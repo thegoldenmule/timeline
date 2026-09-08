@@ -163,7 +163,8 @@ let package = Package(
                 "TimelineCore", "Contracts", "ContractsTestSupport",
                 "ProjectStore", "RenderKit", "MediaKit", "AudioAlign", "AgentKit", "TimelineUI",
             ],
-            swiftSettings: strict),
+            swiftSettings: strict,
+            linkerSettings: [.linkedFramework("AVKit")]),
     ],
     swiftLanguageModes: [.v6]
 )
