@@ -1,0 +1,15 @@
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "py", "version": "0"}
+<< {"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{"listChanged":false}},"instructions":"Fake video editor project. Use project_describe before timeline_apply.","protocolVersion":"2025-06-18","serverInfo":{"name":"timeline-spike","version":"0.0.1"}}}
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+<< {"id":2,"jsonrpc":"2.0","result":{"tools":[{"annotations":{"destructiveHint":false,"idempotentHint":true,"openWorldHint":false,"readOnlyHint":true,"title":"Describe project"},"description":"Summarize the open project: tracks, clips, version.","inputSchema":{"additionalProperties":false,"properties":{},"type":"object"},"name":"project_describe","outputSchema":{"properties":{"clips":{"type":"array"}
+   tools: ['project_describe', 'timeline_apply', 'look_at']
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "project_describe", "arguments": {}}}
+<< {"id":3,"jsonrpc":"2.0","result":{"content":[{"text":"{\"clips\":[{\"duration\":90,\"id\":\"c1\",\"start\":0,\"track\":\"V1\"},{\"duration\":150,\"id\":\"a1\",\"start\":0,\"track\":\"A1\"},{\"duration\":60,\"id\":\"c2\",\"start\":90,\"track\":\"V1\"}],\"tracks\":[\"A1\",\"V1\"],\"version\":1}","type":"text"}],"structuredContent":{"clips":[{"duration":90,"id":"c1","start":0,"track":"V1"},{"duration
+>> {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "timeline_apply", "arguments": {"baseVersion": 1, "commandId": "py-1", "ops": [{"op": "tr
+<< {"id":4,"jsonrpc":"2.0","result":{"content":[{"text":"Applied. version=2 changedIds=[\"a1\"]","type":"text"}],"structuredContent":{"changedIds":["a1"],"version":2}}}
+   apply -> {'changedIds': ['a1'], 'version': 2} isError= None
+>> {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "look_at", "arguments": {}}}
+<< {"id":5,"jsonrpc":"2.0","result":{"content":[{"text":"Viewer frame rendered at 2026-09-08T18:07:08Z (4913 bytes PNG)","type":"text"},{"data":"iVBORw0KGgoAAAANSUhEUgAAAUAAAABQCAYAAABoMayFAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAABQKADAAQAAAABAAAAUAAAAADJ42PTAAASm0lEQVR4Ae1bCZxOVRt/bCntsoQsERmSKZpCZJksFaKRIUskOzWKpCwRk6VCfSU/IdSn1GQJ0YhsLUpUqBQhJK
+   image: image/png 6552 b64 chars, PNG magic ok = True
+server exit code 0

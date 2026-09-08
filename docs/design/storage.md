@@ -1,6 +1,6 @@
 # Storage design: media library, per-project event store, projections
 
-Status: draft for review, 2026-09-08. Scope: single user, single machine, no auth. Companion to `docs/research/README.md`; library and SQLite facts verified in `docs/research/09-storage-sqlite.md`.
+Status: draft for review, 2026-09-08. Scope: single user, single machine, no auth. Companion to `docs/research/README.md`; library and SQLite facts verified in `docs/research/09-storage-sqlite.md`; the schema, write path, undo, and rebuild were exercised in code with measurements on this machine in `spikes/event-store` (GRDB 7.11.1, SQLite 3.51.0, swift-uuidv7 0.6.2). Numbers below come from that run (release build, M4 Max, single run).
 
 ## 1. Principles
 
@@ -41,7 +41,7 @@ Status: draft for review, 2026-09-08. Scope: single user, single machine, no aut
         2026-09-08T15-12-00 Reel 9x16.json
 ```
 
-Import copies (or moves, user choice) the original into `Library/YYYY/YYYY-MM-DD/` using the capture date from QuickTime metadata, falling back to file mtime. Name collisions get a numeric suffix. The sidecar JSON records the content hash, the original source path, the import time, and the ffprobe or AVAsset probe. Importing a file already in the library (same hash) is a no-op that returns the existing asset.
+Import copies the original (move and reference-in-place are options) into `Library/YYYY/YYYY-MM-DD/` using the capture date from QuickTime metadata, falling back to file mtime. Name collisions get a numeric suffix. The sidecar JSON records the content hash, the original source path, the import time, and the ffprobe or AVAsset probe. Importing a file already in the library (same hash) is a no-op that returns the existing asset.
 
 Content hash: SHA-256 over the full file via CryptoKit, streamed in 8 MiB chunks off the main actor. Measured on this machine at about 2.3 GB/s on one core, faster than the SSD, so BLAKE3 is not worth a dependency. `cache.sqlite` remembers `(volume UUID, APFS file content identifier, size, mtime) -> sha256` so already-indexed files are recognized instantly; the tuple is a hint, never an identity across volumes.
 
@@ -51,10 +51,10 @@ Sync services are the main corruption risk: iCloud Drive and Dropbox copy `proje
 
 ## 3. SQLite configuration
 
-- **Library: GRDB 7.x** (MIT, Swift 6 language mode, links the system `libsqlite3`). `DatabasePool` per open project (one writer, concurrent readers), `DatabaseMigrator` for schema versions, `ValueObservation` to drive SwiftUI from projection tables. SQLiteData and StructuredQueries are attractive but still 0.x; revisit at 1.0.
+- **Library: GRDB 7.x** (MIT, Swift 6 language mode, links the system `libsqlite3`). `DatabasePool` per open project (one writer, concurrent readers), `DatabaseMigrator` for schema versions, `ValueObservation` to drive SwiftUI from projection tables (verified to deliver changes from a plain CLI process with `.async(onQueue:)` scheduling). `DatabaseMigrator` records applied migrations in its own `grdb_migrations` table and leaves `PRAGMA user_version` at 0; that table is the schema-version source of truth, and each migration also sets `user_version` for external tooling. SQLiteData and StructuredQueries are attractive but still 0.x; revisit at 1.0.
 - **System SQLite is 3.51.0** on macOS 26.3 (verified): JSONB, STRICT, generated columns, RETURNING, upsert, FTS5, `VACUUM INTO` all available; runtime extensions are compiled out. Apple's build predates the 3.51.3 fix for a WAL-reset corruption bug, so run `integrity_check` after unclean shutdowns and keep the option of a custom SQLite build.
-- Pragmas: `journal_mode=WAL`, `synchronous=NORMAL` (Apple's default for WAL), `foreign_keys=ON`, `busy_timeout=5000`, `PRAGMA user_version` owned by the migrator, `wal_checkpoint(TRUNCATE)` and `PRAGMA optimize` on idle and on close.
-- All tables `STRICT`. **JSON payloads are stored as `TEXT`**, not JSONB: diffable in the CLI, portable, and GRDB's JSON helpers expect text. Hot fields get `VIRTUAL` generated columns with indexes (`jsonb_extract` is still fine to call on text). Only `project_state.state` may be JSONB if measurement shows it matters.
+- Pragmas: `journal_mode=WAL` (set by `DatabasePool`), `synchronous=NORMAL` via `Configuration.prepareDatabase`, `foreign_keys=ON`, busy timeout 5 s on the writer and 10 s on readers (`busyMode` and `readonlyBusyMode`), `wal_checkpoint(TRUNCATE)` and `PRAGMA optimize` on idle and on close. The WAL stays under 5 MB under sustained editing thanks to the default autocheckpoint; truncation on close leaves an empty `-wal` file until the last connection closes, which is normal.
+- All tables `STRICT`. **JSON payloads are stored as `TEXT`**, not JSONB: diffable in the CLI, portable, and GRDB's JSON helpers expect text. Hot fields get `VIRTUAL` generated columns with partial indexes, which the planner uses (`SEARCH events USING INDEX events_clip_idx`) at no measurable insert cost. JSONB buys nothing here: raw appends run at about 70,000 events per second with text payloads and three indexes, and the one serialization cost that matters (section 5) is Swift-side JSON encoding, not SQLite parsing.
 - IDs are UUIDv7 (time-ordered, append-friendly indexes) via the `swift-uuidv7` package until Foundation's `UUID.version7` ships; stored as lowercase `TEXT` for debuggability. Switch to 16-byte `BLOB` only if index size becomes a concern.
 - Backups via `VACUUM INTO` to a temp file then atomic rename, never by copying the live file. Save As is `VACUUM INTO`.
 - The app process is the only writer. The agent's MCP tools call into the same process, so there is no multi-process write contention.
@@ -84,7 +84,7 @@ CREATE TABLE events (
 CREATE INDEX events_clip_idx ON events(clip_id) WHERE clip_id IS NOT NULL;
 
 CREATE INDEX events_type_idx ON events(type);
-CREATE INDEX events_txn_idx  ON events(txn_id);
+CREATE INDEX events_txn_idx  ON events(txn_id, seq);   -- covering: undo reads a txn's events index-only
 
 -- Every accepted command, including ones that produced zero events.
 -- Enables exactly-once semantics when an agent retries a tool call.
@@ -95,7 +95,8 @@ CREATE TABLE commands (
   name         TEXT NOT NULL,                   -- 'trimClip'
   args         TEXT NOT NULL,                   -- JSON
   result       TEXT NOT NULL,                   -- JSON: { txnId, firstSeq, lastSeq, version, changedIds, warnings }
-  status       TEXT NOT NULL CHECK (status IN ('applied','rejected','noop'))
+  status       TEXT NOT NULL CHECK (status IN ('applied','stale','invalid','noop'))
+                                                -- stale = version conflict; invalid = failed validation
 ) STRICT;
 ```
 
@@ -107,7 +108,7 @@ For now there is one stream, `project`. If projects grow to hold several sequenc
 
 Two read models, both rebuildable from `events`.
 
-**The full state document.** A single row holding the entire `Project` value as JSON (JSONB blob if measured to matter). This is what `EditorCore` loads into memory and what the compiler consumes. A project JSON is on the order of 100 KB to a few MB; rewriting it per command is cheap and avoids snapshot bookkeeping.
+**The full state document.** A single row holding the entire `Project` value as JSON. This is what `TimelineCore` loads into memory and what the compiler consumes. Its cost scales with project size, not event count: at 10,000 clips the document is 1.5 MB and Foundation's `JSONEncoder` needs about 40 ms to write it and `JSONDecoder` 35 ms to read it, while at 1,000 clips both are a few milliseconds. Rewriting it inside every command transaction would therefore cap interactive editing at roughly 45 commands per second on a large project (a drag emitting one `ClipMoved` per frame would feel it), so the row is written on a debounce (about 250 ms after the last command) and on close, not per command. The authoritative state lives in memory while the project is open; `last_seq` records which events the row reflects, and `open` folds any newer events on top (a pure fold of 10,000 events takes 45 ms). With a tiny state the whole write path including this row costs 0.16 ms per command; the debounce is what keeps that true as projects grow.
 
 ```sql
 CREATE TABLE project_state (
@@ -219,17 +220,19 @@ CommandHandler.apply(command) -- one SQLite transaction
   2. load Project from project_state (already in memory while open)
   3. if expectedVersion != state.version -> reject with { currentVersion, changedSince: diff }
   4. validate args against state (clip exists, times within asset, no overlap unless allowed)
-  5. decide events: [DomainEvent]  (pure function in EditorCore, no I/O)
+  5. decide events: [DomainEvent]  (pure function in TimelineCore, no I/O)
   6. append events with stream_version = version+1..., same txn_id
-  7. fold events into Project (pure), write project_state
+  7. fold events into the in-memory Project (pure); schedule the debounced project_state write
   8. update query tables and history from the same events
-  9. insert commands row with result
+  9. insert commands row with result (status applied | stale | invalid | noop)
   10. commit; publish { txnId, version, changedIds } to observers (UI, agent)
 ```
 
-Steps 5 and 7 are the pure core: `decide(state, command) -> [Event]` and `evolve(state, event) -> state`. They are unit-tested without SQLite. The handler is a thin adapter around them.
+Steps 5 and 7 are the pure core: `decide(state, command) throws -> [Event]` and `evolve(state, event) -> state`. They are unit-tested without SQLite. The handler is a thin adapter around them. The store and the replay loop call an `inout` form, `evolve(&state, event)`: the value-returning form copies the clip dictionary on every event because the argument is not uniquely referenced, which turned a 45 ms fold of 10,000 events into 641 ms.
 
-Idempotency: every command carries a `commandId` (UUIDv7) generated by the caller. Agent tool calls get one per invocation, so a retried tool call after a timeout returns the original result instead of applying twice.
+Idempotency: every command carries a `commandId` (UUIDv7) generated by the caller. Agent tool calls get one per invocation, so a retried tool call after a timeout returns the original result instead of applying twice. The lookup runs before the version check, so a retry of an already-applied command is not misreported as stale. Stale, invalid, and no-op outcomes are recorded too, so a retry of a rejected command returns the same rejection instead of being re-evaluated against a changed document; a caller that wants a fresh attempt uses a new `commandId`, which is what the MCP tool hint tells the agent to do. A single `DatabasePool` writer means two handlers cannot interleave in one process, but the `UNIQUE (stream_id, stream_version)` constraint was confirmed to reject a forced conflicting insert with `SQLITE_CONSTRAINT_UNIQUE` and roll the transaction back, so it stands as the second line of defence for bugs or a second process.
+
+The `commands` table holds `args` and `result` JSON per command and was about 40% of the file in a 10,000-command run (14 MB total, roughly 1.4 KB per event all-in). Idempotency needs only a short window and the events already carry actor and tool metadata, so rows older than 30 days are pruned on open.
 
 Batching: `timeline_apply({ ops: [...] })` is a single command that produces many events under one `txn_id`, so it is one undo step and one version bump.
 
@@ -239,7 +242,7 @@ Events are facts in past tense, named `<Aggregate><Verb>`. Payloads carry both b
 
 | Type | Payload (abridged) |
 |---|---|
-| `ProjectCreated` | `{ name, settings: { frameRate: {num,den}, width, height, sampleRate, colorSpace } }` |
+| `ProjectCreated` | `{ name, settings: { frameRate: {num,den}, width, height, sampleRate, colorSpace, blendSpace: gamma\|linear, alignment?: AlignmentParameters } }` |
 | `ProjectSettingsChanged` | `{ before, after }` |
 | `ProjectRenamed` | `{ before, after }` |
 | `AssetImported` | `{ assetId, contentHash, libraryPath, displayName, kind, duration, probe }` |
@@ -275,7 +278,7 @@ Schema evolution: `schema_version` on each row plus upcaster functions `upcast(t
 
 ## 8. In-memory model and time
 
-`TimelineCore.Project` is a `Sendable` value type mirroring the JSON in `project_state`. Times are `RationalTime { value: Int64, timescale: Int32 }` (the shape of `CMTime` without flags), stored in SQLite as two integer columns. A single project-wide timescale was rejected: it forces lossy rounding as soon as 23.976 fps video meets 48 kHz audio or a 29.97 clip lands in a 25 fps sequence. Instead each sequence has a canonical frame duration (for example `1001/24000`) and `decide` snaps edit points to it, so projections compare with integer arithmetic; audio offsets from alignment keep their sample-rate timescale. Mixed-rate comparisons cross-multiply in 128-bit, never rescale-and-store. Persist durations rather than end times where a range is stored, matching OTIO and FCPXML semantics. Conversion to `CMTime` happens only in `RenderKit`.
+`TimelineCore.Project` is a `Sendable` value type mirroring the JSON in `project_state`, with `clips` and `tracks` as dictionaries keyed by id so that a sorted-keys encoder yields a canonical, order-independent document. Times are `RationalTime { value: Int64, timescale: Int32 }` (the shape of `CMTime` without flags), encoded as `{ "v": ..., "ts": ... }` in JSON and as two `INTEGER` columns (with `CHECK (x_ts > 0)`) in query tables; never as a `"48048/24000"` string, which would defeat `json_extract` generated columns on time fields. A single project-wide timescale was rejected: it forces lossy rounding as soon as 23.976 fps video meets 48 kHz audio or a 29.97 clip lands in a 25 fps sequence. Instead each sequence has a canonical frame duration (for example `1001/24000`) and `decide` snaps edit points to it, so projections compare with integer arithmetic; audio offsets from alignment keep their sample-rate timescale. Mixed-rate comparisons cross-multiply in 128-bit, never rescale-and-store. Persist durations rather than end times where a range is stored, matching OTIO and FCPXML semantics. Conversion to `CMTime` happens only in `RenderKit`.
 
 ## 9. Undo and redo
 
@@ -312,7 +315,9 @@ CREATE VIRTUAL TABLE transcript_words USING fts5(content_hash UNINDEXED, t0 UNIN
 
 ## 12. Rebuild and recovery
 
-`rebuildProjections()` truncates `project_state`, the query tables, and `history`, then folds all events in `seq` order. This is the recovery path for any projection bug and the migration path when a projection schema changes: bump `user_version`, drop and recreate the projection tables, replay. Event replay for a heavily edited project (tens of thousands of events) takes well under a second.
+`rebuildProjections()` truncates `project_state`, the query tables, and `history`, then folds all events in `seq` order. This is the recovery path for any projection bug and the migration path when a projection schema changes: add a migration that drops and recreates the projection tables, replay. The fold itself is fast (45 ms for 10,000 events, decode included) and the rebuilt `project_state` was byte-equal to the incrementally maintained one at 6 and at 10,000 events, as were the `clips` and `history` rows. What is not fast is writing the query tables one upsert per transaction during replay (1.8 s for 10,000 events at about 80 microseconds per row), so rebuild writes `clips`, `captions`, and `markers` in bulk from the final state, and only `history` is derived per transaction. The rule that makes the equality test meaningful: projection writes are a pure function of the state after a transaction and the events in it.
+
+Measured maintenance costs on a 14 MB project: open, migrate, and load the 10,000-clip state in 39 ms (35 ms of it JSON decoding); `VACUUM INTO` in 19 ms; `integrity_check` in 27 ms. All three are cheap enough to run on every open and close.
 
 Corruption defense: `PRAGMA integrity_check` on open when the previous session did not close cleanly; a `VACUUM INTO` backup before any migration; the Library sidecars allow rebuilding `assets` even if a project file is lost.
 
@@ -325,7 +330,6 @@ Corruption defense: `PRAGMA integrity_check` on open when the previous session d
 
 ## 14. Open decisions
 
-1. **Copy or move on import.** Default to copy into `Library/` and offer move; also allow "reference in place" for footage on external SSDs, with relink by content hash when it reappears.
-2. **Per-sequence streams.** Deferred until a project needs more than one sequence.
-3. **Event payload size for bulk operations.** `CaptionsReplaced` with thousands of words could be large; acceptable in JSONB, but cap at a few MB and split otherwise.
-Resolved: Swift SQLite library is GRDB 7.x (section 3). Cache location is `~/Movies/Timeline/Cache` (decided 2026-09-08); `~/Library/Caches` is not used because macOS purges it under disk pressure.
+1. **Per-sequence streams.** Deferred until a project needs more than one sequence.
+2. **Event payload size for bulk operations.** `CaptionsReplaced` with thousands of words could be large; acceptable as a text payload, but cap at a few MB and split otherwise.
+Resolved 2026-09-08: Swift SQLite library is GRDB 7.x (section 3). Cache location is `~/Movies/Timeline/Cache`; `~/Library/Caches` is not used because macOS purges it under disk pressure. Import copies originals into `Library/` by default, with move and reference-in-place (relink by content hash) as options.

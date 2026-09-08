@@ -1,0 +1,118 @@
+
+### initialize
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}
+id: 1_1
+data: 
+
+id: 1_2
+event: message
+data: {"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{"listChanged":false}},"instructions":"Fake video editor project. Use project_describe before timeline_apply.","protocolVersion":"2025-06-18","serverInfo":{"name":"timeline-spike","version":"0.0.1"}}}
+
+
+HTTP/1.1 200 OK
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+Content-Type: text/event-stream
+SESSION=E5765CCB-8169-4764-8BE8-968D8E66C570
+
+### notifications/initialized
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+
+HTTP/1.1 202 Accepted
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+
+### tools/list
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+id: 2_3
+data: 
+
+id: 2_4
+event: message
+data: {"id":2,"jsonrpc":"2.0","result":{"tools":[{"annotations":{"destructiveHint":false,"idempotentHint":true,"openWorldHint":false,"readOnlyHint":true,"title":"Describe project"},"description":"Summarize the open project: tracks, clips, version.","inputSchema":{"additionalProperties":false,"properties":{},"type":"object"},"name":"project_describe","outputSchema":{"properties":{"clips":{"type":"array"},"tracks":{"type":"array"},"version":{"type":"integer"}},"type":"object"}},{"annotations":{"destructiveHint":false,"idempotentHint":true,"openWorldHint":false,"readOnlyHint":false,"title":"Apply
+
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+
+### tools/call project_describe
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project_describe","arguments":{}}}
+id: 3_5
+data: 
+
+id: 3_6
+event: message
+data: {"id":3,"jsonrpc":"2.0","result":{"content":[{"text":"{\"clips\":[{\"duration\":150,\"id\":\"a1\",\"start\":0,\"track\":\"A1\"},{\"duration\":90,\"id\":\"c1\",\"start\":0,\"track\":\"V1\"},{\"duration\":60,\"id\":\"c2\",\"start\":90,\"track\":\"V1\"}],\"tracks\":[\"A1\",\"V1\"],\"version\":1}","type":"text"}],"structuredContent":{"clips":[{"duration":150,"id":"a1","start":0,"track":"A1"},{"duration":90,"id":"c1","start":0,"track":"V1"},{"duration":60,"id":"c2","start":90,"track":"V1"}],"tracks":["A1","V1"],"version":1}}}
+
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+
+### tools/call timeline_apply (base 1, cmd A)
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"timeline_apply","arguments":{"baseVersion":1,"commandId":"cmd-A","ops":[{"op":"moveClip","clipId":"c1","start":120}]}}}
+id: 4_7
+data: 
+
+id: 4_8
+event: message
+data: {"id":4,"jsonrpc":"2.0","result":{"content":[{"text":"Applied. version=2 changedIds=[\"c1\"]","type":"text"}],"structuredContent":{"changedIds":["c1"],"version":2}}}
+
+
+HTTP/1.1 200 OK
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+Content-Type: text/event-stream
+
+### tools/call timeline_apply RETRY same cmd A (idempotent)
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"timeline_apply","arguments":{"baseVersion":1,"commandId":"cmd-A","ops":[{"op":"moveClip","clipId":"c1","start":120}]}}}
+id: 5_9
+data: 
+
+id: 5_10
+event: message
+data: {"id":5,"jsonrpc":"2.0","result":{"content":[{"text":"Applied. version=2 changedIds=[\"c1\"]","type":"text"}],"structuredContent":{"changedIds":["c1"],"version":2}}}
+
+
+HTTP/1.1 200 OK
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+Content-Type: text/event-stream
+
+### tools/call timeline_apply STALE base 1, cmd B
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"timeline_apply","arguments":{"baseVersion":1,"commandId":"cmd-B","ops":[{"op":"trimClip","clipId":"c2","duration":30}]}}}
+id: 6_11
+data: 
+
+id: 6_12
+event: message
+data: {"id":6,"jsonrpc":"2.0","result":{"content":[{"text":"{\"baseVersion\":1,\"currentVersion\":2,\"error\":\"stale_version\",\"hint\":\"Call project_describe, recompute ops against currentVersion, retry with a NEW commandId.\"}","type":"text"}],"isError":true,"structuredContent":{"baseVersion":1,"currentVersion":2,"error":"stale_version","hint":"Call project_describe, recompute ops against currentVersion, retry with a NEW commandId."}}}
+
+
+HTTP/1.1 200 OK
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+Content-Type: text/event-stream
+
+### tools/call look_at
+POST http://127.0.0.1:8811/mcp
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"look_at","arguments":{}}}
+id: 7_13
+data: 
+
+id: 7_14
+event: message
+data: {"id":7,"jsonrpc":"2.0","result":{"content":[{"text":"Viewer frame rendered at 2026-09-08T18:07:33Z (5103 bytes PNG)","type":"text"},{"data":"iVBORw0KGgoAAAANSUhEUgAAAUAAAABQCAYAAABoMayFAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAABQKADAAQAAAABAAAAUAAAAADJ42PTAAATWUlEQVR4Ae1bC5iN1Rr+DBKikls0yC1DojC5RAzjPiOaMiEiEbpRHJxcGmncSnRO4XEQ6kidadxLIxMiR4mKCrmWS1IRk0s46/32Wbt/dntm75mdc9r97/c8e///Xv9a31rrXet/1/d9a+08UVHRF4VCBIgAEXAhAhEu7DO7TASIABFQBEiAnAhEgAi4FgESoGuHnh0nAkSABMg5QASIgGsRIAG6dujZcSJABEiAnANEgAi4FgESoGuHnh0nAkSABMg5QASIgGsRIAG6dujZcSJA
+
+
+HTTP/1.1 200 OK
+MCP-Session-Id: E5765CCB-8169-4764-8BE8-968D8E66C570
+Content-Type: text/event-stream
+
+### Origin check (evil origin)
+HTTP 403
+### DELETE session
+HTTP 200

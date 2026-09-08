@@ -1,0 +1,74 @@
+# macOS
+.DS_Store
+.AppleDouble
+._*
+.Spotlight-V100
+.Trashes
+
+# Swift Package Manager / Xcode
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+.index-build/
+Package.resolved.lock
+
+# Editors and tooling
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/settings.local.json
+.mcp.local.json
+
+# Local-only configuration (test footage paths, API keys)
+.env
+.env.*
+local.json
+*.local.json
+
+# Media and generated artifacts: never commit footage or renders
+*.mov
+*.MOV
+*.mp4
+*.MP4
+*.m4v
+*.m4a
+*.wav
+*.aif
+*.aiff
+*.mp3
+*.png
+*.jpg
+*.jpeg
+*.gif
+!docs/**/*.png
+!docs/**/*.jpg
+
+# Project bundles, libraries, caches, and databases produced by the app
+*.tlproj/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# Spike run outputs (inputs, sources, SPIKE.md, and small text transcripts are kept)
+spikes/*/tmp/
+spikes/**/*.log
+spikes/**/out-*.json
+spikes/**/out-*.txt
+spikes/**/yap-out.json
+spikes/**/claude-p-output.json
+
+# Test and benchmark outputs
+/tmp/
+/output/
+/renders/

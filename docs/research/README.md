@@ -4,7 +4,9 @@ Date: 2026-09-08. Seven research passes (rendering engines, web UI, AI senses/ha
 
 ## Recommendation in one paragraph
 
-Build a native macOS app with a pure-Swift editing core and AVFoundation as the single render engine. The declarative timeline document (JSON, IDs, rational time) is the source of truth; every feature is a pure operation on that document; a compiler turns the document into an `AVMutableComposition` + custom Metal/Core Image compositor that serves preview, frame grabs, and export from one code path. Tools over the document are exposed through an in-process MCP server so Claude Code can be the agent on day one, with an embedded agent added later. Keep ffmpeg as an optional sidecar for probing and exotic formats, not as the engine.
+Build a native macOS app with a pure-Swift editing core and AVFoundation as the single render engine. The declarative timeline document (JSON, IDs, rational time) is the source of truth; every feature is a pure operation on that document; a compiler turns the document into an `AVMutableComposition` + custom Core Image/Metal compositor that serves preview, frame grabs, and export from one code path. Tools over the document are exposed through an in-process MCP server so Claude Code can be the agent on day one, with an embedded agent added later. Keep ffmpeg as an optional sidecar for probing and exotic formats, not as the engine.
+
+The load-bearing assumptions behind this were exercised in code on this machine (reference implementations under `spikes/`): one compositor did serve `AVAssetImageGenerator`, `AVAssetExportSession`, and a headless `AVPlayerItem` with frame-exact seeks; a Swift MCP server was driven end to end by Claude Code; SpeechAnalyzer transcribed from a plain CLI process at about 65x realtime; audio alignment recovered offsets to 0.02 ms and drift to 0.1 ppm. Measured facts from those runs are folded into the sections below.
 
 ## Why native beats web UI + ffmpeg daemon for this product
 
@@ -31,12 +33,12 @@ Tauri is not a shortcut: it uses WKWebView on macOS, which only gained full WebC
 
 ## What native costs
 
-- AVFoundation learning curve and old samples (AVCustomEdit 2017). Known traps: Core Animation captions via `animationTool` work only in export, so render captions inside the compositor instead; custom compositors must opt into HDR pixel formats; audio has volume ramps and a tap but no per-clip effects graph without an offline `AVAudioEngine` pass.
+- AVFoundation's editing samples are old (AVCustomEdit 2017) and macOS 26 deprecates the mutable classes they use: `AVMutableVideoComposition` and its instruction classes give way to the value type `AVVideoComposition.Configuration` (which also carries `perFrameHDRDisplayMetadataPolicy` and `outputBufferDescription`), and `AVVideoCompositionCoreAnimationTool` is on the deprecation path. Build on `Configuration` from the start. Known traps, confirmed in code: Core Animation captions work only in export, so captions are rendered inside the compositor with Core Text (this worked, including a 300 ms scale-in); AVFoundation instantiates the compositor itself and calls it on its own serial queue, so the class is `@unchecked Sendable` with lock-guarded caches; `renderContextChanged` fires once per consumer session and anything sized to the render context must be rebuilt there; an `AVAssetImageGenerator` held only as a temporary never completes its request, so keep generators alive; Core Image blends in linear light, so a 50/50 dissolve of red and green reads (188,188,0) rather than the (128,128,0) gamma-space blend Final Cut and Premiere produce, which is a product decision to make explicitly; source frames requested as 8-bit BGRA arrive untagged and pure green shifts about 10% toward (0,231,40), so request native YUV source formats or tag buffers before wrapping them. Audio has volume ramps and a tap but no per-clip effects graph without an offline `AVAudioEngine` pass.
 - No maintained open-source Swift NLE timeline component exists. Plan to build the timeline as an AppKit/Metal view inside a SwiftUI shell (SwiftUI `Canvas` has no per-element interactivity).
-- No Claude Agent SDK for Swift. Use Claude Code as a sidecar over MCP, a community Messages-API SDK (SwiftAnthropic, MIT), or `ClaudeForFoundationModels` once on macOS 27.
-- MCP swift-sdk is pre-1.0. Xcode iteration is slower than Vite, and coding agents are stronger at React than SwiftUI; keep the UI thin and the logic in `swift test`-able packages.
+- No Claude Agent SDK for Swift. The embedded agent sits behind an `AgentRuntime` protocol in `Contracts` (start a session with a goal and tool access, stream turns and tool calls, approve or deny expensive tools, report cost); the first implementation drives the Claude Code CLI as a sidecar (`claude -p --output-format stream-json --mcp-config` pointing at the app's own MCP server, with `--allowedTools` scoped to it), so the app gets Claude Code's loop, compaction, and skills for free. A Messages-API implementation (SwiftAnthropic, MIT) or `ClaudeForFoundationModels` on macOS 27 can replace it behind the same protocol.
+- MCP swift-sdk (0.12.1, pin with `exact:`) ships the Streamable HTTP transport but no HTTP listener; about a hundred lines of swift-nio (already a transitive dependency) put it on a socket, and an idle-session sweep is needed because Claude Code does not send `DELETE` at the end of a headless run. Xcode iteration is slower than Vite, and coding agents are stronger at React than SwiftUI; keep the UI thin and the logic in `swift test`-able packages. Cold release build of the MCP server was 37 s, incremental 2.4 s, 5.1 MB stripped.
 
-**Hedge:** if timeline UI velocity dominates, keep the Swift core and host a TypeScript timeline in a `WKWebView` (preview stays native in an `AVPlayerLayer`). Do not pick pure web + ffmpeg for a product whose inputs are iPhone HDR footage.
+**Decided (2026-09-08):** the timeline is native AppKit/Metal inside the SwiftUI shell; the WKWebView hedge is retired. Do not pick pure web + ffmpeg for a product whose inputs are iPhone HDR footage.
 
 ## This machine (verified 2026-09-08)
 
@@ -56,7 +58,7 @@ Tauri is not a shortcut: it uses WKWebView on macOS, which only gained full WebC
 
 ```
 Packages/
-  EditorCore     pure Swift: Project schema, EditOp enum, apply/invert, invariants, JSON codec
+  TimelineCore   pure Swift: Project schema, EditOp enum, apply/invert, invariants, JSON codec
   RenderKit      Project -> AVMutableComposition + AVMutableVideoComposition + AVMutableAudioMix
                  one AVVideoCompositing (Metal/Core Image): transitions, transforms, overlays, captions
                  AVPlayerItem factory, AVAssetImageGenerator frames, async AVAssetExportSession / AVAssetWriter
@@ -67,7 +69,7 @@ Packages/
   App            SwiftUI shell; timeline as NSViewRepresentable Metal view; AVPlayerLayer preview; approval cards
 ```
 
-Dependencies point inward: `EditorCore` imports nothing but Foundation; `RenderKit` depends on `EditorCore`; the App depends on everything.
+Dependencies point inward: `TimelineCore` imports nothing but Foundation; `RenderKit` depends on `TimelineCore`; the App depends on everything.
 
 ### The document
 
@@ -104,7 +106,9 @@ Each tool returns `{ version, changedIds, warnings, thumbnail? }`, never logs. P
 
 ## AI senses pipeline (run at import, cached per asset hash)
 
-probe -> proxy (only if needed for UI thumbnails) -> transcript (SpeechAnalyzer fast pass; WhisperKit + SpeakerKit precision pass; cloud fallback) -> silence ranges -> shot boundaries and keyframes -> face/saliency boxes (Vision) -> OCR for screen recordings (Vision) -> loudness and beats -> VLM descriptions per shot (local Qwen3-VL via Ollama, or Claude on contact sheets, or Gemini agentic video for whole-file narrative) -> `moments.json` of scored highlights.
+probe -> proxy (only if needed for UI thumbnails) -> transcript (SpeechAnalyzer default; WhisperKit + SpeakerKit for diarization, acoustic word offsets, unsupported locales, or pre-macOS-26 hosts; cloud fallback) -> silence ranges -> shot boundaries and keyframes -> face/saliency boxes (Vision) -> OCR for screen recordings (Vision) -> loudness and beats -> VLM descriptions per shot (local Qwen3-VL via Ollama, or Claude on contact sheets, or Gemini agentic video for whole-file narrative) -> `moments.json` of scored highlights.
+
+SpeechAnalyzer, as measured here: runs from a plain, ad-hoc-signed CLI process with no entitlement, bundle, or TCC prompt; the model runs out of process (about 100 MB system-side, 20 MB in the client); 71 s of audio in 1.07 s wall; locale assets are about 85 MB each, download silently in a few seconds, and a process may hold at most 5 reserved locales, so an app must call `assetInstallationRequest` per locale and `release(reservedLocale:)` when done. Every `AttributedString` run is one word with `audioTimeRange` and `transcriptionConfidence`; timestamps sit on a 60 ms grid and a word's end equals the next word's start (or the pause start), not its acoustic offset. Consume `transcriber.results` in a task started before `analyzeSequence`, and ignore the ranges on volatile results, which are bogus. Confidence flagged exactly the doubtful proper nouns (0.44 to 0.58) and is usable for "highlight uncertain words". Word error rate on synthetic speech was 7.7% after number normalization, with names and compounds as the residual; Apple offers `SFCustomLanguageModelData` for vocabulary but no free-text prompt, which is where Whisper's initial prompt helps with names. `yap` is a wrapper over the same API with identical output.
 
 ## Generation providers ("hands")
 
@@ -156,19 +160,39 @@ Prose version of the same list follows for grep-ability.
 
 ## Audio alignment (DAW render to camera audio)
 
-Typical case: a 5-minute DAW render that sits somewhere inside a much longer camera recording (an hour-plus set). Cross-correlation is symmetric, so it finds where the short render lands in the long video regardless of which side is shorter; the long video's audio is the reference timebase and is never retimed. Compute the long video's onset envelope once at import and cache it, then correlate each DAW render against it. Normalize for partial overlap so a render near the start or end of the video is not penalized, and treat several strong peaks (the same song played twice in the set) as candidates for the user to pick. Well solved; Final Cut, Premiere, and Resolve all sync by waveform. Use cross-correlation, not discrete feature points: coarse pass on onset envelopes at 8 kHz via FFT cross-correlation (vDSP), fine pass with phase-transform (GCC-PHAT) correlation on 48 kHz audio plus parabolic interpolation for sub-sample accuracy, then windowed offsets fitted with a robust line to estimate clock drift in ppm. Confidence comes from the ratio of the best peak to the second peak and the residual of the drift fit. Correct drift by plain resampling with `AVAudioConverter` (a 10-50 ppm pitch change is inaudible). Replacing camera audio needs under one frame of accuracy; mixing needs under 0.1 ms or comb filtering appears. Port bbc/audio-offset-finder (Apache-2.0) for the standard-score confidence; ShazamKit custom catalogs give a free coarse cross-check via `matchOffset`. Details in 08-audio-alignment.md.
+Typical case: a 5-minute DAW render that sits somewhere inside a much longer camera recording (an hour-plus set). Cross-correlation is symmetric, so it finds where the short render lands in the long video regardless of which side is shorter; the long video's audio is the reference timebase and is never retimed. Compute the long video's onset envelope once at import and cache it, then correlate each DAW render against it. Normalize for partial overlap so a render near the start or end of the video is not penalized, and treat several strong peaks (the same song played twice in the set) as candidates for the user to pick. Well solved; Final Cut, Premiere, and Resolve all sync by waveform. Use cross-correlation, not discrete feature points: coarse pass on onset envelopes at 8 kHz via FFT cross-correlation (vDSP), fine pass with phase-transform (GCC-PHAT) correlation on 48 kHz audio plus parabolic interpolation for sub-sample accuracy, then windowed offsets fitted with a Theil-Sen line to estimate clock drift in ppm, then a second fine pass on the drift-corrected render. Confidence comes from fine-pass verification of each coarse candidate (inlier fraction and residual of the drift fit, per-window PHAT peak ratio), not from the coarse peak ratio, which collapses long before the alignment becomes unrecoverable. Correct drift by plain resampling (a 10-50 ppm pitch change is inaudible). Replacing camera audio needs under one frame of accuracy; mixing needs under 0.1 ms or comb filtering appears, and mixing a drifted render requires the ppm correction since 23 ppm alone slips 5.5 ms over 4 minutes.
+
+Measured on this machine with synthetic signals (pink noise, AGC-style compression, extra bass and rumble only in the camera, different EQ and reverb on the render, 23 ppm drift): offset error about 0.02 ms, of which most is the render's EQ phase, down to -10 dB SNR; drift recovered to 0.1 ppm; a repeated song reported as two verified candidates rather than a confident wrong answer; -15 dB SNR reported as no alignment rather than a false positive; 0.7 s total for a 60-minute camera track and 1.1 s for 120 minutes on one core, dominated by the 48 kHz to 8 kHz decimation, which should stream from `AVAudioFile` so the camera audio is never resident. Onset envelopes cannot distinguish two performances with identical rhythm; a chroma feature would rank them. Real footage (crowd, HVAC, speech, codecs) will move the thresholds and has not been tested. vDSP details that matter: the packed real FFT keeps DC and Nyquist together in bin 0 and must be multiplied separately, forward and inverse scaling compound to 4N for a correlation, and normalization needs an energy floor over near-silent stretches. ShazamKit custom catalogs remain a free coarse cross-check via `matchOffset`. Research in 08-audio-alignment.md; reference implementation in `spikes/audio-align`.
 
 ## Design documents
 
 - `docs/design/storage.md`: media library layout, per-project event-sourced SQLite, projections, undo, agent concurrency, cache database.
 - `docs/design/implementation-plan.md`: shared foundation first, then six parallel modules, then integration.
+- `spikes/`: throwaway but inspectable reference implementations (compositor, audio-align, mcp-server, speech, event-store), each with a `SPIKE.md` recording exact APIs, measurements, and gotchas. Phase 1 agents should read the one for their module.
 
 ## Open questions
 
-- How much of the timeline UI to build natively versus in a hosted web view. Suggest a two-week spike on the Metal timeline before deciding.
-- Whether to ship a bundled ffmpeg at all in v1, or rely on Homebrew during development only.
-- Caption rendering: Core Text into the compositor (recommended, one path) versus libass for ASS import.
+Decided 2026-09-08:
 
-## Suggested first spike (before any UI)
+- **Blend space is a project setting**, `settings.blendSpace: gamma | linear`, defaulting to `gamma` because it matches what Final Cut and Premiere do to the same footage and what viewers expect from a crossfade. The compositor honours it for every dissolve, opacity, and overlay (Core Image with `workingColorSpace` unset for gamma, the default linear working space otherwise); the agent can set it per project and it is recorded in `ProjectCreated`/`ProjectSettingsChanged`.
+- **Import copies** originals into `Library/`; move and reference-in-place stay as options.
+- **No bundled ffmpeg in v1.** Homebrew `ffmpeg-full` during development for probing and the odd export; nothing in the render path depends on it.
+- **Timeline UI is native AppKit/Metal.** The WKWebView hedge is retired.
+- **Embedded agent behind an `AgentRuntime` protocol**, first implementation the Claude Code CLI sidecar (see "What native costs").
+- **Alignment thresholds are configurable.** `AlignmentParameters` (bandpass edges, envelope hop, minimum overlap, candidate cutoff, fine window length and count, inlier tolerance, verification fractions, drift floor) is a value type with the spike's defaults, adjustable per call from the tool and per project from settings, so real-footage tuning is data, not code.
+- **Caption rendering** is Core Text inside the compositor; libass is an ASS import option only.
 
-Swift package with `EditorCore` + `RenderKit`: load a 3-clip JSON (two iPhone HDR clips, one screen recording), compile to a composition with one crossfade and one animated caption drawn in a custom compositor, play it in `AVPlayer` in a bare window, export HEVC, and expose `timeline_apply` + `render_preview` + `look_at` over MCP so Claude Code can edit it. This exercises every risky assumption (custom compositor, HDR, scrub, MCP) in the smallest possible surface.
+Still open, resolved by real footage during Phase 1 and 2: HDR and 10-bit through the custom compositor (flags and formats compile, no HDR media pushed through yet) and alignment thresholds on real recordings (synthetic results hold to -10 dB against pink noise).
+
+## Test footage on this machine
+
+Real clips in `~/Downloads`, probed 2026-09-08. They cover every platform constraint the design has to handle and are the Phase 1 and 2 test inputs (referenced by path in a local, uncommitted config; never copied into the repo).
+
+| File | What it is | Why it matters |
+|---|---|---|
+| `IMG_1575.MOV` (2.4 GB, 4:00) and `IMG_1581.MOV` (1.6 GB, 2:15) | iPhone 17e, iOS 26.6.1, HEVC 3840x2160 `yuv420p10le`, BT.2020 HLG (`arib-std-b67`), Dolby Vision configuration record, ambient viewing environment metadata, display matrix rotation -90 (portrait), nominal 59.94/60 fps but variable (avg 59.87 fps and 59.99 fps), stereo AAC 48 kHz plus a second 4-channel track ffprobe reports as `unknown` (APAC spatial audio), QuickTime creation date and make/model tags | The HDR compositor test, portrait handling, VFR, explicit audio stream selection, metadata indexing, and long-file alignment reference |
+| `Screen Recording 2026-05-20 at 10.48.59 AM.mov` (10.6 MB, 1:23) | macOS Cmd-Shift-5, H.264 1162x1234 (odd width, window capture), BT.709, timebase 600 with variable frame rate (avg 56.7 fps), no audio | Even-dimension scaling, VFR, silent source |
+| `1.mov` (35 MB, 0:08) | H.264 3014x1536, 120 fps nominal, variable (avg 55.5 fps), BT.709, no audio | High-rate and odd-dimension source |
+| `Trailer-100k.mp4` (36 MB, 0:40) | H.264 1920x1080p24 constant, BT.709, stereo AAC | The plain control clip |
+
+Missing from this set and needed for the DAW scenario: a long camera recording of a performance with a matching DAW render. Until one exists, the synthetic generator in `spikes/audio-align` is the alignment fixture.
