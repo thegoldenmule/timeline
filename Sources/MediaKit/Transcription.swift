@@ -31,7 +31,9 @@ actor LocaleReservations {
         var downloadSeconds: Double?
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             let started = Date()
-            progress?(JobProgress(fraction: nil, message: "Downloading speech model for \(locale.identifier)", stage: "download"))
+            progress?(
+                JobProgress(
+                    fraction: nil, message: "Downloading speech model for \(locale.identifier)", stage: "download"))
             let watcher = Task {
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(1))
@@ -102,7 +104,8 @@ enum SpeechEngine {
             attributeOptions: [.audioTimeRange, .transcriptionConfidence])
         let downloadSeconds = try await reservations.acquire(locale, transcriber: transcriber, progress: progress)
         do {
-            var output = try await analyze(audioURL: audioURL, transcriber: transcriber, options: options, progress: progress)
+            var output = try await analyze(
+                audioURL: audioURL, transcriber: transcriber, options: options, progress: progress)
             await reservations.release(locale)
             output.language = locale.identifier(.bcp47)
             output.downloadSeconds = downloadSeconds

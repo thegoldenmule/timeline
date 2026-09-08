@@ -63,7 +63,9 @@ struct OnsetEnvelopeBuilder {
         window = (0..<n).map { Float(0.5 - 0.5 * cos(2 * Double.pi * Double($0) / Double(n))) }
         let binHz = fs / Double(n)
         var e = (0...parameters.bands).map { b -> Int in
-            let f = parameters.bandpassLowHz * pow(parameters.bandpassHighHz / parameters.bandpassLowHz, Double(b) / Double(parameters.bands))
+            let f =
+                parameters.bandpassLowHz
+                * pow(parameters.bandpassHighHz / parameters.bandpassLowHz, Double(b) / Double(parameters.bands))
             return Int((f / binHz).rounded())
         }
         for b in 1...parameters.bands { e[b] = max(e[b], e[b - 1] + 1) }
@@ -158,7 +160,8 @@ struct OnsetEnvelopeBuilder {
         var out = [Float](repeating: 0, count: count)
         data.withUnsafeBytes { raw in
             for i in 0..<count {
-                out[i] = Float(bitPattern: UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: i * 4, as: UInt32.self)))
+                out[i] = Float(
+                    bitPattern: UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: i * 4, as: UInt32.self)))
             }
         }
         return out

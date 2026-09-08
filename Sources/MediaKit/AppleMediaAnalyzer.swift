@@ -33,7 +33,9 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
         var existing: ArtifactRecord?
     }
 
-    private func slot<P: Encodable>(_ media: MediaReference, kind: AnalysisKind, version: Int, parameters: P, file: String)
+    private func slot<P: Encodable>(
+        _ media: MediaReference, kind: AnalysisKind, version: Int, parameters: P, file: String
+    )
         throws -> CacheSlot
     {
         let paramsHash = try MediaKit.paramsHash(version: version, parameters: parameters)
@@ -50,14 +52,18 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
         return CacheSlot(
             paramsHash: paramsHash,
             cacheKey: AnalysisCacheKey.make(contentHash: media.contentHash, kind: kind, paramsHash: paramsHash),
-            url: dir.appendingPathComponent(file), relativePath: cache.artifactPath(contentHash: media.contentHash, name: file),
+            url: dir.appendingPathComponent(file),
+            relativePath: cache.artifactPath(contentHash: media.contentHash, name: file),
             existing: existing)
     }
 
-    private func store<T: Encodable>(_ value: T, in slot: CacheSlot, media: MediaReference, kind: AnalysisKind, summary: JSONValue?)
+    private func store<T: Encodable>(
+        _ value: T, in slot: CacheSlot, media: MediaReference, kind: AnalysisKind, summary: JSONValue?
+    )
         throws
     {
-        try FileManager.default.createDirectory(at: slot.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: slot.url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         try encoder.encode(value).write(to: slot.url, options: .atomic)
@@ -91,7 +97,8 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
         progress: (@Sendable (JobProgress) -> Void)?
     ) async throws -> Transcript {
         let parameters = SpeechEngine.Parameters(locale: LocaleReservations.key(locale), options: options)
-        let slot = try slot(media, kind: .transcript, version: SpeechEngine.version, parameters: parameters, file: "transcript.json")
+        let slot = try slot(
+            media, kind: .transcript, version: SpeechEngine.version, parameters: parameters, file: "transcript.json")
         if var cached = load(Transcript.self, from: slot) {
             cached.cacheKey = slot.cacheKey
             return cached
@@ -152,7 +159,9 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
     public func detectSilence(_ media: MediaReference, parameters: SilenceParameters) async throws -> SilenceRanges {
         let compute = SilenceComputeParameters(
             thresholdDB: parameters.thresholdDB, minimumDurationSeconds: parameters.minimumDurationSeconds)
-        let slot = try slot(media, kind: .silence, version: AppleMediaAnalyzer.silenceVersion, parameters: compute, file: "silence.json")
+        let slot = try slot(
+            media, kind: .silence, version: AppleMediaAnalyzer.silenceVersion, parameters: compute, file: "silence.json"
+        )
         if var cached = load(SilenceRanges.self, from: slot) {
             cached.cacheKey = slot.cacheKey
             return cached
@@ -178,7 +187,8 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
         }
         if count > 0 { windowRMS.append(Float((sum / Double(count)).squareRoot())) }
         let threshold = Float(pow(10, parameters.thresholdDB / 20))
-        let minWindows = max(1, Int((parameters.minimumDurationSeconds / AppleMediaAnalyzer.silenceWindowSeconds).rounded()))
+        let minWindows = max(
+            1, Int((parameters.minimumDurationSeconds / AppleMediaAnalyzer.silenceWindowSeconds).rounded()))
         let timescale = Int32(rate)
         var ranges: [TimeRange] = []
         var runStart: Int?
@@ -224,17 +234,22 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
     /// reduced size when the decoder allows it). A cut is a difference above `threshold` at least
     /// `minimumShotSeconds` after the previous one; the keyframe is the shot's midpoint.
     public func detectShots(_ media: MediaReference, parameters: ShotParameters) async throws -> ShotList {
-        let compute = ShotComputeParameters(threshold: parameters.threshold, minimumShotSeconds: parameters.minimumShotSeconds)
-        let slot = try slot(media, kind: .shots, version: AppleMediaAnalyzer.shotsVersion, parameters: compute, file: "shots.json")
+        let compute = ShotComputeParameters(
+            threshold: parameters.threshold, minimumShotSeconds: parameters.minimumShotSeconds)
+        let slot = try slot(
+            media, kind: .shots, version: AppleMediaAnalyzer.shotsVersion, parameters: compute, file: "shots.json")
         if var cached = load(ShotList.self, from: slot) {
             cached.cacheKey = slot.cacheKey
             return cached
         }
         let asset = AVURLAsset(url: media.url)
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw AnalysisError.noVideoTrack }
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+            throw AnalysisError.noVideoTrack
+        }
         let duration = try await asset.load(.duration)
         let timescale = duration.timescale > 0 ? duration.timescale : 600
-        let reader = try AppleMediaAnalyzer.videoReader(asset: asset, track: track, scaled: true)
+        let reader =
+            try AppleMediaAnalyzer.videoReader(asset: asset, track: track, scaled: true)
             ?? AppleMediaAnalyzer.videoReader(asset: asset, track: track, scaled: false)
         guard let (reader, output) = reader else { throw AnalysisError.failed("cannot read video") }
         defer { if reader.status == .reading { reader.cancelReading() } }
@@ -264,7 +279,9 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
             frameTimes += 1
             lastTime = time
         }
-        if reader.status == .failed { throw AnalysisError.failed(reader.error?.localizedDescription ?? "decode failed") }
+        if reader.status == .failed {
+            throw AnalysisError.failed(reader.error?.localizedDescription ?? "decode failed")
+        }
         let end = duration.isNumeric && duration > lastTime ? duration : lastTime
         var boundaries = [CMTime.zero] + cuts + [end]
         boundaries = boundaries.map { CMTimeConvertScale($0, timescale: timescale, method: .default) }
@@ -344,10 +361,14 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
     public func onsetEnvelope(_ media: MediaReference, parameters: AlignmentParameters) async throws -> OnsetEnvelope {
         let compute = OnsetEnvelopeBuilder.Parameters(parameters)
         let file = "onset-\(compute.sampleRate / 1000)k.f32"
-        let slot = try slot(media, kind: .onsetEnvelope, version: OnsetEnvelopeBuilder.version, parameters: compute, file: file)
-        if slot.existing != nil, let size = try? FileManager.default.attributesOfItem(atPath: slot.url.path)[.size] as? Int {
+        let slot = try slot(
+            media, kind: .onsetEnvelope, version: OnsetEnvelopeBuilder.version, parameters: compute, file: file)
+        if slot.existing != nil,
+            let size = try? FileManager.default.attributesOfItem(atPath: slot.url.path)[.size] as? Int
+        {
             return OnsetEnvelope(
-                url: slot.url, sampleRate: compute.sampleRate, hop: compute.hop, frameCount: size / 4, cacheKey: slot.cacheKey)
+                url: slot.url, sampleRate: compute.sampleRate, hop: compute.hop, frameCount: size / 4,
+                cacheKey: slot.cacheKey)
         }
         var builder: OnsetEnvelopeBuilder?
         _ = try await AudioDecoder.readMono(url: media.url) { samples in
@@ -358,7 +379,8 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
         guard var builder else { throw AnalysisError.noAudioTrack }
         try Task.checkCancellation()
         let envelope = builder.finish()
-        try FileManager.default.createDirectory(at: slot.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: slot.url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try OnsetEnvelopeBuilder.encode(envelope).write(to: slot.url, options: .atomic)
         try record(
             slot, media: media, kind: .onsetEnvelope,

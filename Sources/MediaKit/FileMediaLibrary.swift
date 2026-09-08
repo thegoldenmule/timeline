@@ -142,10 +142,13 @@ public actor FileMediaLibrary: MediaLibrary {
         // 2. Idempotent by hash: a file the library knows returns its asset; a known file whose copy went
         //    missing is relinked to this one.
         if let existing = try cache.media(contentHash: hash), let asset = existing.asset {
-            if let path = existing.libraryPath, FileManager.default.fileExists(atPath: layout.url(forLibraryPath: path).path) {
+            if let path = existing.libraryPath,
+                FileManager.default.fileExists(atPath: layout.url(forLibraryPath: path).path)
+            {
                 progress?(.done)
                 return ImportResult(
-                    asset: asset, alreadyInLibrary: true, sourceURL: source, libraryURL: layout.url(forLibraryPath: path))
+                    asset: asset, alreadyInLibrary: true, sourceURL: source,
+                    libraryURL: layout.url(forLibraryPath: path))
             }
             let relinked = try await relink(asset, to: source)
             progress?(.done)
@@ -164,7 +167,8 @@ public actor FileMediaLibrary: MediaLibrary {
             destination = source
         case .copy, .move:
             let date = inspection.capturedAt ?? identity.modified
-            let dir = layout.libraryDir.appendingPathComponent(FileMediaLibrary.dateFolder(for: date), isDirectory: true)
+            let dir = layout.libraryDir.appendingPathComponent(
+                FileMediaLibrary.dateFolder(for: date), isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             destination = await claimDestination(in: dir, name: source.lastPathComponent)
             do {
@@ -305,7 +309,9 @@ public actor FileMediaLibrary: MediaLibrary {
         try output.synchronize()
     }
 
-    private nonisolated func writeSidecar(_ sidecar: Sidecar, for destination: URL, mode: ImportMode, contentHash: String)
+    private nonisolated func writeSidecar(
+        _ sidecar: Sidecar, for destination: URL, mode: ImportMode, contentHash: String
+    )
         throws
     {
         let url: URL

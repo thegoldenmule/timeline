@@ -151,9 +151,11 @@ public final class PeaksStore: Sendable {
         let spp = max(1, samplesPerPixel)
         let (file, _) = try await peaksFile(for: media)
         let sampleRate = file.sampleRate
-        let startSample = range.map { Int64(($0.lowerBound.seconds * Double(sampleRate)).rounded()) } ?? file.firstSample
+        let startSample =
+            range.map { Int64(($0.lowerBound.seconds * Double(sampleRate)).rounded()) } ?? file.firstSample
         let endSample =
-            range.map { Int64(($0.upperBound.seconds * Double(sampleRate)).rounded()) } ?? file.firstSample + file.frames
+            range.map { Int64(($0.upperBound.seconds * Double(sampleRate)).rounded()) } ?? file.firstSample
+            + file.frames
         guard let level = file.levels.last(where: { $0.hop <= spp }) else {
             return try await decodeRange(media, file: file, startSample: startSample, endSample: endSample, hop: spp)
         }
@@ -179,7 +181,8 @@ public final class PeaksStore: Sendable {
             i += 1
         }
         return WaveformPeaks(
-            sampleRate: sampleRate, hop: hop, startSample: file.firstSample + Int64(first) * Int64(hop), min: mins, max: maxs)
+            sampleRate: sampleRate, hop: hop, startSample: file.firstSample + Int64(first) * Int64(hop), min: mins,
+            max: maxs)
     }
 
     private func decodeRange(

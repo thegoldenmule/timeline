@@ -101,7 +101,8 @@ public enum MediaProbe {
         probe.capturedAt = capturedAt ?? (attributes?[.creationDate] as? Date)
 
         return MediaInspection(
-            kind: video.isEmpty ? .audio : .video, duration: RationalTime(cmValue: duration.value, timescale: duration.timescale),
+            kind: video.isEmpty ? .audio : .video,
+            duration: RationalTime(cmValue: duration.value, timescale: duration.timescale),
             hasVideo: !video.isEmpty, hasAudio: !audio.isEmpty, sampleRate: sampleRate, frameDuration: frameDuration,
             probe: probe, audioTracks: tracks, capturedAt: capturedAt)
     }
@@ -144,12 +145,14 @@ public enum MediaProbe {
             probe.colorPrimaries = primaries.map(colorName)
             probe.transfer = transfer.map(colorName)
             if let matrix { probe.extra["matrix"] = .string(colorName(matrix)) }
-            if let depth = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_BitsPerComponent)
+            if let depth = CMFormatDescriptionGetExtension(
+                format, extensionKey: kCMFormatDescriptionExtension_BitsPerComponent)
                 as? Int
             {
                 probe.extra["bitsPerComponent"] = .number(Double(depth))
             }
-            if let full = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_FullRangeVideo)
+            if let full = CMFormatDescriptionGetExtension(
+                format, extensionKey: kCMFormatDescriptionExtension_FullRangeVideo)
                 as? Bool
             {
                 probe.extra["fullRange"] = .bool(full)

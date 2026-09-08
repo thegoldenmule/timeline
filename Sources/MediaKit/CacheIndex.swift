@@ -331,7 +331,9 @@ public final class CacheIndex: Sendable {
             var arguments: [any DatabaseValueConvertible] = [match]
             if let contentHashes {
                 guard !contentHashes.isEmpty else { return [] }
-                sql += " AND content_hash IN (" + Array(repeating: "?", count: contentHashes.count).joined(separator: ",") + ")"
+                sql +=
+                    " AND content_hash IN (" + Array(repeating: "?", count: contentHashes.count).joined(separator: ",")
+                    + ")"
                 arguments.append(contentsOf: contentHashes)
             }
             sql += " ORDER BY content_hash, rowid LIMIT ?"
@@ -385,7 +387,8 @@ public final class CacheIndex: Sendable {
         try writer.read { db in
             guard
                 let row = try Row.fetchOne(
-                    db, sql: "SELECT * FROM alignments WHERE reference_hash = ? AND target_hash = ? AND params_hash = ?",
+                    db,
+                    sql: "SELECT * FROM alignments WHERE reference_hash = ? AND target_hash = ? AND params_hash = ?",
                     arguments: [referenceHash, targetHash, paramsHash]),
                 let json = row["candidates"] as String?,
                 let alignment = try? ProjectCodec.decoder.decode(Alignment.self, from: Data(json.utf8))

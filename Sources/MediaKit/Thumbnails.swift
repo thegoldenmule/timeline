@@ -112,7 +112,8 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
                 x: column * sheet.info.tileWidth, y: row * sheet.info.tileHeight, width: sheet.info.tileWidth,
                 height: sheet.info.tileHeight)
             guard let cropped = sheet.image.cropping(to: rect) else { continue }
-            let image = height == sheet.info.tileHeight ? cropped : AVThumbnailProvider.scaled(cropped, toHeight: height)
+            let image =
+                height == sheet.info.tileHeight ? cropped : AVThumbnailProvider.scaled(cropped, toHeight: height)
             result.append(Thumbnail(time: time, image: image))
         }
         return result
@@ -133,7 +134,8 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
             return cached
         }
         let parameters = SheetParameters(
-            fps: fps, tileHeight: tileHeight, tilesPerSheet: configuration.tilesPerSheet, columns: configuration.columns,
+            fps: fps, tileHeight: tileHeight, tilesPerSheet: configuration.tilesPerSheet,
+            columns: configuration.columns,
             jpegQuality: configuration.jpegQuality, chunk: chunk)
         let paramsHash = try MediaKit.paramsHash(version: AVThumbnailProvider.version, parameters: parameters)
         if let record = try cache.artifact(contentHash: media.contentHash, kind: .thumbnails, paramsHash: paramsHash),
@@ -143,7 +145,8 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
             remember(memoKey, loaded)
             return loaded
         }
-        let generated = try await generate(media, fps: fps, tileHeight: tileHeight, chunk: chunk, name: name, paramsHash: paramsHash)
+        let generated = try await generate(
+            media, fps: fps, tileHeight: tileHeight, chunk: chunk, name: name, paramsHash: paramsHash)
         stats.withLock { $0.sheetsGenerated += 1 }
         remember(memoKey, generated)
         return generated
@@ -162,7 +165,8 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
         guard FileManager.default.fileExists(atPath: url.path), FileManager.default.fileExists(atPath: infoURL.path)
         else { return nil }
         let info = try JSONDecoder().decode(SheetInfo.self, from: Data(contentsOf: infoURL))
-        guard let ci = CIImage(contentsOf: url), let image = AVThumbnailProvider.context.createCGImage(ci, from: ci.extent)
+        guard let ci = CIImage(contentsOf: url),
+            let image = AVThumbnailProvider.context.createCGImage(ci, from: ci.extent)
         else { return nil }
         return Sheet(info: info, image: image)
     }
@@ -187,7 +191,8 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
         guard let firstImage = frames.first(where: { $0 != nil }) ?? nil else {
             throw AnalysisError.noVideoTrack
         }
-        let tileWidth = max(1, Int((Double(firstImage.width) * Double(tileHeight) / Double(firstImage.height)).rounded()))
+        let tileWidth = max(
+            1, Int((Double(firstImage.width) * Double(tileHeight) / Double(firstImage.height)).rounded()))
         let columns = min(configuration.columns, count)
         let rows = (count + columns - 1) / columns
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -213,13 +218,16 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
             fps: fps, tileHeight: tileHeight, tileWidth: tileWidth, chunk: chunk, firstTile: firstTile, count: count,
             columns: columns)
 
-        let dir = cache.layout.artifactDir(contentHash: media.contentHash).appendingPathComponent("thumbs", isDirectory: true)
+        let dir = cache.layout.artifactDir(contentHash: media.contentHash).appendingPathComponent(
+            "thumbs", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let jpegURL = cache.layout.artifactDir(contentHash: media.contentHash).appendingPathComponent(name + ".jpg")
         let infoURL = cache.layout.artifactDir(contentHash: media.contentHash).appendingPathComponent(name + ".json")
         try AVThumbnailProvider.context.writeJPEGRepresentation(
             of: CIImage(cgImage: image), to: jpegURL, colorSpace: colorSpace,
-            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: configuration.jpegQuality])
+            options: [
+                kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: configuration.jpegQuality
+            ])
         try JSONEncoder().encode(info).write(to: infoURL, options: .atomic)
         let now = clock.now()
         try cache.ensureMedia(contentHash: media.contentHash, url: media.url, now: now)

@@ -61,9 +61,12 @@ public struct FileIdentity: Hashable, Sendable, Codable {
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         else { throw MediaError.notFound(url) }
         volumeUUID = values.volumeUUIDString ?? "no-uuid"
-        fileID = Int64((attributes[.systemFileNumber] as? UInt64) ?? UInt64(truncatingIfNeeded: (attributes[.systemFileNumber] as? Int) ?? 0))
+        fileID = Int64(
+            (attributes[.systemFileNumber] as? UInt64)
+                ?? UInt64(truncatingIfNeeded: (attributes[.systemFileNumber] as? Int) ?? 0))
         size = Int64(values.fileSize ?? ((attributes[.size] as? Int) ?? 0))
-        modified = values.contentModificationDate ?? (attributes[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
+        modified =
+            values.contentModificationDate ?? (attributes[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
     }
 
     /// The modification time as the cache stores it (ISO-8601 with milliseconds), so equality is stable.

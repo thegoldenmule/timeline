@@ -62,7 +62,8 @@ enum AudioDecoder {
         defer { if reader.status == .reading { reader.cancelReading() } }
         try configure?(sampleRate)
 
-        var info = Info(sampleRate: sampleRate, channels: channels, trackID: track.trackID, firstSample: 0, framesDecoded: 0)
+        var info = Info(
+            sampleRate: sampleRate, channels: channels, trackID: track.trackID, firstSample: 0, framesDecoded: 0)
         var sawFirst = false
         var mono: [Float] = []
         while let buffer = output.copyNextSampleBuffer() {
@@ -80,8 +81,11 @@ enum AudioDecoder {
             if mono.count < frames { mono = [Float](repeating: 0, count: frames) }
             var interleaved = [Float](repeating: 0, count: floats)
             try interleaved.withUnsafeMutableBytes { raw in
-                let status = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: raw.baseAddress!)
-                guard status == kCMBlockBufferNoErr else { throw AnalysisError.failed("CMBlockBufferCopyDataBytes \(status)") }
+                let status = CMBlockBufferCopyDataBytes(
+                    block, atOffset: 0, dataLength: length, destination: raw.baseAddress!)
+                guard status == kCMBlockBufferNoErr else {
+                    throw AnalysisError.failed("CMBlockBufferCopyDataBytes \(status)")
+                }
             }
             if channels == 1 {
                 try interleaved.withUnsafeBufferPointer { try sink(UnsafeBufferPointer(rebasing: $0[0..<frames])) }
