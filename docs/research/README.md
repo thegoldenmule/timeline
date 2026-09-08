@@ -33,10 +33,10 @@ Tauri is not a shortcut: it uses WKWebView on macOS, which only gained full WebC
 
 ## What native costs
 
-- AVFoundation's editing samples are old (AVCustomEdit 2017) and macOS 26 deprecates the mutable classes they use: `AVMutableVideoComposition` and its instruction classes give way to the value type `AVVideoComposition.Configuration` (which also carries `perFrameHDRDisplayMetadataPolicy` and `outputBufferDescription`), and `AVVideoCompositionCoreAnimationTool` is on the deprecation path. Build on `Configuration` from the start. Known traps, confirmed in code: Core Animation captions work only in export, so captions are rendered inside the compositor with Core Text (this worked, including a 300 ms scale-in); AVFoundation instantiates the compositor itself and calls it on its own serial queue, so the class is `@unchecked Sendable` with lock-guarded caches; `renderContextChanged` fires once per consumer session and anything sized to the render context must be rebuilt there; an `AVAssetImageGenerator` held only as a temporary never completes its request, so keep generators alive; Core Image blends in linear light, so a 50/50 dissolve of red and green reads (188,188,0) rather than the (128,128,0) gamma-space blend Final Cut and Premiere produce, which is a product decision to make explicitly; source frames requested as 8-bit BGRA arrive untagged and pure green shifts about 10% toward (0,231,40), so request native YUV source formats or tag buffers before wrapping them. Audio has volume ramps and a tap but no per-clip effects graph without an offline `AVAudioEngine` pass.
+- AVFoundation's editing samples are old (AVCustomEdit 2017) and macOS 26 deprecates the mutable classes they use: `AVMutableVideoComposition` and its instruction classes give way to the value type `AVVideoComposition.Configuration` (which also carries `perFrameHDRDisplayMetadataPolicy` and `outputBufferDescription`), and `AVVideoCompositionCoreAnimationTool` is on the deprecation path. Build on `Configuration` from the start. Known traps, confirmed in code: Core Animation captions work only in export, so captions are rendered inside the compositor with Core Text (this worked, including a 300 ms scale-in); AVFoundation instantiates the compositor itself and calls it on its own serial queue, so the class is `@unchecked Sendable` with lock-guarded caches; `renderContextChanged` fires once per consumer session and anything sized to the render context must be rebuilt there; an `AVAssetImageGenerator` held only as a temporary never completes its request, so keep generators alive; Core Image blends in linear light, so a 50/50 dissolve of red and green reads (188,188,0) rather than the (128,128,0) gamma-space blend Final Cut and Premiere produce, which is a product decision to make explicitly; source frames requested as 8-bit BGRA arrive untagged and pure green shifts about 10% toward (0,231,40), so request native YUV source formats or tag buffers before wrapping them. Audio has volume ramps and a tap but no per-clip effects graph without an offline `AVAudioEngine` pass. Live preview after an edit, measured on a 200-clip sequence: replacing `videoComposition` on the live player item takes 2 ms paused and one frame playing, so property edits are effectively free; a structural edit needs a new player item, and its cost is entirely audio startup (2 to 4 ms for a video-only item, 15 to 25 ms with two AAC tracks in a fast regime, 340 to 590 ms in a slow regime this machine fell into for four consecutive process launches with no code change, the same phenomenon behind the earlier 264 ms figure). Mutating a composition a player already holds is silently ignored while paused and stalls playback for over a second while playing, so compositions are treated as frozen. An `AVPlayerItem` binds to one `AVPlayer` for life, and `AVQueuePlayer` does not pre-prepare queued items, so hiding a swap while playing takes a second player and layer.
 - No maintained open-source Swift NLE timeline component exists. Plan to build the timeline as an AppKit/Metal view inside a SwiftUI shell (SwiftUI `Canvas` has no per-element interactivity).
-- No Claude Agent SDK for Swift. The embedded agent sits behind an `AgentRuntime` protocol in `Contracts` (start a session with a goal and tool access, stream turns and tool calls, approve or deny expensive tools, report cost); the first implementation drives the Claude Code CLI as a sidecar (`claude -p --output-format stream-json --mcp-config` pointing at the app's own MCP server, with `--allowedTools` scoped to it), so the app gets Claude Code's loop, compaction, and skills for free. A Messages-API implementation (SwiftAnthropic, MIT) or `ClaudeForFoundationModels` on macOS 27 can replace it behind the same protocol.
-- MCP swift-sdk (0.12.1, pin with `exact:`) ships the Streamable HTTP transport but no HTTP listener; about a hundred lines of swift-nio (already a transitive dependency) put it on a socket, and an idle-session sweep is needed because Claude Code does not send `DELETE` at the end of a headless run. Xcode iteration is slower than Vite, and coding agents are stronger at React than SwiftUI; keep the UI thin and the logic in `swift test`-able packages. Cold release build of the MCP server was 37 s, incremental 2.4 s, 5.1 MB stripped.
+- No Claude Agent SDK for Swift. The embedded agent sits behind an `AgentRuntime` protocol in `Contracts` (start a session with a goal and tool access, stream turns and tool calls, approve or deny expensive tools, report cost); the first implementation drives the Claude Code CLI as a sidecar, so the app gets Claude Code's loop, compaction, and skills for free. Verified against Claude Code 2.1.263: `--strict-mcp-config` with an inline `--mcp-config` (which supports `headers`, so each launch carries a per-launch bearer token the server checks) loads only the app's server; `--permission-mode dontAsk` plus `--allowedTools` scoped to the server runs headless; `--max-budget-usd`, `--model`, `--append-system-prompt`, and `--settings` (inline JSON, including hooks) exist; a `PreToolUse` hook may return `permissionDecision: allow | deny` and fires even for allow-listed tools, which is the documented way to surface an approval to the app's UI, while `--permission-prompt-tool` exists but its contract is undocumented and is not relied on. The stream-json event schema is not documented as stable, so the parser is tolerant and tested against recorded transcripts; the single-shot `--output-format json` result carries the cost. The sidecar must be launched with `CLAUDECODE` unset when the app itself runs under Claude Code, and the app detects `claude --version` and `claude auth status` to degrade to "MCP only" when absent. Because none of that is a contract the app controls, the authoritative approval gate lives server-side in the tools (`approval_required` plus token), and the runtime is tested against recorded transcripts with a Messages-API stub compiled against the same protocol. A Messages-API implementation (SwiftAnthropic, MIT) or `ClaudeForFoundationModels` on macOS 27 can replace the sidecar behind the same protocol.
+- MCP swift-sdk (0.12.1, pin with `exact:`) ships the Streamable HTTP transport but no HTTP listener; about a hundred lines of swift-nio (already a transitive dependency) put it on a socket, an idle-session sweep is needed because Claude Code does not send `DELETE` at the end of a headless run, and the stdio variant users can register with `claude mcp add` is a proxy to the running app so the database never has a second writer. Xcode iteration is slower than Vite, and coding agents are stronger at React than SwiftUI; keep the UI thin and the logic in `swift test`-able packages. Cold release build of the MCP server was 37 s, incremental 2.4 s, 5.1 MB stripped.
 
 **Decided (2026-09-08):** the timeline is native AppKit/Metal inside the SwiftUI shell; the WKWebView hedge is retired. Do not pick pure web + ffmpeg for a product whose inputs are iPhone HDR footage.
 
@@ -58,14 +58,14 @@ Tauri is not a shortcut: it uses WKWebView on macOS, which only gained full WebC
 
 ```
 Packages/
-  TimelineCore   pure Swift: Project schema, EditOp enum, apply/invert, invariants, JSON codec
-  RenderKit      Project -> AVMutableComposition + AVMutableVideoComposition + AVMutableAudioMix
-                 one AVVideoCompositing (Metal/Core Image): transitions, transforms, overlays, captions
-                 AVPlayerItem factory, AVAssetImageGenerator frames, async AVAssetExportSession / AVAssetWriter
+  TimelineCore   pure Swift: the model in docs/design/timeline-model.md (commands, events, decide/evolve/invert, invariants, history fold)
+  RenderKit      Sequence -> AVMutableComposition + AVVideoComposition.Configuration + AVMutableAudioMix
+                 one AVVideoCompositing (Core Image/Metal): transitions, transforms, overlays, captions
+                 incremental update, AVPlayerItem factory, AVAssetImageGenerator frames, async export
   AnalysisKit    actors over SpeechAnalyzer, Vision, SoundAnalysis, ffprobe; typed annotations cached per asset
   Providers      Klipy/Giphy memes, Pexels/Pixabay b-roll, TTS (Apple, Kokoro, ElevenLabs), Freesound, Splice MCP
-  AgentKit       Tool registry (name, description, JSON Schema, annotations, handler) -> MCP server (swift-sdk)
-                 optional embedded agent: Claude Code CLI sidecar or Messages API; Foundation Models for cheap passes
+  AgentKit       Tool registry (name, description, JSON Schema, annotations, handler) -> MCP server (swift-sdk + nio listener)
+                 ApprovalPolicy gate; AgentRuntime: Claude Code CLI sidecar first, Messages API later; Foundation Models for cheap passes
   App            SwiftUI shell; timeline as NSViewRepresentable Metal view; AVPlayerLayer preview; approval cards
 ```
 
@@ -73,30 +73,22 @@ Dependencies point inward: `TimelineCore` imports nothing but Foundation; `Rende
 
 ### The document
 
-```
-Project { version, settings{ fps (rational), width, height, sampleRate },
-          assets{ id -> { path, kind, duration, fps, hasAudio, color{ primaries, transfer }, analysis? } },
-          tracks[ { id, kind: video|audio, clips[ { id, assetId, start, in, out, speed,
-                    transform{ x,y,scale,rotation,opacity }, effects[], transitionIn?, transitionOut?, audio{ gain, fadeIn, fadeOut } } ] } ],
-          captions[ { id, style, items[ { id, start, end, words[ { text, t0, t1 } ] } ] } ],
-          markers[] }
-```
-
-Times are integer frames at project rate (or `{value, timescale}` like `CMTime`). Every mutation is an `EditOp` with an inverse; the document carries a monotonically increasing `version` used for optimistic locking between the human and the agent (`timeline_apply` fails with a compact diff when `baseVersion` is stale). Move to Yjs/Automerge-style CRDTs only if truly concurrent editing is needed.
+Defined normatively in `docs/design/timeline-model.md`: a project holds assets and sequences; a sequence holds ordered tracks, transitions as first-class objects between adjacent clips, and markers; clips carry link groups (video and audio from one asset move together), rational times, speed, and `Animatable` transform, opacity, effects, and gain (constants only in v1); caption items are clips on caption tracks. Every mutation is a command with an edit mode (ripple or overwrite) that `decide` turns into invertible events; undo is linear across human and agent; the human's commands apply unconditionally while the agent's carry an expected version and receive a diff on conflict. One command per gesture, one batch per agent step.
 
 ### Tool surface (keep about 15 visible; defer the rest via tool search)
 
-Senses: `project_describe`, `media_import`, `media_analyze(level)`, `transcript_search`, `look_at(asset, timestamps)` returns a contact sheet image, `get_moments`.
-Hands: `align_audio(referenceAsset, targetAsset)` returns offset, drift ppm, confidence, candidates, proof image; `timeline_apply({ ops[], baseVersion })`, `timeline_query`, `caption_add(style, source)`, `transition_add`, `overlay_add` (meme, image, text), `effect_add`, `audio_mix` (duck under speech, normalize LUFS), `find_broll`, `find_meme`, `generate_tts`.
-Output: `render_preview(range)`, `render_export(preset)` gated by approval and cost estimate, `export_fcpxml`.
+Every tool takes a `projectId` (default: the frontmost project); `project_list` enumerates open projects.
+Senses: `project_describe(level: summary | tracks | full, range?)`, `media_import`, `media_analyze(level)`, `transcript_search`, `look_at(asset, timestamps)` returns a contact sheet image, `get_moments`.
+Hands: `align_audio(referenceAsset, targetAsset, parameters?)` returns offset, drift ppm, confidence, candidates, proof image; `timeline_apply({ ops[], expectedVersion })` with client ids and `$ref` back-references, `timeline_query`, `caption_add(style, source)`, `transition_add`, `overlay_add` (meme, image, text), `effect_add`, `audio_mix` (duck under speech, normalize LUFS), `find_broll`, `find_meme`, `generate_tts`.
+Output: `render_preview(range)`, `render_export(preset)`, `export_fcpxml`.
 
-Each tool returns `{ version, changedIds, warnings, thumbnail? }`, never logs. Procedures such as "TikTok captions" or "jump-cut talking head" are Agent Skills (SKILL.md) that sequence these tools.
+Mutating tools return `{ version, changedIds, warnings }`; a stale `expectedVersion` returns `ChangedSince`. Expensive tools (`render_export`, cloud generation) are gated server-side by an `ApprovalPolicy`: without a granted approval token they return `{ status: "approval_required", approvalToken, estimate }`, the app shows an approval card, and the agent retries with the token. This holds for every client, Claude Code included; runtime-side hooks only improve the UX. No tool returns logs. Procedures such as "TikTok captions" or "jump-cut talking head" are Agent Skills (SKILL.md) that sequence these tools.
 
 ### Testing pyramid
 
 | Layer | Tooling | Needs media? |
 |---|---|---|
-| EditOp apply/invert, invariants, JSON round trip | Swift Testing, property-style generators | no |
+| Command decide, event evolve/invert, invariants, history fold, JSON round trip | Swift Testing, property-style generators | no |
 | Compiler Project -> AVComposition (track count, segments, time ranges, instructions) | Swift Testing on the composition objects | no |
 | Compositor frames | synthetic assets written in-test with AVAssetWriter (solid colors, test pattern); `AVAssetImageGenerator` + swift-snapshot-testing with perceptual tolerance | synthetic only |
 | Tool contracts | every tool has JSON Schema, descriptions on all fields, example payload validates | no |
@@ -166,9 +158,10 @@ Measured on this machine with synthetic signals (pink noise, AGC-style compressi
 
 ## Design documents
 
-- `docs/design/storage.md`: media library layout, per-project event-sourced SQLite, projections, undo, agent concurrency, cache database.
+- `docs/design/timeline-model.md`: the normative document model, commands, events, invariants, edit modes, undo semantics. Where other documents disagree with it, it wins.
+- `docs/design/storage.md`: media library layout, per-project event-sourced SQLite, projections, crash recovery, cache database.
 - `docs/design/implementation-plan.md`: shared foundation first, then six parallel modules, then integration.
-- `spikes/`: throwaway but inspectable reference implementations (compositor, audio-align, mcp-server, speech, event-store), each with a `SPIKE.md` recording exact APIs, measurements, and gotchas. Phase 1 agents should read the one for their module.
+- `spikes/`: throwaway but inspectable reference implementations (compositor, preview-update, audio-align, mcp-server, speech, event-store), each with a `SPIKE.md` recording exact APIs, measurements, and gotchas. Phase 1 agents should read the one for their module.
 
 ## Open questions
 
@@ -182,7 +175,7 @@ Decided 2026-09-08:
 - **Alignment thresholds are configurable.** `AlignmentParameters` (bandpass edges, envelope hop, minimum overlap, candidate cutoff, fine window length and count, inlier tolerance, verification fractions, drift floor) is a value type with the spike's defaults, adjustable per call from the tool and per project from settings, so real-footage tuning is data, not code.
 - **Caption rendering** is Core Text inside the compositor; libass is an ASS import option only.
 
-Still open, resolved by real footage during Phase 1 and 2: HDR and 10-bit through the custom compositor (flags and formats compile, no HDR media pushed through yet) and alignment thresholds on real recordings (synthetic results hold to -10 dB against pink noise).
+Still open, resolved by real footage during Phase 1 and 2: HDR and 10-bit through the custom compositor (flags and formats compile, no HDR media pushed through yet) and alignment thresholds on real recordings (synthetic results hold to -10 dB against pink noise). Still open in AVFoundation: the root cause of the bimodal audio startup cost for new player items; the interactive promise therefore rests on the video-only gesture item, and `readyToPlay` is logged so the slow regime is visible in the field. Worth a follow-up spike: a separate audio-only player slaved to the video player's timebase so structural video edits never pay the audio cost.
 
 ## Test footage on this machine
 

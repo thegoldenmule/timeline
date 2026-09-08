@@ -1,6 +1,6 @@
 # Storage design: media library, per-project event store, projections
 
-Status: draft for review, 2026-09-08. Scope: single user, single machine, no auth. Companion to `docs/research/README.md`; library and SQLite facts verified in `docs/research/09-storage-sqlite.md`; the schema, write path, undo, and rebuild were exercised in code with measurements on this machine in `spikes/event-store` (GRDB 7.11.1, SQLite 3.51.0, swift-uuidv7 0.6.2). Numbers below come from that run (release build, M4 Max, single run).
+Status: draft for review, 2026-09-08. Scope: single user, single machine, no auth. The document shape, commands, events, invariants, and undo semantics are defined in `docs/design/timeline-model.md`, which is normative; this document covers persistence only. Companion to `docs/research/README.md`; library and SQLite facts verified in `docs/research/09-storage-sqlite.md`; the schema, write path, undo, and rebuild were exercised in code with measurements on this machine in `spikes/event-store` (GRDB 7.11.1, SQLite 3.51.0, swift-uuidv7 0.6.2). Numbers below come from that run (release build, M4 Max, single run).
 
 ## 1. Principles
 
@@ -57,7 +57,7 @@ Sync services are the main corruption risk: iCloud Drive and Dropbox copy `proje
 - All tables `STRICT`. **JSON payloads are stored as `TEXT`**, not JSONB: diffable in the CLI, portable, and GRDB's JSON helpers expect text. Hot fields get `VIRTUAL` generated columns with partial indexes, which the planner uses (`SEARCH events USING INDEX events_clip_idx`) at no measurable insert cost. JSONB buys nothing here: raw appends run at about 70,000 events per second with text payloads and three indexes, and the one serialization cost that matters (section 5) is Swift-side JSON encoding, not SQLite parsing.
 - IDs are UUIDv7 (time-ordered, append-friendly indexes) via the `swift-uuidv7` package until Foundation's `UUID.version7` ships; stored as lowercase `TEXT` for debuggability. Switch to 16-byte `BLOB` only if index size becomes a concern.
 - Backups via `VACUUM INTO` to a temp file then atomic rename, never by copying the live file. Save As is `VACUUM INTO`.
-- The app process is the only writer. The agent's MCP tools call into the same process, so there is no multi-process write contention.
+- The app process is the only writer. The agent's MCP tools call into the same process, so there is no multi-process write contention. The stdio MCP binary that Claude Code can spawn is a thin proxy that forwards to the running app's HTTP endpoint; it never opens `project.sqlite`.
 
 ## 4. Schema: event store
 
@@ -79,9 +79,11 @@ CREATE TABLE events (
   metadata       TEXT,                          -- JSON: tool name, tool args hash, agent turn id
   -- indexed hot fields pulled from the payload without duplicating it
   clip_id        TEXT AS (json_extract(payload, '$.clipId')) VIRTUAL,
+  sequence_id    TEXT AS (json_extract(payload, '$.sequenceId')) VIRTUAL,
   UNIQUE (stream_id, stream_version)            -- optimistic concurrency
 ) STRICT;
 CREATE INDEX events_clip_idx ON events(clip_id) WHERE clip_id IS NOT NULL;
+CREATE INDEX events_sequence_idx ON events(sequence_id, seq) WHERE sequence_id IS NOT NULL;
 
 CREATE INDEX events_type_idx ON events(type);
 CREATE INDEX events_txn_idx  ON events(txn_id, seq);   -- covering: undo reads a txn's events index-only
@@ -119,7 +121,7 @@ CREATE TABLE project_state (
 ) STRICT;
 ```
 
-**Query tables.** Normalized rows for the UI, the agent's `timeline_query`, and reports. They exist so that "clips on track V2 between 10 s and 40 s" or "every clip using asset X" is a SQL query rather than a JSON scan.
+**Query tables.** Normalized rows for the UI, the agent's `timeline_query`, and reports. They exist so that "clips on track V2 between 10 s and 40 s" or "every clip using asset X" is a SQL query rather than a JSON scan. They hold **live rows only**: a removed clip is deleted from `clips` (its snapshot lives in the event), which is what lets rebuild write these tables in bulk from the final state and still match the incrementally maintained rows byte for byte.
 
 ```sql
 CREATE TABLE assets (
@@ -128,85 +130,91 @@ CREATE TABLE assets (
   kind          TEXT NOT NULL CHECK (kind IN ('video','audio','image')),
   library_path  TEXT NOT NULL,                  -- relative to Library root
   display_name  TEXT NOT NULL,
-  duration_v    INTEGER NOT NULL, duration_ts INTEGER NOT NULL,   -- rational {value, timescale}
+  duration_v    INTEGER NOT NULL, duration_ts INTEGER NOT NULL CHECK (duration_ts > 0),
   has_video     INTEGER NOT NULL, has_audio INTEGER NOT NULL,
-  probe         TEXT,                           -- JSON summary: codec, fps, size, color, rotation, captured_at, gps
-  removed       INTEGER NOT NULL DEFAULT 0
+  offline       INTEGER NOT NULL DEFAULT 0,
+  probe         TEXT                            -- JSON summary: codec, fps, size, color, rotation, captured_at, gps
+) STRICT;
+
+CREATE TABLE sequences (
+  sequence_id TEXT PRIMARY KEY, name TEXT NOT NULL,
+  frame_v INTEGER NOT NULL, frame_ts INTEGER NOT NULL CHECK (frame_ts > 0),
+  width INTEGER NOT NULL, height INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE tracks (
-  track_id   TEXT PRIMARY KEY,
-  kind       TEXT NOT NULL CHECK (kind IN ('video','audio','caption')),
-  position   INTEGER NOT NULL,                  -- z-order / display order
-  name       TEXT NOT NULL,
-  muted      INTEGER NOT NULL DEFAULT 0,
-  locked     INTEGER NOT NULL DEFAULT 0,
-  removed    INTEGER NOT NULL DEFAULT 0
+  track_id    TEXT PRIMARY KEY,
+  sequence_id TEXT NOT NULL REFERENCES sequences(sequence_id),
+  kind        TEXT NOT NULL CHECK (kind IN ('video','audio','caption')),
+  position    INTEGER NOT NULL,                 -- z-order / display order within the sequence
+  name        TEXT NOT NULL,
+  muted       INTEGER NOT NULL DEFAULT 0,
+  locked      INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE TABLE clips (
-  clip_id     TEXT PRIMARY KEY,
-  track_id    TEXT NOT NULL REFERENCES tracks(track_id),
-  asset_id    TEXT REFERENCES assets(asset_id), -- NULL for generated clips (title, color)
-  start_v     INTEGER NOT NULL, start_ts INTEGER NOT NULL,      -- timeline position
-  in_v        INTEGER NOT NULL, in_ts    INTEGER NOT NULL,      -- source in point
-  out_v       INTEGER NOT NULL, out_ts   INTEGER NOT NULL,      -- source out point, exclusive
-  speed_num   INTEGER NOT NULL DEFAULT 1, speed_den INTEGER NOT NULL DEFAULT 1,
-  props       TEXT,                             -- JSON: transform, effects, transitions, audio, label
-  removed     INTEGER NOT NULL DEFAULT 0
+  clip_id       TEXT PRIMARY KEY,
+  sequence_id   TEXT NOT NULL REFERENCES sequences(sequence_id),
+  track_id      TEXT NOT NULL REFERENCES tracks(track_id),
+  asset_id      TEXT REFERENCES assets(asset_id), -- NULL for generated clips and caption items
+  link_group_id TEXT,
+  start_v       INTEGER NOT NULL, start_ts INTEGER NOT NULL CHECK (start_ts > 0),
+  in_v          INTEGER NOT NULL, in_ts    INTEGER NOT NULL CHECK (in_ts > 0),
+  out_v         INTEGER NOT NULL, out_ts   INTEGER NOT NULL CHECK (out_ts > 0),
+  speed_num     INTEGER NOT NULL DEFAULT 1, speed_den INTEGER NOT NULL DEFAULT 1,
+  text          TEXT,                           -- caption items only
+  props         TEXT                            -- JSON: transform, opacity, effects, audio, words, style, label
 ) STRICT;
-CREATE INDEX clips_track_start_idx ON clips(track_id, start_v) WHERE removed = 0;
-CREATE INDEX clips_asset_idx ON clips(asset_id) WHERE removed = 0;
+CREATE INDEX clips_track_start_idx ON clips(track_id, start_v);
+CREATE INDEX clips_asset_idx ON clips(asset_id);
+CREATE INDEX clips_link_idx ON clips(link_group_id) WHERE link_group_id IS NOT NULL;
 
-CREATE TABLE captions (
-  caption_id  TEXT PRIMARY KEY,
-  track_id    TEXT NOT NULL REFERENCES tracks(track_id),
-  start_v INTEGER NOT NULL, start_ts INTEGER NOT NULL,
-  end_v   INTEGER NOT NULL, end_ts   INTEGER NOT NULL,
-  text        TEXT NOT NULL,
-  words       TEXT,                             -- JSON [{text,t0,t1}]
-  style       TEXT,
-  removed     INTEGER NOT NULL DEFAULT 0
+CREATE TABLE transitions (
+  transition_id TEXT PRIMARY KEY,
+  sequence_id   TEXT NOT NULL REFERENCES sequences(sequence_id),
+  track_id      TEXT NOT NULL REFERENCES tracks(track_id),
+  left_clip_id  TEXT NOT NULL REFERENCES clips(clip_id),
+  right_clip_id TEXT NOT NULL REFERENCES clips(clip_id),
+  kind TEXT NOT NULL, duration_v INTEGER NOT NULL, duration_ts INTEGER NOT NULL CHECK (duration_ts > 0),
+  alignment TEXT NOT NULL CHECK (alignment IN ('centered','startOnCut','endOnCut')),
+  params TEXT
 ) STRICT;
 
 CREATE TABLE markers (
-  marker_id TEXT PRIMARY KEY, at_v INTEGER NOT NULL, at_ts INTEGER NOT NULL,
-  label TEXT NOT NULL, color TEXT, removed INTEGER NOT NULL DEFAULT 0
+  marker_id TEXT PRIMARY KEY, sequence_id TEXT NOT NULL REFERENCES sequences(sequence_id),
+  at_v INTEGER NOT NULL, at_ts INTEGER NOT NULL CHECK (at_ts > 0),
+  label TEXT NOT NULL, colour TEXT
 ) STRICT;
 
-CREATE TABLE alignments (                       -- audio alignment facts, one per (reference, target)
-  reference_asset TEXT NOT NULL, target_asset TEXT NOT NULL,
-  offset_num INTEGER NOT NULL, offset_den INTEGER NOT NULL,   -- seconds as rational
-  drift_ppm  REAL NOT NULL, confidence REAL NOT NULL,
-  candidates TEXT, computed_at TEXT NOT NULL,
-  PRIMARY KEY (reference_asset, target_asset)
-) STRICT;
-
-CREATE TABLE renders (
+CREATE TABLE renders (                          -- operational, not part of the event stream
   render_id TEXT PRIMARY KEY, requested_at TEXT NOT NULL, completed_at TEXT,
-  preset TEXT NOT NULL, output_path TEXT, output_hash TEXT,
+  sequence_id TEXT NOT NULL, preset TEXT NOT NULL,   -- preset is a serialized ExportPreset
+  output_path TEXT, output_hash TEXT,
   project_version INTEGER NOT NULL,             -- what was rendered
   status TEXT NOT NULL CHECK (status IN ('queued','running','done','failed','cancelled')),
-  receipt TEXT                                  -- JSON: settings, duration, warnings
+  receipt TEXT                                  -- JSON: settings, duration, warnings (offline assets, etc.)
 ) STRICT;
 
--- Undo model, derived from events: one row per txn.
+-- History is a projection of the transaction fold defined in timeline-model.md section 7:
+-- one row per transaction, live/undone state derived, never a mutable pointer table.
 CREATE TABLE history (
   txn_id      TEXT PRIMARY KEY,
   first_seq   INTEGER NOT NULL, last_seq INTEGER NOT NULL,
   actor       TEXT NOT NULL,
   label       TEXT NOT NULL,                    -- 'Trim clip', 'Agent: add captions to V1'
-  undone_by   TEXT REFERENCES history(txn_id),  -- set when a compensating txn reverts this one
-  undoes      TEXT REFERENCES history(txn_id)   -- set on the compensating txn
+  kind        TEXT NOT NULL CHECK (kind IN ('edit','undo','redo')),
+  target_txn  TEXT,                             -- for undo/redo rows: the transaction acted on
+  live        INTEGER NOT NULL                  -- derived: 1 unless the latest marker targeting it is an undo
 ) STRICT;
 
 CREATE TABLE projection_state (
-  name     TEXT PRIMARY KEY,                    -- 'project_state', 'query_tables', 'history'
-  last_seq INTEGER NOT NULL
+  name     TEXT PRIMARY KEY,                    -- 'project_state', 'query_tables', 'history', 'session'
+  last_seq INTEGER NOT NULL,
+  note     TEXT                                 -- 'session' row: 'open' | 'closed' (clean-close marker)
 ) STRICT;
 ```
 
-Rows are soft-deleted (`removed = 1`) so that history queries and relinking still work; the in-memory `Project` simply omits removed items.
+Audio alignment results are not stored here: they are derived data keyed by the two content hashes and the parameters, and live in `cache.sqlite` (section 11). Applying an alignment is an ordinary `addClip` or `moveClip` whose command metadata records the alignment key.
 
 ## 6. Write path
 
@@ -217,15 +225,17 @@ Command (from UI, MCP tool, or script)
         v
 CommandHandler.apply(command) -- one SQLite transaction
   1. if commands[commandId] exists -> return stored result (idempotent retry)
-  2. load Project from project_state (already in memory while open)
-  3. if expectedVersion != state.version -> reject with { currentVersion, changedSince: diff }
-  4. validate args against state (clip exists, times within asset, no overlap unless allowed)
-  5. decide events: [DomainEvent]  (pure function in TimelineCore, no I/O)
+  2. resolve { "$ref": i } ids in a batch to the ids minted by earlier operations
+  3. if expectedVersion is present and != state.version -> reject stale with ChangedSince (UI commands omit it)
+  4. decide events: [DomainEvent]  (pure function in TimelineCore, no I/O; validation lives here)
+  5. run invariants on the resulting state; reject invalid if any fail
   6. append events with stream_version = version+1..., same txn_id
   7. fold events into the in-memory Project (pure); schedule the debounced project_state write
   8. update query tables and history from the same events
   9. insert commands row with result (status applied | stale | invalid | noop)
   10. commit; publish { txnId, version, changedIds } to observers (UI, agent)
+
+One command per gesture, one `timeline_apply` per agent step (timeline-model.md section 4). Nothing in the store coalesces events.
 ```
 
 Steps 5 and 7 are the pure core: `decide(state, command) throws -> [Event]` and `evolve(state, event) -> state`. They are unit-tested without SQLite. The handler is a thin adapter around them. The store and the replay loop call an `inout` form, `evolve(&state, event)`: the value-returning form copies the clip dictionary on every event because the argument is not uniquely referenced, which turned a 45 ms fold of 10,000 events into 641 ms.
@@ -234,61 +244,23 @@ Idempotency: every command carries a `commandId` (UUIDv7) generated by the calle
 
 The `commands` table holds `args` and `result` JSON per command and was about 40% of the file in a 10,000-command run (14 MB total, roughly 1.4 KB per event all-in). Idempotency needs only a short window and the events already carry actor and tool metadata, so rows older than 30 days are pruned on open.
 
-Batching: `timeline_apply({ ops: [...] })` is a single command that produces many events under one `txn_id`, so it is one undo step and one version bump.
+Batching: `timeline_apply({ ops: [...] })` is a single command that produces many events under one `txn_id`, so it is one undo step and one version bump. Operations that create entities accept client ids, and later operations reference earlier results with `{ "$ref": index }`, so a batch can split a clip and then add a transition on the new cut.
 
 ## 7. Event catalog
 
-Events are facts in past tense, named `<Aggregate><Verb>`. Payloads carry both before and after values where a change is not otherwise invertible, so any transaction can be compensated without replaying the whole log. IDs are UUIDv7 strings. Times are `{ "v": 12345, "ts": 48000 }`.
-
-| Type | Payload (abridged) |
-|---|---|
-| `ProjectCreated` | `{ name, settings: { frameRate: {num,den}, width, height, sampleRate, colorSpace, blendSpace: gamma\|linear, alignment?: AlignmentParameters } }` |
-| `ProjectSettingsChanged` | `{ before, after }` |
-| `ProjectRenamed` | `{ before, after }` |
-| `AssetImported` | `{ assetId, contentHash, libraryPath, displayName, kind, duration, probe }` |
-| `AssetRelinked` | `{ assetId, before: libraryPath, after: libraryPath }` |
-| `AssetRemoved` / `AssetRestored` | `{ assetId }` |
-| `AssetAnalysisRecorded` | `{ assetId, kind: transcript\|shots\|silence\|..., cacheKey, summary }` (the data lives in Cache; the event records that it exists and its hash) |
-| `TrackAdded` | `{ trackId, kind, position, name }` |
-| `TrackRemoved` / `TrackRestored` | `{ trackId }` |
-| `TrackReordered` | `{ trackId, before: position, after: position }` |
-| `TrackRenamed`, `TrackMuteSet`, `TrackLockSet` | `{ trackId, before, after }` |
-| `ClipAdded` | `{ clipId, trackId, assetId?, start, in, out, props }` |
-| `ClipRemoved` | `{ clipId, snapshot }` (full clip so undo is a `ClipAdded`) |
-| `ClipMoved` | `{ clipId, before: {trackId,start}, after: {trackId,start} }` |
-| `ClipTrimmed` | `{ clipId, edge: head\|tail, before: {start,in,out}, after: {start,in,out} }` |
-| `ClipSplit` | `{ clipId, at, newClipId }` |
-| `ClipsJoined` | `{ keptClipId, removedClipId, removedSnapshot }` |
-| `ClipSpeedSet` | `{ clipId, before, after }` |
-| `ClipTransformSet` | `{ clipId, before, after }` |
-| `ClipAudioSet` | `{ clipId, before, after }` (gain, fades, mute) |
-| `ClipEffectAdded` / `ClipEffectChanged` / `ClipEffectRemoved` | `{ clipId, effectId, before?, after? }` |
-| `ClipTransitionSet` / `ClipTransitionCleared` | `{ clipId, edge, before?, after? }` |
-| `CaptionTrackAdded` | `{ trackId, language, style }` |
-| `CaptionsReplaced` | `{ trackId, before: [items], after: [items] }` (bulk, from transcript) |
-| `CaptionEdited` | `{ captionId, before, after }` |
-| `CaptionStyleSet` | `{ trackId, before, after }` |
-| `MarkerAdded` / `MarkerMoved` / `MarkerRemoved` | `{ markerId, ... }` |
-| `AudioAlignmentComputed` | `{ referenceAssetId, targetAssetId, offset, driftPpm, confidence, candidates, method }` |
-| `AudioAlignmentApplied` | `{ alignmentRef, clipId, before: {start}, after: {start}, driftCorrectedAssetId? }` |
-| `RenderRequested` / `RenderCompleted` / `RenderFailed` | `{ renderId, preset, projectVersion, outputPath?, outputHash?, error? }` |
-| `TransactionUndone` / `TransactionRedone` | `{ targetTxnId }` (marker event; the compensating events follow in the same txn) |
-
-Schema evolution: `schema_version` on each row plus upcaster functions `upcast(type, version, payload) -> payload@latest` applied on read. Old events are never rewritten.
+Defined in `docs/design/timeline-model.md` section 6. Persistence notes only: the `events.payload` column holds the event JSON; `schema_version` holds the event's `schemaVersion`; embedded clip snapshots carry their own `clipSchema` so upcasters recurse; render jobs, alignment results, and tool receipts are not events.
 
 ## 8. In-memory model and time
 
-`TimelineCore.Project` is a `Sendable` value type mirroring the JSON in `project_state`, with `clips` and `tracks` as dictionaries keyed by id so that a sorted-keys encoder yields a canonical, order-independent document. Times are `RationalTime { value: Int64, timescale: Int32 }` (the shape of `CMTime` without flags), encoded as `{ "v": ..., "ts": ... }` in JSON and as two `INTEGER` columns (with `CHECK (x_ts > 0)`) in query tables; never as a `"48048/24000"` string, which would defeat `json_extract` generated columns on time fields. A single project-wide timescale was rejected: it forces lossy rounding as soon as 23.976 fps video meets 48 kHz audio or a 29.97 clip lands in a 25 fps sequence. Instead each sequence has a canonical frame duration (for example `1001/24000`) and `decide` snaps edit points to it, so projections compare with integer arithmetic; audio offsets from alignment keep their sample-rate timescale. Mixed-rate comparisons cross-multiply in 128-bit, never rescale-and-store. Persist durations rather than end times where a range is stored, matching OTIO and FCPXML semantics. Conversion to `CMTime` happens only in `RenderKit`.
+Defined in `docs/design/timeline-model.md` sections 1 and 2. Persistence notes: `RationalTime` is encoded as `{ "v": Int64, "ts": Int32 }` in JSON and as two `INTEGER` columns with `CHECK (x_ts > 0)` in query tables, never as a `"48048/24000"` string, which would defeat `json_extract` generated columns on time fields. The state document is encoded with sorted keys and `withoutEscapingSlashes`, which with id-keyed dictionaries makes it canonical and lets rebuild be compared byte for byte.
 
 ## 9. Undo and redo
 
-Undo never deletes events. Undo of transaction T appends a new transaction U containing a `TransactionUndone { targetTxnId: T }` marker followed by compensating events computed from T's payloads (each event type has `invert(event) -> [Event]`, made possible by the before/after payloads). `history.undone_by` links T to U. Redo of T appends another compensating transaction that reverts U.
-
-The undo stack shown to the human is `history` filtered to `actor = 'human'` plus agent transactions that the human chooses to see, ordered by `first_seq`, excluding rows already undone. Agent transactions are labelled with the tool name and are undoable as units, which is what makes the agent safe to let loose: one keystroke reverts an entire agent turn.
+Defined in `docs/design/timeline-model.md` section 7 (linear across actors, compensating events, derived live/undone state). Persistence notes: `history` is a projection of the transaction fold, rebuilt like every other projection; the store never mutates a history row to mark it undone, it recomputes `live` from the markers. A new non-marker transaction makes older undone transactions unreachable, which the fold expresses without any deletion.
 
 ## 10. Agent concurrency
 
-The human and the agent share one write path and one version counter. An agent tool call carries the `expectedVersion` it last saw. If the human edited in between, the command is rejected with a diff, the agent re-reads, and retries with a new `commandId`. This is optimistic locking, deliberately simpler than a CRDT; concurrent edits are seconds apart, not simultaneous.
+The human and the agent share one write path and one version counter. An agent tool call carries the `expectedVersion` it last saw. If the human edited in between, the command is rejected with a `ChangedSince` diff (timeline-model.md section 8), the agent re-reads, and retries with a new `commandId`. UI commands omit `expectedVersion`: they are in-process and always apply to the latest state, so an agent commit landing mid-drag never turns the drop into a stale rejection. This is optimistic locking, deliberately simpler than a CRDT; concurrent edits are seconds apart, not simultaneous.
 
 Every agent tool invocation is also recorded in `commands` with the tool name and argument hash in `metadata`, so "what did the agent do and why" is answerable from the project alone.
 
@@ -309,13 +281,22 @@ CREATE TABLE artifacts (
   PRIMARY KEY (content_hash, kind, params_hash)
 ) STRICT;
 CREATE VIRTUAL TABLE transcript_words USING fts5(content_hash UNINDEXED, t0 UNINDEXED, t1 UNINDEXED, speaker UNINDEXED, word);
+CREATE TABLE alignments (                       -- derived; recomputable from the two files
+  reference_hash TEXT NOT NULL, target_hash TEXT NOT NULL, params_hash TEXT NOT NULL,
+  offset_v INTEGER NOT NULL, offset_ts INTEGER NOT NULL CHECK (offset_ts > 0),
+  drift_ppm REAL NOT NULL, confidence REAL NOT NULL, status TEXT NOT NULL,
+  candidates TEXT, computed_at TEXT NOT NULL,
+  PRIMARY KEY (reference_hash, target_hash, params_hash)
+) STRICT;
 ```
 
 `transcript_search` in the agent's tool set is an FTS5 query filtered to the content hashes present in the current project. Deleting the Cache directory loses nothing that cannot be regenerated; `AssetAnalysisRecorded` events tell the app what to regenerate.
 
 ## 12. Rebuild and recovery
 
-`rebuildProjections()` truncates `project_state`, the query tables, and `history`, then folds all events in `seq` order. This is the recovery path for any projection bug and the migration path when a projection schema changes: add a migration that drops and recreates the projection tables, replay. The fold itself is fast (45 ms for 10,000 events, decode included) and the rebuilt `project_state` was byte-equal to the incrementally maintained one at 6 and at 10,000 events, as were the `clips` and `history` rows. What is not fast is writing the query tables one upsert per transaction during replay (1.8 s for 10,000 events at about 80 microseconds per row), so rebuild writes `clips`, `captions`, and `markers` in bulk from the final state, and only `history` is derived per transaction. The rule that makes the equality test meaningful: projection writes are a pure function of the state after a transaction and the events in it.
+`rebuildProjections()` truncates `project_state`, the query tables, and `history`, then folds all events in `seq` order. This is the recovery path for any projection bug and the migration path when a projection schema changes: add a migration that drops and recreates the projection tables, replay. The fold itself is fast (45 ms for 10,000 events, decode included) and the rebuilt `project_state` was byte-equal to the incrementally maintained one at 6 and at 10,000 events, as were the `clips` and `history` rows. What is not fast is writing the query tables one upsert per transaction during replay (1.8 s for 10,000 events at about 80 microseconds per row), so rebuild writes `assets`, `sequences`, `tracks`, `clips`, `transitions`, and `markers` in bulk from the final state, and only `history` is derived per transaction. Because the query tables hold live rows only, bulk-from-state and incremental maintenance produce identical rows. The rule that makes the equality test meaningful: projection writes are a pure function of the state after a transaction and the events in it.
+
+Crash recovery. The `session` row in `projection_state` is set to `open` on open and `closed` on clean close. On open, if it reads `open`, run `integrity_check`; then compare every `projection_state.last_seq` with `MAX(seq)` in `events`. `project_state` will normally lag because it is debounced: fold the missing events onto it. If `query_tables` or `history` lag (a crash between step 8 and commit cannot happen inside one transaction, but a projection bug can), rebuild them. Only after all rows agree does the project open for editing.
 
 Measured maintenance costs on a 14 MB project: open, migrate, and load the 10,000-clip state in 39 ms (35 ms of it JSON decoding); `VACUUM INTO` in 19 ms; `integrity_check` in 27 ms. All three are cheap enough to run on every open and close.
 
@@ -325,11 +306,11 @@ Corruption defense: `PRAGMA integrity_check` on open when the previous session d
 
 - `decide` and `evolve` are pure: property tests that for every command, `evolve*(state, decide(state, cmd))` satisfies invariants (no overlaps per track, `in < out <= duration`, times on frame boundaries), and that `invert` composed with the original is identity.
 - Round trip: `Project -> JSONB -> Project` equality; every event type has a fixture JSON per `schema_version` and an upcaster test.
-- Store tests run against an in-memory SQLite: append with stale `expectedVersion` is rejected; duplicate `commandId` returns the stored result and appends nothing; `rebuildProjections()` reproduces `project_state` byte-for-byte.
+- Store tests run against in-memory and on-disk SQLite: append with stale `expectedVersion` is rejected and a forced conflicting insert is rolled back by the UNIQUE constraint; duplicate `commandId` returns the stored result and appends nothing; undo, redo, undo again, and a new transaction after an undo all fold to the documented history; a crash simulated between a commit and the debounced state write reopens to the same state as a pure fold; `rebuildProjections()` reproduces `project_state`, every query table, and `history` byte-for-byte; a v1 fixture project opens through the migrator.
 - A golden project fixture (a few hundred events) replayed in CI guards against event-schema drift.
 
 ## 14. Open decisions
 
-1. **Per-sequence streams.** Deferred until a project needs more than one sequence.
+1. **Per-sequence streams.** Every timeline event now carries `sequenceId` and the events table indexes it, so splitting into per-sequence streams later is a change to `stream_id` assignment only. Deferred until a project needs more than one sequence.
 2. **Event payload size for bulk operations.** `CaptionsReplaced` with thousands of words could be large; acceptable as a text payload, but cap at a few MB and split otherwise.
 Resolved 2026-09-08: Swift SQLite library is GRDB 7.x (section 3). Cache location is `~/Movies/Timeline/Cache`; `~/Library/Caches` is not used because macOS purges it under disk pressure. Import copies originals into `Library/` by default, with move and reference-in-place (relink by content hash) as options.
