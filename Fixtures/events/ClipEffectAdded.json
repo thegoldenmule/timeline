@@ -1,0 +1,32 @@
+{
+  "actor" : "agent:session-1",
+  "causationId" : "00000000-0000-7000-8000-000000000000",
+  "commandId" : "command-2",
+  "eventId" : "00000000-0000-7000-8000-000000000029",
+  "metadata" : {
+    "tool" : "timeline_apply"
+  },
+  "occurredAt" : "2026-09-08T00:00:28.000Z",
+  "payload" : {
+    "after" : {
+      "enabled" : true,
+      "id" : "effect-1",
+      "kind" : "blur",
+      "params" : {
+        "mix" : {
+          "constant" : 0.5
+        },
+        "radius" : {
+          "constant" : 4
+        }
+      }
+    },
+    "clipId" : "clip-1",
+    "effectId" : "effect-1",
+    "index" : 0,
+    "sequenceId" : "sequence-1"
+  },
+  "schemaVersion" : 1,
+  "txnId" : "txn-2",
+  "type" : "ClipEffectAdded"
+}

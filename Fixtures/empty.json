@@ -1,0 +1,82 @@
+{
+  "activeSequenceId" : "00000000-0000-7000-8000-000000000004",
+  "assets" : {
+
+  },
+  "id" : "00000000-0000-7000-8000-000000000003",
+  "name" : "Empty",
+  "sequences" : {
+    "00000000-0000-7000-8000-000000000004" : {
+      "frameDuration" : {
+        "ts" : 24000,
+        "v" : 1001
+      },
+      "height" : 1080,
+      "id" : "00000000-0000-7000-8000-000000000004",
+      "markers" : {
+
+      },
+      "name" : "Sequence 1",
+      "tracks" : [
+        {
+          "clips" : {
+
+          },
+          "id" : "00000000-0000-7000-8000-000000000006",
+          "kind" : "video",
+          "locked" : false,
+          "muted" : false,
+          "name" : "V1"
+        },
+        {
+          "clips" : {
+
+          },
+          "id" : "00000000-0000-7000-8000-00000000000a",
+          "kind" : "audio",
+          "locked" : false,
+          "muted" : false,
+          "name" : "A1"
+        }
+      ],
+      "transitions" : {
+
+      },
+      "width" : 1920
+    }
+  },
+  "settings" : {
+    "alignment" : {
+      "bandpassHighHz" : 3000,
+      "bandpassLowHz" : 300,
+      "candidateCutoffRatio" : 0.5,
+      "driftFloorPpm" : 0.5,
+      "energyFloorFraction" : 0.1,
+      "envelopeBands" : 24,
+      "envelopeHop" : 128,
+      "envelopeMedianSeconds" : 1,
+      "envelopeSampleRate" : 8000,
+      "envelopeWindow" : 512,
+      "fineSearchRadiusMs" : 100,
+      "fineWindowCount" : 24,
+      "fineWindowSeconds" : 10,
+      "inlierToleranceMs" : 0.5,
+      "maxCandidates" : 5,
+      "maxDriftPpm" : 500,
+      "maxFitMADMs" : 0.5,
+      "minConfidence" : 0.5,
+      "minimumInlierFraction" : 0.6,
+      "minimumOverlapFraction" : 0.5,
+      "minimumOverlapSeconds" : 10,
+      "phatBandHighHz" : 7000,
+      "phatBandLowHz" : 80,
+      "phatEpsilon" : 1e-06,
+      "phatRho" : 1,
+      "secondPeakExclusionSeconds" : 5
+    },
+    "blendSpace" : "gamma",
+    "colorSpace" : "rec709",
+    "sampleRate" : 48000
+  },
+  "version" : 3
+}

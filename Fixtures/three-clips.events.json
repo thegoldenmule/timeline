@@ -1,0 +1,429 @@
+[
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-000000000001",
+    "eventId" : "00000000-0000-7000-8000-000000000005",
+    "occurredAt" : "2026-09-08T00:00:00.000Z",
+    "payload" : {
+      "name" : "Three clips",
+      "projectId" : "00000000-0000-7000-8000-000000000003",
+      "sequence" : {
+        "frameDuration" : {
+          "ts" : 24000,
+          "v" : 1001
+        },
+        "height" : 1080,
+        "id" : "00000000-0000-7000-8000-000000000004",
+        "markers" : {
+
+        },
+        "name" : "Sequence 1",
+        "tracks" : [
+
+        ],
+        "transitions" : {
+
+        },
+        "width" : 1920
+      },
+      "settings" : {
+        "alignment" : {
+          "bandpassHighHz" : 3000,
+          "bandpassLowHz" : 300,
+          "candidateCutoffRatio" : 0.5,
+          "driftFloorPpm" : 0.5,
+          "energyFloorFraction" : 0.1,
+          "envelopeBands" : 24,
+          "envelopeHop" : 128,
+          "envelopeMedianSeconds" : 1,
+          "envelopeSampleRate" : 8000,
+          "envelopeWindow" : 512,
+          "fineSearchRadiusMs" : 100,
+          "fineWindowCount" : 24,
+          "fineWindowSeconds" : 10,
+          "inlierToleranceMs" : 0.5,
+          "maxCandidates" : 5,
+          "maxDriftPpm" : 500,
+          "maxFitMADMs" : 0.5,
+          "minConfidence" : 0.5,
+          "minimumInlierFraction" : 0.6,
+          "minimumOverlapFraction" : 0.5,
+          "minimumOverlapSeconds" : 10,
+          "phatBandHighHz" : 7000,
+          "phatBandLowHz" : 80,
+          "phatEpsilon" : 1e-06,
+          "phatRho" : 1,
+          "secondPeakExclusionSeconds" : 5
+        },
+        "blendSpace" : "gamma",
+        "colorSpace" : "rec709",
+        "sampleRate" : 48000
+      }
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000002",
+    "type" : "ProjectCreated"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-000000000007",
+    "eventId" : "00000000-0000-7000-8000-000000000009",
+    "occurredAt" : "2026-09-08T00:00:01.000Z",
+    "payload" : {
+      "kind" : "video",
+      "name" : "V1",
+      "position" : 0,
+      "sequenceId" : "00000000-0000-7000-8000-000000000004",
+      "trackId" : "00000000-0000-7000-8000-000000000006"
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000008",
+    "type" : "TrackAdded"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-00000000000b",
+    "eventId" : "00000000-0000-7000-8000-00000000000d",
+    "occurredAt" : "2026-09-08T00:00:02.000Z",
+    "payload" : {
+      "kind" : "audio",
+      "name" : "A1",
+      "position" : 1,
+      "sequenceId" : "00000000-0000-7000-8000-000000000004",
+      "trackId" : "00000000-0000-7000-8000-00000000000a"
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-00000000000c",
+    "type" : "TrackAdded"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-00000000000f",
+    "eventId" : "00000000-0000-7000-8000-000000000011",
+    "occurredAt" : "2026-09-08T00:00:03.000Z",
+    "payload" : {
+      "assetId" : "00000000-0000-7000-8000-00000000000e",
+      "contentHash" : "sha256-0000000000007000800000000000000e",
+      "displayName" : "IMG_1575.MOV",
+      "duration" : {
+        "ts" : 24000,
+        "v" : 720720
+      },
+      "frameDuration" : {
+        "ts" : 24000,
+        "v" : 1001
+      },
+      "hasAudio" : true,
+      "hasVideo" : true,
+      "kind" : "video",
+      "libraryPath" : "2026/2026-09-08/IMG_1575.MOV",
+      "probe" : {
+        "codec" : "hvc1",
+        "extra" : {
+
+        },
+        "height" : 1080,
+        "width" : 1920
+      },
+      "sampleRate" : 48000
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000010",
+    "type" : "AssetImported"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-000000000013",
+    "eventId" : "00000000-0000-7000-8000-000000000015",
+    "occurredAt" : "2026-09-08T00:00:04.000Z",
+    "payload" : {
+      "assetId" : "00000000-0000-7000-8000-000000000012",
+      "contentHash" : "sha256-00000000000070008000000000000012",
+      "displayName" : "Screen Recording.mov",
+      "duration" : {
+        "ts" : 24000,
+        "v" : 480480
+      },
+      "frameDuration" : {
+        "ts" : 24000,
+        "v" : 1001
+      },
+      "hasAudio" : false,
+      "hasVideo" : true,
+      "kind" : "video",
+      "libraryPath" : "2026/2026-09-08/Screen Recording.mov",
+      "probe" : {
+        "codec" : "hvc1",
+        "extra" : {
+
+        },
+        "height" : 1080,
+        "width" : 1920
+      }
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000014",
+    "type" : "AssetImported"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-000000000017",
+    "eventId" : "00000000-0000-7000-8000-000000000019",
+    "occurredAt" : "2026-09-08T00:00:05.000Z",
+    "payload" : {
+      "assetId" : "00000000-0000-7000-8000-000000000016",
+      "contentHash" : "sha256-00000000000070008000000000000016",
+      "displayName" : "band-mix-v3.wav",
+      "duration" : {
+        "ts" : 48000,
+        "v" : 5760000
+      },
+      "hasAudio" : true,
+      "hasVideo" : false,
+      "kind" : "audio",
+      "libraryPath" : "2026/2026-09-08/band-mix-v3.wav",
+      "probe" : {
+        "codec" : "aac",
+        "extra" : {
+
+        }
+      },
+      "sampleRate" : 48000
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000018",
+    "type" : "AssetImported"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-00000000001b",
+    "eventId" : "00000000-0000-7000-8000-00000000001d",
+    "occurredAt" : "2026-09-08T00:00:06.000Z",
+    "payload" : {
+      "clipId" : "00000000-0000-7000-8000-00000000001a",
+      "clipSchema" : 1,
+      "sequenceId" : "00000000-0000-7000-8000-000000000004",
+      "snapshot" : {
+        "assetId" : "00000000-0000-7000-8000-00000000000e",
+        "audio" : {
+          "gain" : {
+            "constant" : 1
+          },
+          "muted" : false,
+          "pitchCorrected" : true
+        },
+        "effects" : [
+
+        ],
+        "id" : "00000000-0000-7000-8000-00000000001a",
+        "opacity" : {
+          "constant" : 1
+        },
+        "sourceIn" : {
+          "ts" : 24000,
+          "v" : 24024
+        },
+        "sourceOut" : {
+          "ts" : 24000,
+          "v" : 120120
+        },
+        "speed" : {
+          "den" : 1,
+          "num" : 1
+        },
+        "start" : {
+          "ts" : 24000,
+          "v" : 0
+        },
+        "trackId" : "00000000-0000-7000-8000-000000000006",
+        "transform" : {
+          "constant" : {
+            "anchorX" : 0.5,
+            "anchorY" : 0.5,
+            "rotation" : 0,
+            "scale" : 1,
+            "x" : 0,
+            "y" : 0
+          }
+        }
+      }
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-00000000001c",
+    "type" : "ClipAdded"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-00000000001f",
+    "eventId" : "00000000-0000-7000-8000-000000000021",
+    "occurredAt" : "2026-09-08T00:00:07.000Z",
+    "payload" : {
+      "clipId" : "00000000-0000-7000-8000-00000000001e",
+      "clipSchema" : 1,
+      "sequenceId" : "00000000-0000-7000-8000-000000000004",
+      "snapshot" : {
+        "assetId" : "00000000-0000-7000-8000-000000000012",
+        "audio" : {
+          "gain" : {
+            "constant" : 1
+          },
+          "muted" : false,
+          "pitchCorrected" : true
+        },
+        "effects" : [
+
+        ],
+        "id" : "00000000-0000-7000-8000-00000000001e",
+        "opacity" : {
+          "constant" : 1
+        },
+        "sourceIn" : {
+          "ts" : 24000,
+          "v" : 0
+        },
+        "sourceOut" : {
+          "ts" : 24000,
+          "v" : 48048
+        },
+        "speed" : {
+          "den" : 1,
+          "num" : 1
+        },
+        "start" : {
+          "ts" : 24000,
+          "v" : 96096
+        },
+        "trackId" : "00000000-0000-7000-8000-000000000006",
+        "transform" : {
+          "constant" : {
+            "anchorX" : 0.5,
+            "anchorY" : 0.5,
+            "rotation" : 0,
+            "scale" : 1,
+            "x" : 0,
+            "y" : 0
+          }
+        }
+      }
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000020",
+    "type" : "ClipAdded"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-000000000023",
+    "eventId" : "00000000-0000-7000-8000-000000000025",
+    "occurredAt" : "2026-09-08T00:00:08.000Z",
+    "payload" : {
+      "clipId" : "00000000-0000-7000-8000-000000000022",
+      "clipSchema" : 1,
+      "sequenceId" : "00000000-0000-7000-8000-000000000004",
+      "snapshot" : {
+        "assetId" : "00000000-0000-7000-8000-00000000000e",
+        "audio" : {
+          "gain" : {
+            "constant" : 1
+          },
+          "muted" : false,
+          "pitchCorrected" : true
+        },
+        "effects" : [
+
+        ],
+        "id" : "00000000-0000-7000-8000-000000000022",
+        "opacity" : {
+          "constant" : 1
+        },
+        "sourceIn" : {
+          "ts" : 24000,
+          "v" : 240240
+        },
+        "sourceOut" : {
+          "ts" : 24000,
+          "v" : 360360
+        },
+        "speed" : {
+          "den" : 1,
+          "num" : 1
+        },
+        "start" : {
+          "ts" : 24000,
+          "v" : 144144
+        },
+        "trackId" : "00000000-0000-7000-8000-000000000006",
+        "transform" : {
+          "constant" : {
+            "anchorX" : 0.5,
+            "anchorY" : 0.5,
+            "rotation" : 0,
+            "scale" : 1,
+            "x" : 0,
+            "y" : 0
+          }
+        }
+      }
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000024",
+    "type" : "ClipAdded"
+  },
+  {
+    "actor" : "human",
+    "commandId" : "00000000-0000-7000-8000-000000000027",
+    "eventId" : "00000000-0000-7000-8000-000000000029",
+    "occurredAt" : "2026-09-08T00:00:09.000Z",
+    "payload" : {
+      "clipId" : "00000000-0000-7000-8000-000000000026",
+      "clipSchema" : 1,
+      "sequenceId" : "00000000-0000-7000-8000-000000000004",
+      "snapshot" : {
+        "assetId" : "00000000-0000-7000-8000-000000000016",
+        "audio" : {
+          "gain" : {
+            "constant" : 1
+          },
+          "muted" : false,
+          "pitchCorrected" : true
+        },
+        "effects" : [
+
+        ],
+        "id" : "00000000-0000-7000-8000-000000000026",
+        "opacity" : {
+          "constant" : 1
+        },
+        "sourceIn" : {
+          "ts" : 1,
+          "v" : 0
+        },
+        "sourceOut" : {
+          "ts" : 48000,
+          "v" : 528000
+        },
+        "speed" : {
+          "den" : 1,
+          "num" : 1
+        },
+        "start" : {
+          "ts" : 48000,
+          "v" : 12000
+        },
+        "trackId" : "00000000-0000-7000-8000-00000000000a",
+        "transform" : {
+          "constant" : {
+            "anchorX" : 0.5,
+            "anchorY" : 0.5,
+            "rotation" : 0,
+            "scale" : 1,
+            "x" : 0,
+            "y" : 0
+          }
+        }
+      }
+    },
+    "schemaVersion" : 1,
+    "txnId" : "00000000-0000-7000-8000-000000000028",
+    "type" : "ClipAdded"
+  }
+]

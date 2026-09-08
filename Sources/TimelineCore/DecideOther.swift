@@ -92,6 +92,7 @@ extension Decider {
             throw .invalid(reason: "A transition joins two clips on one track")
         }
         try requireUnlocked(left.track)
+        guard left.track.kind != .caption else { throw .invalid(reason: "Caption tracks do not take transitions") }
         guard left.end == right.clip.start else {
             throw .invalid(reason: "Clips \(left.clip.id) and \(right.clip.id) are not adjacent")
         }

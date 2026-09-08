@@ -86,6 +86,9 @@ public enum Invariants {
             guard clipTrack[left.id] == tr.trackId, clipTrack[right.id] == tr.trackId else {
                 throw .invalid(reason: "Transition \(tr.id) references clips on another track")
             }
+            guard seq.track(tr.trackId)?.kind != .caption else {
+                throw .invalid(reason: "Transition \(tr.id) sits on a caption track")
+            }
             guard seq.end(of: left) == right.start else {
                 throw .invalid(reason: "Transition \(tr.id) joins clips that are not adjacent")
             }
@@ -104,7 +107,9 @@ public enum Invariants {
     public static func maxTransitionDuration(
         left: Clip, right: Clip, alignment: TransitionAlignment, in seq: Sequence, assets: [AssetID: Asset]
     ) -> RationalTime {
-        let unlimited = RationalTime(Int64.max / 4, 1)
+        // Generated clips have no media limit; a 68-year handle stands in for infinity and still
+        // converts to frames without overflowing.
+        let unlimited = RationalTime(Int64(Int32.max), 1)
         var leftAvail = unlimited
         if let a = left.assetId.flatMap({ assets[$0] }) {
             leftAvail = (a.duration - left.sourceOut) / left.speed

@@ -1,0 +1,25 @@
+{
+  "actor" : "agent:session-1",
+  "causationId" : "00000000-0000-7000-8000-000000000000",
+  "commandId" : "command-2",
+  "eventId" : "00000000-0000-7000-8000-000000000042",
+  "metadata" : {
+    "tool" : "timeline_apply"
+  },
+  "occurredAt" : "2026-09-08T00:00:41.000Z",
+  "payload" : {
+    "after" : {
+      "ts" : 24000,
+      "v" : 60060
+    },
+    "before" : {
+      "ts" : 24000,
+      "v" : 48048
+    },
+    "markerId" : "marker-1",
+    "sequenceId" : "sequence-1"
+  },
+  "schemaVersion" : 1,
+  "txnId" : "txn-2",
+  "type" : "MarkerMoved"
+}
