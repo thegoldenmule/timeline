@@ -29,8 +29,8 @@ public enum MemoryClass: String, Codable, Sendable, Hashable, CaseIterable {
     case large
 }
 
-/// Progress as reported by a job. `fraction` is nil while indeterminate.
-public struct Progress: Hashable, Sendable, Codable {
+/// Progress as reported by a job (named to avoid Foundation.Progress). `fraction` is nil while indeterminate.
+public struct JobProgress: Hashable, Sendable, Codable {
     public var fraction: Double?
     public var message: String?
     public var stage: String?
@@ -43,8 +43,8 @@ public struct Progress: Hashable, Sendable, Codable {
         self.etaSeconds = etaSeconds
     }
 
-    public static let indeterminate = Progress()
-    public static let done = Progress(fraction: 1)
+    public static let indeterminate = JobProgress()
+    public static let done = JobProgress(fraction: 1)
 }
 
 /// What a finished job hands back: files it wrote and a typed payload encoded as JSON (an
@@ -92,7 +92,7 @@ extension JobError: LocalizedError {
 /// thing spelled through the context for jobs that hop threads.
 public protocol JobContext: Sendable {
     var jobId: JobID { get }
-    func report(_ progress: Progress)
+    func report(_ progress: JobProgress)
     var isCancelled: Bool { get }
     func checkCancellation() throws
 }
@@ -154,11 +154,11 @@ public struct JobHandle: Sendable, Identifiable {
     public var id: JobID
     public var kind: JobKind
     public var label: String
-    public var progress: AsyncStream<Progress>
+    public var progress: AsyncStream<JobProgress>
     public var task: Task<JobOutcome, any Error>
 
     public init(
-        id: JobID, kind: JobKind, label: String, progress: AsyncStream<Progress>, task: Task<JobOutcome, any Error>
+        id: JobID, kind: JobKind, label: String, progress: AsyncStream<JobProgress>, task: Task<JobOutcome, any Error>
     ) {
         self.id = id
         self.kind = kind
