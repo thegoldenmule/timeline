@@ -1,0 +1,86 @@
+import Contracts
+import Foundation
+import TimelineCore
+
+/// The two fingerprints `Renderer.update` diffs. Structural covers exactly what changes a composition track
+/// segment (the same split as `SequenceFingerprint` in ContractsTestSupport, plus whether the file exists,
+/// because a missing file becomes a slate); instruction covers the whole sequence.
+enum RenderFingerprint {
+    private struct Segment: Encodable {
+        var clipId: ClipID
+        var assetId: AssetID?
+        var source: String?
+        var start: RationalTime
+        var sourceIn: RationalTime
+        var sourceOut: RationalTime
+        var speed: Rational
+    }
+
+    private struct TrackSegments: Encodable {
+        var trackId: TrackID
+        var kind: TrackKind
+        var segments: [Segment]
+    }
+
+    private struct Overlap: Encodable {
+        var transitionId: TransitionID
+        var left: ClipID
+        var right: ClipID
+        var duration: RationalTime
+        var alignment: TransitionAlignment
+    }
+
+    private struct Structure: Encodable {
+        var frameDuration: RationalTime
+        var width: Int
+        var height: Int
+        var audio: Bool
+        var tracks: [TrackSegments]
+        var overlaps: [Overlap]
+    }
+
+    static func structural(_ sequence: Sequence, assets: [AssetID: Asset], layout: LibraryLayout, audio: Bool) -> String
+    {
+        var presence: [AssetID: Bool] = [:]
+        func present(_ asset: Asset) -> Bool {
+            if let p = presence[asset.id] { return p }
+            let p = FileManager.default.fileExists(atPath: layout.url(for: asset).path)
+            presence[asset.id] = p
+            return p
+        }
+        let structure = Structure(
+            frameDuration: sequence.frameDuration, width: sequence.width, height: sequence.height, audio: audio,
+            tracks: sequence.tracks.map { track in
+                TrackSegments(
+                    trackId: track.id, kind: track.kind,
+                    segments: track.clips.values.sorted { ($0.start, $0.id) < ($1.start, $1.id) }.map { clip in
+                        let asset = clip.assetId.flatMap { assets[$0] }
+                        return Segment(
+                            clipId: clip.id, assetId: clip.assetId,
+                            source: asset.map { "\($0.libraryPath)|\($0.offline || !present($0))|\($0.kind.rawValue)" },
+                            start: clip.start, sourceIn: clip.sourceIn, sourceOut: clip.sourceOut, speed: clip.speed)
+                    })
+            },
+            overlaps: sequence.transitions.values.sorted { $0.id < $1.id }.map {
+                Overlap(
+                    transitionId: $0.id, left: $0.leftClipId, right: $0.rightClipId, duration: $0.duration,
+                    alignment: $0.alignment)
+            })
+        return (try? StableHash.fnv1a(encoding: structure)) ?? "structure-unencodable"
+    }
+
+    static func instruction(
+        _ sequence: Sequence, assets: [AssetID: Asset], blendSpace: BlendSpace, quality: RenderQuality
+    ) -> String {
+        struct Everything: Encodable {
+            var sequence: Sequence
+            var assets: [AssetID: Asset]
+            var blendSpace: BlendSpace
+            var quality: RenderQuality
+        }
+        return
+            (try? StableHash.fnv1a(
+                encoding: Everything(sequence: sequence, assets: assets, blendSpace: blendSpace, quality: quality)))
+            ?? "instruction-unencodable"
+    }
+}
