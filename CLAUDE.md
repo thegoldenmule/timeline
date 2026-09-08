@@ -1,0 +1,1 @@
+- Commit incrementally to main using simple, one-line commit messages.
