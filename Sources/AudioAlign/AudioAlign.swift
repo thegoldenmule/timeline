@@ -40,8 +40,14 @@ enum AlignerDefaults {
     static let logPowerFloor: Float = 1e-6
     /// The fine pass's "second peak" must be at least this far from the PHAT peak (spike: 48 samples at 48 kHz).
     static let phatSecondPeakExclusionMs = 1.0
+    /// A fine window only counts as an inlier when its PHAT peak is at least this many times the best value
+    /// outside the exclusion zone. Measured on the synthetic pairs: 1.8-2.8 for true alignments down to -10 dB
+    /// SNR, 1.0-1.25 for false candidates and unrelated material (spike: 2.1-2.5 vs 1.0-1.1).
+    static let minimumPhatPeakRatio: Float = 1.5
     /// Fewer fine windows than this cannot support a drift fit; drift is then reported as zero.
     static let minimumWindowsForDriftFit = 3
+    /// A candidate needs at least this many measured fine windows (inside the reference) to be verified.
+    static let minimumVerificationWindows = 2
     /// Number of points the coarse correlation curve is max-pooled to for `AlignmentProof.correlation`.
     static let proofCorrelationPoints = 2048
     /// Sub-sample resolution of `Alignment.offset`: the timescale is the reference sample rate times this, so a

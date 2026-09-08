@@ -14,18 +14,21 @@ struct FineWindow: Sendable, Hashable {
     var ratio: Float
 }
 
-/// A robust line `y = intercept + slope * x` through window offsets.
+/// A robust line `y = intercept + slope * x` through window offsets. Points flagged invalid (a PHAT peak with
+/// no clear winner) never take part in the fit and never count as inliers, but they still count in the
+/// denominator of `inlierFraction`.
 struct LineFit: Sendable {
     var slope: Double
     var intercept: Double
-    /// Median absolute residual, in `y` units.
+    /// Median absolute residual over the valid points, in `y` units.
     var mad: Double
     var residuals: [Double]
+    var valid: [Bool]
     var inlierTolerance: Double
 
     var count: Int { residuals.count }
-    var inliers: [Bool] { residuals.map { $0 <= inlierTolerance } }
-    var inlierCount: Int { residuals.filter { $0 <= inlierTolerance }.count }
+    var inliers: [Bool] { zip(residuals, valid).map { $0 <= inlierTolerance && $1 } }
+    var inlierCount: Int { inliers.filter { $0 }.count }
     var inlierFraction: Double { count == 0 ? 0 : Double(inlierCount) / Double(count) }
 }
 
@@ -37,8 +40,16 @@ func median(_ v: [Double]) -> Double {
 
 /// Theil-Sen robust line: median of pairwise slopes, median intercept, refit once on inliers (|residual| <=
 /// `inlierTolerance`). With `fitSlope == false` the slope is held at zero (too few windows for a drift fit).
-func theilSen(x: [Double], y: [Double], inlierTolerance: Double, fitSlope: Bool = true) -> LineFit {
-    precondition(x.count == y.count)
+/// Points with `valid == false` are excluded from the fit.
+func theilSen(
+    x allX: [Double], y allY: [Double], valid allValid: [Bool]? = nil, inlierTolerance: Double,
+    fitSlope: Bool = true
+) -> LineFit {
+    precondition(allX.count == allY.count)
+    let valid = allValid ?? [Bool](repeating: true, count: allX.count)
+    precondition(valid.count == allX.count)
+    let validIndices = valid.indices.filter { valid[$0] }
+    let x = validIndices.map { allX[$0] }, y = validIndices.map { allY[$0] }
     func fit(_ x: [Double], _ y: [Double]) -> (slope: Double, intercept: Double) {
         guard !x.isEmpty else { return (0, .nan) }
         var slope = 0.0
@@ -58,9 +69,10 @@ func theilSen(x: [Double], y: [Double], inlierTolerance: Double, fitSlope: Bool 
         (s, b) = fit(keep.map { x[$0] }, keep.map { y[$0] })
         residuals = zip(x, y).map { abs($1 - (b + s * $0)) }
     }
+    let allResiduals = zip(allX, allY).map { abs($1 - (b + s * $0)) }
     return LineFit(
-        slope: s, intercept: b, mad: residuals.isEmpty ? .nan : median(residuals), residuals: residuals,
-        inlierTolerance: inlierTolerance)
+        slope: s, intercept: b, mad: residuals.isEmpty ? .nan : median(residuals), residuals: allResiduals,
+        valid: valid, inlierTolerance: inlierTolerance)
 }
 
 /// GCC-PHAT (`|G|^rho` whitening, band-limited) between a reference excerpt of `windowSamples + 2 * radius`

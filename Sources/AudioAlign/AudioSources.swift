@@ -63,9 +63,13 @@ public final class AudioFileSource: MonoAudioSource, @unchecked Sendable {
 
     public static func open(url: URL) async throws -> AudioFileSource {
         let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
-            throw AudioAlignError.noAudioTrack(url)
+        let tracks: [AVAssetTrack]
+        do {
+            tracks = try await asset.loadTracks(withMediaType: .audio)
+        } catch {
+            throw AudioAlignError.decodingFailed(url, error.localizedDescription)
         }
+        guard let track = tracks.first else { throw AudioAlignError.noAudioTrack(url) }
         let (descriptions, timeRange) = try await track.load(.formatDescriptions, .timeRange)
         guard let asbd = descriptions.first.flatMap({ CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee }),
             asbd.mSampleRate > 0
@@ -169,22 +173,29 @@ public final class AudioFileSource: MonoAudioSource, @unchecked Sendable {
         return out
     }
 
+    /// Delivers exactly `chunkFrames` frames per call (the last chunk shorter), whatever buffer boundaries
+    /// `AVAssetReader` chooses, so the envelope a file produces does not depend on I/O timing.
     public func forEachChunk(chunkFrames: Int, _ body: (UnsafeBufferPointer<Float>) throws -> Void) throws {
+        precondition(chunkFrames > 0)
         let (reader, output) = try makeReader(range: nil)
         var mono: [Float] = []
         var scratch: [Float] = []
+        var pending: [Float] = []
+        pending.reserveCapacity(2 * chunkFrames)
         do {
             while let buffer = output.copyNextSampleBuffer() {
                 guard mixdown(buffer, into: &mono, scratch: &scratch) != nil else { continue }
-                try mono.withUnsafeBufferPointer { p in
-                    var start = 0
-                    while start < p.count {
-                        let end = min(p.count, start + chunkFrames)
-                        try body(UnsafeBufferPointer(rebasing: p[start..<end]))
-                        start = end
+                pending.append(contentsOf: mono)
+                var start = 0
+                while pending.count - start >= chunkFrames {
+                    try pending.withUnsafeBufferPointer { p in
+                        try body(UnsafeBufferPointer(rebasing: p[start..<(start + chunkFrames)]))
                     }
+                    start += chunkFrames
                 }
+                if start > 0 { pending.removeFirst(start) }
             }
+            if !pending.isEmpty { try pending.withUnsafeBufferPointer { try body($0) } }
         } catch {
             reader.cancelReading()
             throw error

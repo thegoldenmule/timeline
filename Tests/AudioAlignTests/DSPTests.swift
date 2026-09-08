@@ -177,6 +177,18 @@ func maxAbsDifference(_ a: [Float], _ b: [Float]) -> Float {
         #expect(fit.intercept == 15)
     }
 
+    @Test func theilSenIgnoresInvalidPointsButCountsThem() {
+        let x = [0.0, 1, 2, 3]
+        let y = [5.0, 6, 700, 8]
+        let fit = theilSen(x: x, y: y, valid: [true, true, false, true], inlierTolerance: 0.1)
+        #expect(abs(fit.slope - 1) < 1e-9 && abs(fit.intercept - 5) < 1e-9)
+        #expect(fit.inliers == [true, true, false, true])
+        #expect(fit.inlierFraction == 0.75)
+        #expect(fit.mad < 1e-9)
+        let none = theilSen(x: x, y: y, valid: [false, false, false, false], inlierTolerance: 0.1)
+        #expect(none.inlierCount == 0 && none.intercept.isNaN)
+    }
+
     @Test func runningMedianMatchesNaive() {
         var rng = TestRNG(seed: 6)
         let x = rng.signal(400)

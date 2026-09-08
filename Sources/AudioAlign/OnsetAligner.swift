@@ -281,9 +281,11 @@ public struct OnsetAligner: AudioAligner, Sendable {
             let ratio = (1 + driftPPM * 1e-6) * target.sampleRate / fsRef
             for w in starts {
                 try token.check()
-                let referenceExcerpt = try reference.read(
-                    frames: Int64(
-                        coarseStart + w - fine.radius)..<Int64(coarseStart + w + fine.windowSamples + fine.radius))
+                let referenceStart = coarseStart + w - fine.radius
+                let referenceEnd = referenceStart + fine.windowSamples + 2 * fine.radius
+                // A window whose reference excerpt leaves the recording measures zero-padding, not audio.
+                guard referenceStart >= 0, Int64(referenceEnd) <= reference.frameCount else { continue }
+                let referenceExcerpt = try reference.read(frames: Int64(referenceStart)..<Int64(referenceEnd))
                 let targetExcerpt = try Self.targetExcerpt(target, start: w, count: fine.windowSamples, ratio: ratio)
                 let m = fine.measure(reference: referenceExcerpt, target: targetExcerpt)
                 windows.append(
@@ -292,7 +294,8 @@ public struct OnsetAligner: AudioAligner, Sendable {
                         offsetSamples: Double(coarseStart) + m.lag - Double(fine.radius), peak: m.peak, ratio: m.ratio))
             }
             let fit = theilSen(
-                x: windows.map(\.targetTimeSeconds), y: windows.map(\.offsetSamples), inlierTolerance: tolerance,
+                x: windows.map(\.targetTimeSeconds), y: windows.map(\.offsetSamples),
+                valid: windows.map { $0.ratio >= AlignerDefaults.minimumPhatPeakRatio }, inlierTolerance: tolerance,
                 fitSlope: windows.count >= AlignerDefaults.minimumWindowsForDriftFit)
             return (windows, fit)
         }
@@ -318,12 +321,14 @@ public struct OnsetAligner: AudioAligner, Sendable {
             windows: windows, fit: fit)
     }
 
-    /// Confidence is the fine-pass verification signal: inlier fraction weighted by how far the fit's MAD sits
-    /// under `maxFitMADMs`. The coarse peak ratio plays no part (it collapses long before the alignment does).
+    /// Confidence is the fine-pass verification signal: inlier fraction (windows whose PHAT peak is unambiguous
+    /// and whose offset sits on the drift line) weighted by how far the fit's MAD sits under `maxFitMADMs`. The
+    /// coarse peak ratio plays no part (it collapses long before the alignment does).
     static func verify(
         fit: LineFit, driftPPM: Double, sampleRate: Double, parameters p: AlignmentParameters
     ) -> (verified: Bool, confidence: Double) {
-        guard fit.count > 0, fit.intercept.isFinite, fit.mad.isFinite else { return (false, 0) }
+        guard fit.count >= AlignerDefaults.minimumVerificationWindows, fit.intercept.isFinite, fit.mad.isFinite
+        else { return (false, 0) }
         let madMs = fit.mad / sampleRate * 1000
         let confidence = fit.inlierFraction * max(0, 1 - madMs / p.maxFitMADMs)
         let verified =
