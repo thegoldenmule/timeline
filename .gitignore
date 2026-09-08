@@ -72,3 +72,6 @@ spikes/**/claude-p-output.json
 /tmp/
 /output/
 /renders/
+
+# Agent worktrees
+.claude/worktrees/

@@ -1,4 +1,5 @@
 import Testing
+
 @testable import Contracts
 
 @Suite struct ContractsSmoke {
