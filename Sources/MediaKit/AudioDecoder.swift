@@ -19,7 +19,8 @@ enum AudioDecoder {
     /// Decodes and hands mono chunks to `sink`. `range` limits decoding (used for high-zoom peaks). Returns the
     /// format and how many frames were decoded; throws `AnalysisError.noAudioTrack` when there is none.
     static func readMono(
-        url: URL, range: CMTimeRange? = nil, sink: (_ samples: UnsafeBufferPointer<Float>) throws -> Void
+        url: URL, range: CMTimeRange? = nil, sink: (_ samples: UnsafeBufferPointer<Float>) throws -> Void,
+        configure: ((_ sampleRate: Double) throws -> Void)? = nil
     ) async throws -> Info {
         let asset = AVURLAsset(url: url)
         let tracks = try await asset.loadTracks(withMediaType: .audio)
@@ -59,6 +60,7 @@ enum AudioDecoder {
             throw AnalysisError.failed("startReading: \(reader.error?.localizedDescription ?? "unknown")")
         }
         defer { if reader.status == .reading { reader.cancelReading() } }
+        try configure?(sampleRate)
 
         var info = Info(sampleRate: sampleRate, channels: channels, trackID: track.trackID, firstSample: 0, framesDecoded: 0)
         var sawFirst = false

@@ -172,6 +172,7 @@ public actor FileMediaLibrary: MediaLibrary {
                 try await place(source, at: destination, mode: mode, size: identity.size, progress: progress)
             } catch {
                 await release(destination)
+                FileMediaLibrary.removeIfEmpty(dir)
                 throw error
             }
         }
@@ -207,6 +208,17 @@ public actor FileMediaLibrary: MediaLibrary {
         await release(destination)
         progress?(.done)
         return ImportResult(asset: asset, alreadyInLibrary: false, sourceURL: source, libraryURL: destination)
+    }
+
+    /// Removes a date folder an aborted import left empty (and its year folder when that is empty too).
+    private static func removeIfEmpty(_ dir: URL) {
+        var current = dir
+        for _ in 0..<2 {
+            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: current.path), entries.isEmpty
+            else { return }
+            try? FileManager.default.removeItem(at: current)
+            current = current.deletingLastPathComponent()
+        }
     }
 
     /// `YYYY/YYYY-MM-DD` in the user's calendar and time zone.
