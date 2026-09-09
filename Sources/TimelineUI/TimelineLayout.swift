@@ -10,6 +10,25 @@ public enum ZoomLevel {
     public static let defaultIndex = 3
 }
 
+/// The buttons every track header carries, in the order they are drawn and hit tested.
+public enum TrackControl: String, Hashable, Sendable, CaseIterable {
+    case mute
+    case solo
+    case lock
+    case remove
+
+    /// The single capital the scene draws in the button. Capitals of similar width, because the scene
+    /// builder centres them with a fixed offset and has no font metrics.
+    public var glyph: String {
+        switch self {
+        case .mute: "M"
+        case .solo: "S"
+        case .lock: "L"
+        case .remove: "X"
+        }
+    }
+}
+
 /// One row of the track area.
 public struct TrackRow: Hashable, Sendable {
     public var trackId: TrackID
@@ -31,13 +50,23 @@ public struct TimelineLayout: Hashable, Sendable {
     /// Sequence time (seconds) at the left edge of the track area.
     public var scrollSeconds: Double
     public var rulerHeight: CGFloat = 28
-    public var headerWidth: CGFloat = 120
+    public var headerWidth: CGFloat = 148
     public var trackGap: CGFloat = 2
     public var rows: [TrackRow] = []
 
     public static let trackHeights: [TrackKind: CGFloat] = [.video: 64, .audio: 44, .caption: 28]
     /// Points within which a clip edge counts as a trim handle.
     public static let trimHandleWidth: CGFloat = 8
+    /// Side of one header button, and the gap between two of them.
+    public static let controlSize: CGFloat = 18
+    public static let controlGap: CGFloat = 3
+    /// Padding between the header's edges and its contents.
+    public static let headerInset: CGFloat = 8
+    /// Rows at least this tall put the button strip on its own line under the name; shorter rows (captions)
+    /// put it beside the name and let the name truncate.
+    public static let stackedRowHeight: CGFloat = 40
+    /// Height of the track name's text box.
+    public static let nameHeight: CGFloat = 14
     /// Points within which a dragged edge snaps to a snap target.
     public static let snapTolerance: CGFloat = 8
     /// Timescale for times derived from pointer positions; `decide` snaps them to frames or samples.
@@ -89,6 +118,54 @@ public struct TimelineLayout: Hashable, Sendable {
 
     public func isInRuler(_ point: CGPoint) -> Bool { point.y < rulerHeight && point.x >= headerWidth }
     public func isInHeader(_ point: CGPoint) -> Bool { point.x < headerWidth }
+
+    // MARK: Header controls
+
+    /// Width of the whole button strip.
+    public static var controlStripWidth: CGFloat {
+        CGFloat(TrackControl.allCases.count) * controlSize
+            + CGFloat(TrackControl.allCases.count - 1) * controlGap
+    }
+
+    /// True when `row` is tall enough for the name and the strip to sit on separate lines.
+    public func isStacked(_ row: TrackRow) -> Bool { row.height >= TimelineLayout.stackedRowHeight }
+
+    /// The four buttons of `row`'s header, in draw and hit-test order. The one definition the scene builder
+    /// and the gesture controller both use, so what is drawn is exactly what is clickable.
+    public func controls(in row: TrackRow) -> [(control: TrackControl, rect: CGRect)] {
+        let size = TimelineLayout.controlSize
+        let gap = TimelineLayout.controlGap
+        let inset = TimelineLayout.headerInset
+        let x0: CGFloat
+        let y: CGFloat
+        if isStacked(row) {
+            x0 = inset
+            y = row.maxY - size - 6
+        } else {
+            x0 = max(inset, headerWidth - inset - TimelineLayout.controlStripWidth)
+            y = row.y + (row.height - size) / 2
+        }
+        return TrackControl.allCases.enumerated().map { i, control in
+            (control, CGRect(x: x0 + CGFloat(i) * (size + gap), y: y, width: size, height: size))
+        }
+    }
+
+    /// The button under `point`, if any.
+    public func control(atPoint point: CGPoint, in row: TrackRow) -> TrackControl? {
+        controls(in: row).first { $0.rect.contains(point) }?.control
+    }
+
+    /// Where the track name draws, and how wide it may be before it truncates.
+    public func nameRect(in row: TrackRow) -> CGRect {
+        let inset = TimelineLayout.headerInset
+        let height = TimelineLayout.nameHeight
+        if isStacked(row) {
+            return CGRect(x: inset, y: row.y + 5, width: max(0, headerWidth - inset * 2), height: height)
+        }
+        let stripX = max(inset, headerWidth - inset - TimelineLayout.controlStripWidth)
+        return CGRect(
+            x: inset, y: row.y + (row.height - height) / 2, width: max(0, stripX - inset - 6), height: height)
+    }
 
     // MARK: Clips
 

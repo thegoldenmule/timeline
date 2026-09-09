@@ -104,6 +104,68 @@ struct LayoutTests {
         #expect(vm.editMode(for: .move) == .ripple)
     }
 
+    @Test func everyRowGivesFourControlsInMuteSoloLockRemoveOrder() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let l = f.viewModel.layout
+        for row in l.rows {
+            #expect(l.controls(in: row).map(\.control) == [.mute, .solo, .lock, .remove])
+        }
+        #expect(TrackControl.allCases.map(\.glyph) == ["M", "S", "L", "X"])
+    }
+
+    @Test func tallRowsPutTheStripBelowTheNameAndShortRowsPutItBeside() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let l = f.viewModel.layout
+        let video = l.rows[0]
+        let caption = l.rows[2]
+        #expect(l.isStacked(video) && !l.isStacked(caption))
+
+        // Stacked: the name spans the header and the strip sits under it, left-aligned.
+        let videoStrip = l.controls(in: video)
+        let videoName = l.nameRect(in: video)
+        #expect(videoStrip[0].rect.minX == TimelineLayout.headerInset)
+        #expect(videoStrip[0].rect.minY >= videoName.maxY)
+        #expect(videoName.width > TimelineLayout.controlStripWidth)
+
+        // Beside: the strip is right-aligned on the row's centre line and the name gives way to it.
+        let capStrip = l.controls(in: caption)
+        let capName = l.nameRect(in: caption)
+        #expect(abs(capStrip[3].rect.maxX - (l.headerWidth - TimelineLayout.headerInset)) < 0.001)
+        #expect(abs(capStrip[0].rect.midY - caption.midY) < 0.001)
+        #expect(capName.maxX <= capStrip[0].rect.minX)
+        #expect(capName.width > 0)
+    }
+
+    @Test func controlRectsStayInsideTheHeaderAndNeverOverlap() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let l = f.viewModel.layout
+        for row in l.rows {
+            let rects = l.controls(in: row).map(\.rect)
+            for rect in rects {
+                #expect(rect.minX >= 0 && rect.maxX <= l.headerWidth)
+                #expect(rect.minY >= row.y && rect.maxY <= row.maxY)
+                #expect(rect.width == TimelineLayout.controlSize && rect.height == TimelineLayout.controlSize)
+            }
+            for (a, b) in zip(rects, rects.dropFirst()) {
+                #expect(b.minX == a.maxX + TimelineLayout.controlGap)
+            }
+        }
+    }
+
+    @Test func controlAtPointFindsExactlyTheButtonUnderIt() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let l = f.viewModel.layout
+        let row = l.rows[1]
+        for (control, rect) in l.controls(in: row) {
+            #expect(l.control(atPoint: CGPoint(x: rect.midX, y: rect.midY), in: row) == control)
+        }
+        // The gaps between buttons, the name line, and the header edge are not buttons.
+        let strip = l.controls(in: row)
+        #expect(l.control(atPoint: CGPoint(x: strip[0].rect.maxX + 1, y: strip[0].rect.midY), in: row) == nil)
+        #expect(l.control(atPoint: CGPoint(x: 12, y: l.nameRect(in: row).midY), in: row) == nil)
+        #expect(l.control(atPoint: CGPoint(x: l.headerWidth - 1, y: row.midY), in: row) == nil)
+    }
+
     @Test func sceneStatsCountLabelsAndMediaRequestsOnlyForWideClips() async throws {
         let f = try await UIFixture.make("three-clips", media: true, zoomIndex: 0)
         let scene = TimelineSceneBuilder.build(from: f.viewModel)

@@ -258,10 +258,11 @@ struct GestureTests {
     @Test func rulerScrubsAndArrowsNudgeThePlayhead() async throws {
         let f = try await UIFixture.make("three-clips")
         let g = TimelineGestureController(viewModel: f.viewModel)
-        g.mouseDown(at: CGPoint(x: 320, y: 10))
+        let tenSeconds = f.viewModel.layout.x(forSeconds: 10)
+        g.mouseDown(at: CGPoint(x: tenSeconds, y: 10))
         #expect(abs(f.viewModel.playhead.seconds - 10) < 0.05)
-        g.mouseDragged(to: CGPoint(x: 340, y: 10))
-        _ = await g.mouseUp(at: CGPoint(x: 340, y: 10))
+        g.mouseDragged(to: CGPoint(x: tenSeconds + 20, y: 10))
+        _ = await g.mouseUp(at: CGPoint(x: tenSeconds + 20, y: 10))
         #expect(abs(f.viewModel.playhead.seconds - 11) < 0.05)
         #expect(f.viewModel.playhead.isFrameAligned(frameDuration: f.viewModel.frameDuration))
         let before = f.viewModel.playhead
