@@ -721,3 +721,10 @@ What can overlap: the user can create the Cloud project, consent screen, and Des
 10. **Categories and playlists.** V1 ships a static US assignable category list and no playlist picker (`playlistId` is in the request and the publisher supports it; the sheet exposes it as a text field). A `videoCategories.list`/`playlists.list` fetch cached for 30 days is a small follow-up.
 11. **Skeleton check time.** The publish step adds about one to two seconds (5 MiB through the in-process fake, one drop, one resume). Acceptable.
 12. **Provenance for the AI disclosure.** No generative provider exists yet, so `containsSyntheticMedia` defaults to false with the help text; when providers land, the default should be computed from asset provenance and shown with a reason (11 §3).
+
+## 7. Decisions from the user (2026-09-09)
+
+- **Cloud project owner:** the user's personal Google account. Consent screen in Testing with the user as the only test user; verification deferred.
+- **Compliance audit:** file after the publish sheet works on a real account. Until it passes, uploads are forced private and `publishAt` cannot work; the UI notice from `PublishCapabilities` states this, and `audited: false` stays the default.
+- **Dev token storage:** the 0600 file store under `~/Library/Application Support/Timeline` for the unsigned `swift run` binary; the Keychain store engages automatically when the app runs bundled and signed.
+- **Live testing:** none for now. Every test runs against `FakeYouTubeServer`; `LiveYouTubeTests` stays opt-in behind `TIMELINE_LIVE_YOUTUBE=1` and is not run by the agents.
