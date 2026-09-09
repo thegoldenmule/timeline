@@ -4,6 +4,8 @@
 // - `SQLiteProjectStoreOpener` handles the `.tlproj` package (`manifest.json`, `project.sqlite`, `renders/`).
 // - `Schema` holds the migrator; `Projections` the query tables and history; `Recovery` the open-time checks.
 // - `CacheDatabase` is the shared `Cache/cache.sqlite` index (section 11).
+// - `SQLiteMediaCatalog` scans `.tlproj` packages read-only into `Cache/projects.sqlite`, the
+//   cross-project media index behind the library panel (docs/plans/media-library.md section 2.4).
 import Foundation
 
 /// Errors of the storage layer that are not `EditorError`s (those come out of `apply`).

@@ -50,6 +50,21 @@ public struct AssetRow: Codable, Hashable, Sendable, FetchableRecord, Persistabl
         offline = asset.offline
         probe = String(decoding: try ProjectCodec.encode(asset.probe), as: UTF8.self)
     }
+
+    /// The asset this row projects. The projection has no columns for `sampleRate`, `frameDuration`, or
+    /// `analyses`, so those come back empty: enough to browse and to import by hash (the cross-project
+    /// catalog), not a substitute for the owning project's state.
+    public func asset() throws -> Asset {
+        guard let kind = AssetKind(rawValue: kind) else {
+            throw ProjectStoreError.storage("asset \(assetId) has an unknown kind \(self.kind)")
+        }
+        return Asset(
+            id: AssetID(assetId), contentHash: contentHash, libraryPath: libraryPath, displayName: displayName,
+            kind: kind, duration: RationalTime(value: durationV, timescale: durationTs), hasVideo: hasVideo,
+            hasAudio: hasAudio,
+            probe: try probe.map { try ProjectCodec.decode(Probe.self, from: Data($0.utf8)) } ?? Probe(),
+            offline: offline)
+    }
 }
 
 /// A row of `sequences`.
