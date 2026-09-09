@@ -1,19 +1,49 @@
+import AgentKit
+import AudioAlign
 import Contracts
 import ContractsTestSupport
 import Foundation
+import MediaKit
+import ProjectStore
+import Synchronization
 import TimelineCore
 
-/// The composition root. Every service is held as an `any` existential so that Phase 2 swaps one fake
-/// for the real module by changing a single line in `AppServices.fakes()`; nothing else in the app
-/// names a concrete type. See docs/design/walking-skeleton.md for the swap table.
-struct AppServices: Sendable {
-    /// The in-memory key the fixture project is registered under; a `.tlproj` URL in Phase 2.
-    static let fixtureURL = URL(fileURLWithPath: "/fixtures/three-clips.tlproj")
+/// Lines the services and the MCP host log, kept for the window and printed to stderr.
+final class AppLog: Sendable {
+    private let lines = Mutex<[String]>([])
+    let echo: Bool
 
+    init(echo: Bool = true) { self.echo = echo }
+
+    func log(_ line: String) {
+        lines.withLock { $0.append(line) }
+        if echo { FileHandle.standardError.write(Data("[timeline] \(line)\n".utf8)) }
+    }
+
+    var all: [String] { lines.withLock { $0 } }
+}
+
+/// The composition root. Every service is held as an `any` existential; `AppServices.boot` builds the
+/// real modules over one `LibraryLayout` root (`~/Movies/Timeline`, or `TIMELINE_ROOT`). The one fake
+/// left is the renderer: see `renderer` below for the RenderKit swap point.
+struct AppServices: Sendable {
+    /// Which agent runtime to build: probe Claude Code and fall back to the scripted loop, or the
+    /// scripted loop directly (the headless check, which must not spawn `claude`).
+    enum AgentMode: Sendable {
+        case auto
+        case fallback
+    }
+
+    let layout: LibraryLayout
     let opener: any ProjectStoreOpening
+    /// SWAP POINT (RenderKit): replace `FakeRenderer()` in `boot` with RenderKit's renderer once it
+    /// merges. `ProjectDocument.refreshRender` is where its gesture path (video-only during a drag,
+    /// audio on release) plugs in; nothing else names the renderer's concrete type.
     let renderer: any Renderer
     let jobRunner: any JobRunner
     let mediaLibrary: any MediaLibrary
+    /// MediaKit's `cache.sqlite` index, shared by the library, the analyzer, and both providers.
+    let cache: CacheIndex
     let thumbnails: any ThumbnailProvider
     let waveforms: any WaveformProvider
     let analyzer: any MediaAnalyzer
@@ -21,31 +51,111 @@ struct AppServices: Sendable {
     let approvals: any ApprovalGate
     let registry: any ToolRegistry
     let agentRuntime: any AgentRuntime
+    /// What `ClaudeCodeRuntime.availability()` said, or the fallback's own report.
+    let agentAvailability: RuntimeAvailability
+    /// True when `agentRuntime` is the scripted fallback rather than the Claude Code sidecar.
+    let agentIsFallback: Bool
     let receipts: any ToolReceiptSink
     /// The open projects, what tools resolve `projectId` against. App-owned in every phase.
     let projects: OpenProjects
+    let mcpHost: MCPServerHost
+    let mcp: MCPConnectionInfo
+    /// Where `{ url, token }` for the `timeline-mcp` stdio proxy was written.
+    let proxyConfigurationURL: URL
+    let log: AppLog
 
-    /// Every service from the fakes in `ContractsTestSupport`. Phase 2 swap points are marked.
-    static func fakes() async throws -> AppServices {
-        let opener = FakeProjectStoreOpener()  // Phase 2: ProjectStore's SQLite opener
-        await opener.register(try Fixtures.store("three-clips"), at: fixtureURL)
-        let approvals = FakeApprovalGate(policy: .standard)  // Phase 2: AgentKit's gate
-        let registry = InMemoryToolRegistry()  // Phase 2: AgentKit's registry with the real tool set
-        for tool in DemoTools.all { await registry.register(tool) }
+    /// `TIMELINE_ROOT` when set (tests and the headless check), else `~/Movies/Timeline`.
+    static var configuredRoot: URL {
+        if let root = ProcessInfo.processInfo.environment["TIMELINE_ROOT"], !root.isEmpty {
+            return URL(fileURLWithPath: (root as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return LibraryLayout.default.root
+    }
+
+    /// The project the window opens by default.
+    static func defaultProjectURL(in layout: LibraryLayout) -> URL {
+        layout.projectsDir.appendingPathComponent("Untitled.tlproj", isDirectory: true)
+    }
+
+    /// Builds every service, starts the MCP host, and writes the proxy configuration.
+    static func boot(root: URL = configuredRoot, agent: AgentMode = .auto, log: AppLog = AppLog()) async throws
+        -> AppServices
+    {
+        let layout = LibraryLayout(root: root)
+        for dir in [layout.libraryDir, layout.cacheDir, layout.projectsDir] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        let cache = try CacheIndex(layout: layout)
+        let library = try FileMediaLibrary(layout: layout, cache: cache)
+        let analyzer = AppleMediaAnalyzer(cache: cache)
+        let thumbnails = AVThumbnailProvider(cache: cache)
+        let waveforms = PeaksWaveformProvider(store: analyzer.peaksStore)
+        let aligner = OnsetAligner()
+        let jobRunner = BudgetedJobRunner(budget: .conservative)
+        let approvals = StandardApprovalGate(policy: .standard)
+        let receipts = ReceiptLog(fileURL: layout.cacheDir.appendingPathComponent("receipts.jsonl"))
+        let projects = OpenProjects()
+        let renderer = FakeRenderer()  // SWAP POINT (RenderKit): the only fake left in the app.
+        let opener = SQLiteProjectStoreOpener(libraryRootHint: layout.root.path)
+
+        let toolServices = ToolServices(
+            renderer: renderer, mediaLibrary: library, analyzer: analyzer, aligner: aligner, jobRunner: jobRunner,
+            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts)
+        let baseContext = ToolContext(projects: projects, services: toolServices, approvals: approvals, actor: .human)
+        let registry = await EditorTools.standard(context: baseContext)
+
+        let host = MCPServerHost(
+            registry: registry, context: baseContext,
+            configuration: MCPServerHost.Configuration(log: { log.log($0) }))
+        let mcp = try await host.start()
+        let proxyURL =
+            ProcessInfo.processInfo.environment["TIMELINE_ROOT"] == nil
+            ? MCPConnectionInfo.defaultProxyConfigurationURL : layout.root.appendingPathComponent("mcp.json")
+        try mcp.writeProxyConfiguration(to: proxyURL)
+        log.log("MCP: \(mcp.claudeMCPAddCommand)")
+
+        let call: ToolLoopRuntime.Call = { name, input, sessionId in
+            var context = baseContext
+            context.actor = .agent(sessionId: sessionId)
+            context.sessionId = sessionId
+            return try await registry.call(name, input: input, context: context)
+        }
+        let exportPath = layout.root.appendingPathComponent("Exports/Reel 9x16.mp4").path
+        let fallback = ToolLoopRuntime(
+            base: FakeAgentRuntime(script: DemoAgentScript.events(exportPath: exportPath)), gate: approvals,
+            call: call)
+        let agentRuntime: any AgentRuntime
+        let availability: RuntimeAvailability
+        let isFallback: Bool
+        switch agent {
+        case .fallback:
+            agentRuntime = fallback
+            availability = RuntimeAvailability(installed: false, loggedIn: false, detail: "scripted fallback")
+            isFallback = true
+        case .auto:
+            let claude = ClaudeCodeRuntime(
+                configuration: ClaudeCodeRuntime.Configuration(
+                    workingDirectoryRoot: layout.root.appendingPathComponent("Agent", isDirectory: true),
+                    approvals: host.approvalGate, log: { log.log($0) }))
+            let probed = await claude.availability()
+            availability = probed
+            if probed.isUsable {
+                agentRuntime = claude
+                isFallback = false
+                log.log("Claude Code \(probed.version ?? "") available: \(probed.detail ?? "")")
+            } else {
+                agentRuntime = fallback
+                isFallback = true
+                log.log("Claude Code not usable (\(probed.detail ?? "unknown")); using the scripted fallback")
+            }
+        }
+
         return AppServices(
-            opener: opener,
-            renderer: FakeRenderer(),  // Phase 2: RenderKit
-            jobRunner: FakeJobRunner(),  // Phase 2: the budgeted runner
-            mediaLibrary: try FakeMediaLibrary(),  // Phase 2: MediaKit
-            thumbnails: FakeThumbnailProvider(),  // Phase 2: MediaKit
-            waveforms: FakeWaveformProvider(),  // Phase 2: MediaKit
-            analyzer: FakeAnalyzer(),  // Phase 2: MediaKit
-            aligner: FakeAudioAligner(),  // Phase 2: AudioAlign
-            approvals: approvals,
-            registry: registry,
-            agentRuntime: FakeAgentRuntime(script: DemoAgentScript.events),  // Phase 2: AgentKit's sidecar
-            receipts: FakeToolReceiptSink(),  // Phase 2: ProjectStore's `commands` metadata
-            projects: OpenProjects())
+            layout: layout, opener: opener, renderer: renderer, jobRunner: jobRunner, mediaLibrary: library,
+            cache: cache, thumbnails: thumbnails, waveforms: waveforms, analyzer: analyzer, aligner: aligner,
+            approvals: approvals, registry: registry, agentRuntime: agentRuntime, agentAvailability: availability,
+            agentIsFallback: isFallback, receipts: receipts, projects: projects, mcpHost: host, mcp: mcp,
+            proxyConfigurationURL: proxyURL, log: log)
     }
 
     /// The services a tool handler may reach. Everything is wired, so no tool answers `serviceUnavailable`.
@@ -60,9 +170,22 @@ struct AppServices: Sendable {
             projects: projects, services: toolServices, approvals: approvals, actor: actor, sessionId: sessionId)
     }
 
-    /// The registry call every UI surface and the agent bridge go through.
+    /// The registry call every UI surface goes through.
     func callTool(_ name: String, input: ToolInput, actor: Actor, sessionId: String? = nil) async throws -> ToolOutput {
         try await registry.call(name, input: input, context: toolContext(actor: actor, sessionId: sessionId))
+    }
+
+    /// The policy an embedded session runs under.
+    var runtimePolicy: RuntimePolicy {
+        RuntimePolicy(
+            maxBudgetUSD: 2, maxTurns: 12,
+            systemPromptAppend:
+                "You are editing inside the Timeline app. Read the project with project_describe before changing it.",
+            workingDirectory: layout.root.appendingPathComponent("Agent", isDirectory: true))
+    }
+
+    func shutdown() async {
+        await mcpHost.stop()
     }
 }
 
@@ -77,6 +200,11 @@ actor OpenProjects: ProjectDirectory {
         entries.removeAll { $0.id == id }
         entries.append((id, store, url))
         if frontmostId == nil { frontmostId = id }
+    }
+
+    func remove(_ id: ProjectID) {
+        entries.removeAll { $0.id == id }
+        if frontmostId == id { frontmostId = entries.last?.id }
     }
 
     func setFrontmost(_ id: ProjectID) { frontmostId = id }
@@ -95,4 +223,27 @@ actor OpenProjects: ProjectDirectory {
     }
 
     func store(for id: ProjectID) -> (any ProjectStore)? { entries.first { $0.id == id }?.store }
+}
+
+/// Waits for the human's answer to an `approval_required` result by polling the gate's token status,
+/// so a card answered from any surface (the stack, an agent transcript) resumes the caller.
+enum ApprovalWait {
+    static func verdict(for token: ApprovalToken, on gate: any ApprovalGate, timeout: Duration = .seconds(600))
+        async -> ApprovalVerdict
+    {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline, !Task.isCancelled {
+            switch await gate.status(of: token) {
+            case .pending:
+                try? await Task.sleep(for: .milliseconds(50))
+            case .granted, .consumed:
+                return .approve
+            case .denied(let reason):
+                return .deny(reason: reason)
+            case .unknown:
+                return .deny(reason: "The gate does not know this token")
+            }
+        }
+        return .deny(reason: Task.isCancelled ? "Cancelled" : "Timed out waiting for approval")
+    }
 }

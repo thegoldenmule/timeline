@@ -2,8 +2,9 @@ import AppKit
 import Foundation
 import SwiftUI
 
-/// Entry point. `--skeleton-check` runs the walking-skeleton flow headlessly on the main actor and
-/// exits with its verdict; anything else launches the SwiftUI window.
+/// Entry point. `--skeleton-check` runs the end-to-end check headlessly on the main actor against a
+/// temporary library root and exits with its verdict; anything else launches the SwiftUI window over
+/// `TIMELINE_ROOT` (default `~/Movies/Timeline`).
 @main
 enum TimelineAppMain {
     @MainActor static func main() {
@@ -26,7 +27,7 @@ struct TimelineWindowApp: App {
         WindowGroup("Timeline") {
             ContentView(model: model)
         }
-        .defaultSize(width: 1200, height: 760)
+        .defaultSize(width: 1400, height: 860)
     }
 }
 
