@@ -14,6 +14,8 @@ public enum JobKind: String, Codable, Sendable, Hashable, CaseIterable {
     case analysis
     case thumbnails
     case peaks
+    /// An upload to a `PublishDestination`; the outcome payload is a `PublishReceipt`.
+    case publish
 }
 
 /// The memory a job needs while it runs, declared up front so the runner can enforce the budget from
@@ -181,4 +183,12 @@ public protocol JobRunner: Sendable {
     func running() async -> [JobID]
     /// Jobs admitted but waiting for budget.
     func queued() async -> [JobID]
+    /// A handle over a job this runner knows (queued, running, or finished), so a job submitted by a
+    /// tool can be tracked by the app's job list. The returned handle shares the job's task and gets a
+    /// fresh progress stream; only one consumer should read each stream. Default: nil.
+    func handle(for id: JobID) async -> JobHandle?
+}
+
+extension JobRunner {
+    public func handle(for id: JobID) async -> JobHandle? { nil }
 }

@@ -89,10 +89,17 @@ public struct ToolOutput: Hashable, Sendable, Codable {
     }
 
     /// The canonical `approval_required` result: `{ "status": "approval_required", "approvalToken",
-    /// "estimate", "requestId", "tool", "summary" }`. Not an error: the agent waits for the approval
-    /// card and retries the same call with `approvalToken` added to its input.
+    /// "estimate", "requestId", "tool", "summary", "details": [{ "label", "value" }], "warnings": [String] }`.
+    /// `summary` is `presentation?.summary ?? inputSummary`; `details` and `warnings` are empty arrays
+    /// when the request carries no presentation. Not an error: the agent waits for the approval card
+    /// and retries the same call with `approvalToken` added to its input.
     public static func approvalRequired(_ request: ApprovalRequest) -> ToolOutput {
         let estimate = (try? JSONValue(encoding: request.estimate)) ?? .object([:])
+        let summary = request.presentation?.summary ?? request.inputSummary
+        let details = (request.presentation?.details ?? []).map { detail in
+            JSONValue.object(["label": .string(detail.label), "value": .string(detail.value)])
+        }
+        let warnings = (request.presentation?.warnings ?? []).map(JSONValue.string)
         return ToolOutput(
             structured: .object([
                 "status": .string("approval_required"),
@@ -100,9 +107,11 @@ public struct ToolOutput: Hashable, Sendable, Codable {
                 "estimate": estimate,
                 "requestId": .string(request.id),
                 "tool": .string(request.tool),
-                "summary": .string(request.inputSummary),
+                "summary": .string(summary),
+                "details": .array(details),
+                "warnings": .array(warnings),
             ]),
-            text: "Approval required: \(request.inputSummary). Retry with approvalToken once granted.")
+            text: "Approval required: \(summary). Retry with approvalToken once granted.")
     }
 
     public var isApprovalRequired: Bool { structured?["status"]?.stringValue == "approval_required" }
@@ -198,12 +207,17 @@ public struct ToolServices: Sendable {
     public var thumbnails: (any ThumbnailProvider)?
     public var waveforms: (any WaveformProvider)?
     public var receipts: (any ToolReceiptSink)?
+    /// Connected-account providers by kind; empty hides `publish_youtube` and `account_status`.
+    public var accounts: [AccountProviderKind: any AccountProvider]
+    /// Publishers by destination; empty hides `publish_youtube` and `publish_status`.
+    public var publishers: [PublishDestination: any Publisher]
 
     public init(
         renderer: (any Renderer)? = nil, mediaLibrary: (any MediaLibrary)? = nil, analyzer: (any MediaAnalyzer)? = nil,
         aligner: (any AudioAligner)? = nil, jobRunner: (any JobRunner)? = nil,
         thumbnails: (any ThumbnailProvider)? = nil, waveforms: (any WaveformProvider)? = nil,
-        receipts: (any ToolReceiptSink)? = nil
+        receipts: (any ToolReceiptSink)? = nil, accounts: [AccountProviderKind: any AccountProvider] = [:],
+        publishers: [PublishDestination: any Publisher] = [:]
     ) {
         self.renderer = renderer
         self.mediaLibrary = mediaLibrary
@@ -213,6 +227,8 @@ public struct ToolServices: Sendable {
         self.thumbnails = thumbnails
         self.waveforms = waveforms
         self.receipts = receipts
+        self.accounts = accounts
+        self.publishers = publishers
     }
 }
 
@@ -251,6 +267,15 @@ public struct ToolContext: Sendable {
     /// The gate check for this call, with the context's actor and session filled in.
     public func checkApproval(tool: String, input: ToolInput, estimate: Estimate) async -> ApprovalDecision {
         await approvals.check(tool: tool, input: input, estimate: estimate, actor: actor, sessionId: sessionId)
+    }
+
+    /// The gate check with the tool's own card content (summary, detail rows, warnings).
+    public func checkApproval(
+        tool: String, input: ToolInput, estimate: Estimate, presentation: ApprovalPresentation?
+    ) async -> ApprovalDecision {
+        await approvals.check(
+            tool: tool, input: input, estimate: estimate, presentation: presentation, actor: actor,
+            sessionId: sessionId)
     }
 }
 

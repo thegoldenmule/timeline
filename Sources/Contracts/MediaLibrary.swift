@@ -22,6 +22,9 @@ public struct LibraryLayout: Hashable, Sendable, Codable {
     public var cacheDir: URL { root.appendingPathComponent("Cache", isDirectory: true) }
     public var projectsDir: URL { root.appendingPathComponent("Projects", isDirectory: true) }
     public var cacheDatabase: URL { cacheDir.appendingPathComponent("cache.sqlite") }
+    /// `Exports/`, the default output directory of `render_export` under this root (never the hard-coded
+    /// default root, so `TIMELINE_ROOT` is honoured).
+    public var exportsDir: URL { root.appendingPathComponent("Exports", isDirectory: true) }
 
     /// `~/Movies/Timeline`, the user-configurable default.
     public static let `default` = LibraryLayout(

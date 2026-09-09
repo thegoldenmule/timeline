@@ -56,9 +56,15 @@ public struct ApprovalPolicy: Hashable, Sendable, Codable {
         rule(for: tool).requiresApproval(estimate: estimate)
     }
 
-    /// Exports and cloud generation always ask; everything else runs.
+    /// Exports, publishing, and cloud generation always ask; everything else runs. The table:
+    /// `render_export` always; `publish_youtube` always (the approval card is the express consent
+    /// YouTube's policies require, publish-plan.md section 1); `generate_tts` when it costs money;
+    /// `find_broll`, `find_meme`, `publish_status`, `account_status` never; default never.
     public static let standard = ApprovalPolicy(rules: [
         "render_export": .always,
+        "publish_youtube": .always,
+        "publish_status": .never,
+        "account_status": .never,
         "generate_tts": .whenEstimate(above: Estimate(usd: 0)),
         "find_broll": .never,
         "find_meme": .never,
@@ -86,20 +92,56 @@ public struct ApprovalToken: Hashable, Sendable, Codable, RawRepresentable, Expr
     }
 }
 
+/// One label/value row of an approval card.
+public struct ApprovalDetail: Hashable, Sendable, Codable {
+    public var label: String
+    public var value: String
+
+    public init(label: String, value: String) {
+        self.label = label
+        self.value = value
+    }
+
+    public init(_ label: String, _ value: String) {
+        self.label = label
+        self.value = value
+    }
+}
+
+/// What a tool wants the card to show instead of the gate's generic `tool(key=value)` summary.
+public struct ApprovalPresentation: Hashable, Sendable, Codable {
+    /// "Publish \"Band rehearsal\" to YouTube as Private".
+    public var summary: String
+    /// Ordered label/value rows.
+    public var details: [ApprovalDetail]
+    /// Rendered in a warning colour.
+    public var warnings: [String]
+
+    public init(summary: String, details: [ApprovalDetail] = [], warnings: [String] = []) {
+        self.summary = summary
+        self.details = details
+        self.warnings = warnings
+    }
+}
+
 public struct ApprovalRequest: Hashable, Sendable, Codable, Identifiable {
     public var id: String
     public var token: ApprovalToken
     public var tool: String
-    /// One line for the card, e.g. "Export Reel 9:16 (1080x1920 H.264) to ~/Movies/reel.mp4".
+    /// One line for the card, e.g. "Export Reel 9:16 (1080x1920 H.264) to ~/Movies/reel.mp4". Gates that
+    /// receive a `presentation` use its `summary` here.
     public var inputSummary: String
     public var estimate: Estimate
     public var requestedAt: Date
     public var actor: Actor
     public var sessionId: String?
+    /// The tool's own card content, when it supplied one (decodes nil when absent, so recorded
+    /// transcripts still parse).
+    public var presentation: ApprovalPresentation?
 
     public init(
         id: String, token: ApprovalToken, tool: String, inputSummary: String, estimate: Estimate, requestedAt: Date,
-        actor: Actor, sessionId: String? = nil
+        actor: Actor, sessionId: String? = nil, presentation: ApprovalPresentation? = nil
     ) {
         self.id = id
         self.token = token
@@ -109,6 +151,7 @@ public struct ApprovalRequest: Hashable, Sendable, Codable, Identifiable {
         self.requestedAt = requestedAt
         self.actor = actor
         self.sessionId = sessionId
+        self.presentation = presentation
     }
 }
 
@@ -147,6 +190,13 @@ public protocol ApprovalGate: Sendable {
     var policy: ApprovalPolicy { get async }
     func check(tool: String, input: ToolInput, estimate: Estimate, actor: Actor, sessionId: String?) async
         -> ApprovalDecision
+    /// `check` with the tool's own card content. Gates that raise cards (`FakeApprovalGate`, the app's
+    /// `StandardApprovalGate`, AgentKit's `RecordingApprovalGate`) store `presentation` on the request
+    /// and use its summary as `inputSummary`. Default: forwards to the five-argument form, dropping it.
+    func check(
+        tool: String, input: ToolInput, estimate: Estimate, presentation: ApprovalPresentation?, actor: Actor,
+        sessionId: String?
+    ) async -> ApprovalDecision
     func grant(_ token: ApprovalToken) async
     func deny(_ token: ApprovalToken, reason: String?) async
     /// True once for a granted token; false for unknown, denied, pending, or already consumed tokens.
@@ -160,6 +210,14 @@ public protocol ApprovalGate: Sendable {
 
 extension ApprovalGate {
     public func status(of token: ApprovalToken) async -> ApprovalTokenStatus { .unknown }
+
+    /// Default keeps existing gates conforming: presentation is dropped.
+    public func check(
+        tool: String, input: ToolInput, estimate: Estimate, presentation: ApprovalPresentation?, actor: Actor,
+        sessionId: String?
+    ) async -> ApprovalDecision {
+        await check(tool: tool, input: input, estimate: estimate, actor: actor, sessionId: sessionId)
+    }
 }
 
 /// One line per tool invocation, recorded whatever the outcome, so "what did the agent do and why" is

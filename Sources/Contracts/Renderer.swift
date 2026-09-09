@@ -208,10 +208,13 @@ public struct ExportReceipt: Hashable, Sendable, Codable {
     public var startedAt: Date
     public var finishedAt: Date
     public var warnings: [String]
+    /// `FileHash.sha256(of: outputURL)` ("sha256-<64 hex>"), what the render ledger stores and a publish
+    /// verifies against. Nil in receipts written before the ledger existed.
+    public var outputHash: String?
 
     public init(
         preset: ExportPreset, sequenceId: SequenceID, projectVersion: Int64?, outputURL: URL, durationSeconds: Double,
-        startedAt: Date, finishedAt: Date, warnings: [String] = []
+        startedAt: Date, finishedAt: Date, warnings: [String] = [], outputHash: String? = nil
     ) {
         self.preset = preset
         self.sequenceId = sequenceId
@@ -221,6 +224,7 @@ public struct ExportReceipt: Hashable, Sendable, Codable {
         self.startedAt = startedAt
         self.finishedAt = finishedAt
         self.warnings = warnings
+        self.outputHash = outputHash
     }
 }
 
