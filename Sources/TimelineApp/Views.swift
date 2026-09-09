@@ -19,6 +19,8 @@ final class AppModel {
     private(set) var tools: ToolConsole?
     private(set) var agent: AgentConsole?
     private(set) var publish: PublishConsole?
+    /// The library panel's state over the open document and the machine-wide catalog.
+    private(set) var library: MediaLibraryModel?
     private(set) var bootError: String?
     private(set) var bootStage = "Starting services"
     var lastCommandError: String?
@@ -60,6 +62,8 @@ final class AppModel {
             create
             ? try await ProjectDocument.openOrCreate(at: url, name: name, using: services)
             : try await ProjectDocument.open(at: url, using: services)
+        // Remembered so a package the user keeps outside the projects directory stays browsable.
+        await services.catalog.register(packageAt: url)
         await install(document)
     }
 
@@ -72,6 +76,12 @@ final class AppModel {
         }
         self.document = document
         await publish?.attach(document)
+        guard let services else { return }
+        let library = MediaLibraryModel(
+            viewModel: document.viewModel, catalog: services.catalog, layout: services.layout,
+            thumbnails: services.thumbnails)
+        self.library = library
+        Task { @MainActor in await library.load() }
     }
 
     /// Runs an async action from a button, surfacing its error in the window. The publish console
@@ -203,7 +213,9 @@ final class AppModel {
         let name = url.deletingPathExtension().lastPathComponent
         perform {
             self.document = nil
-            await self.install(try await document.fork(to: url, name: name, using: services))
+            let forked = try await document.fork(to: url, name: name, using: services)
+            await services.catalog.register(packageAt: url)
+            await self.install(forked)
         }
     }
 
@@ -298,9 +310,17 @@ struct EditorView: View {
     let agent: AgentConsole
     let publish: PublishConsole
     @State private var goal = "Describe the project, then export a vertical reel of the active sequence."
+    @AppStorage("showsLibrary") private var showsLibrary = true
 
     var body: some View {
         HSplitView {
+            if showsLibrary, let library = model.library {
+                MediaLibraryView(
+                    model: library, onInsert: { model.insertLibraryItems($0) },
+                    onImport: { model.presentImportPanel() }
+                )
+                .frame(minWidth: 220, idealWidth: 280, maxWidth: 420)
+            }
             VStack(spacing: 0) {
                 PreviewLayerView(preview: document.preview)
                     .frame(minHeight: 240)
@@ -368,6 +388,9 @@ struct EditorView: View {
             Button("Fork", systemImage: "arrow.triangle.branch") { model.presentForkPanel() }
                 .disabled(model.document == nil)
             Button("Import", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
+            Button("Library", systemImage: "rectangle.stack") { showsLibrary.toggle() }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .help("Show or hide the media library")
         }
         ToolbarItemGroup {
             Button("Split", systemImage: "scissors") {

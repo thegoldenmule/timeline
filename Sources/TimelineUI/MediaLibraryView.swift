@@ -157,6 +157,8 @@ public final class MediaLibraryModel {
         var rows: [Row] = []
         rows.reserveCapacity(items.count)
         for item in items {
+            // Media the open project holds is not library-only, however recently the catalog was scanned.
+            if item.projectId == nil, hashes.contains(item.contentHash) { continue }
             guard kindFilter.assetKind == nil || item.asset.kind == kindFilter.assetKind else { continue }
             guard let score = score(item) else { continue }
             let url = item.url(defaultRoot: layout.root)

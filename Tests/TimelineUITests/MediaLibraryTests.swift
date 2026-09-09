@@ -199,6 +199,23 @@ struct MediaLibraryTests {
         #expect(model.rows.map(\.asset.contentHash) == hashes, "a second load lists the same way")
     }
 
+    @Test func libraryOnlyMediaTheOpenProjectAlreadyHoldsIsNotListedTwice() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let mine = try #require(f.viewModel.project.assets.values.first { $0.displayName == "band-mix-v3.wav" })
+        // The cache index knows the file too, and no scanned project claims it yet.
+        let catalog = FakeMediaCatalog(items: [
+            Fixtures.catalogItem(mine), Fixtures.catalogItem(asset("loose.wav", hash: "sha256-loose", kind: .audio)),
+        ])
+        let model = MediaLibraryModel(
+            viewModel: f.viewModel, catalog: catalog, layout: LibraryLayout(root: MediaLibraryTests.root),
+            fileExists: { _ in true })
+        await model.load()
+
+        #expect(model.rows.filter { $0.asset.contentHash == mine.contentHash }.count == 1)
+        #expect(model.rows.first { $0.asset.contentHash == mine.contentHash }?.item.projectId == f.viewModel.project.id)
+        #expect(model.rows.contains { $0.asset.displayName == "loose.wav" }, "library-only media still lists")
+    }
+
     @Test func dragPayloadCarriesTheHashAndTheOwningProject() async throws {
         let (model, _, _) = try await self.model(items: [
             Fixtures.catalogItem(

@@ -46,6 +46,8 @@ struct AppServices: Sendable {
     let mediaLibrary: any MediaLibrary
     /// MediaKit's `cache.sqlite` index, shared by the library, the analyzer, and both providers.
     let cache: CacheIndex
+    /// Every project on this machine and the media it holds, behind the library panel. Read-only.
+    let catalog: any MediaCatalog
     let thumbnails: any ThumbnailProvider
     let waveforms: any WaveformProvider
     let analyzer: any MediaAnalyzer
@@ -92,6 +94,7 @@ struct AppServices: Sendable {
         }
         let cache = try CacheIndex(layout: layout)
         let library = try FileMediaLibrary(layout: layout, cache: cache)
+        let catalog = CompositeMediaCatalog(packages: try SQLiteMediaCatalog(layout: layout), cache: cache)
         let analyzer = AppleMediaAnalyzer(cache: cache)
         let thumbnails = AVThumbnailProvider(cache: cache)
         let waveforms = PeaksWaveformProvider(store: analyzer.peaksStore)
@@ -159,7 +162,8 @@ struct AppServices: Sendable {
         return AppServices(
             layout: layout, opener: opener, renderer: renderer, previewRenderer: renderer, jobRunner: jobRunner,
             mediaLibrary: library,
-            cache: cache, thumbnails: thumbnails, waveforms: waveforms, analyzer: analyzer, aligner: aligner,
+            cache: cache, catalog: catalog, thumbnails: thumbnails, waveforms: waveforms, analyzer: analyzer,
+            aligner: aligner,
             approvals: approvals, registry: registry, agentRuntime: agentRuntime, agentAvailability: availability,
             agentIsFallback: isFallback, receipts: receipts, publishing: publishingServices, projects: projects,
             mcpHost: host, mcp: mcp, proxyConfigurationURL: proxyURL, log: log)
