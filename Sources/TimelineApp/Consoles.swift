@@ -67,11 +67,14 @@ final class ToolConsole {
 
 /// Runs one embedded agent session at a time: TimelineUI's `AgentTranscript` folds the events and
 /// hands approvals to the shared `ApprovalCenter`; the runtime is the Claude Code sidecar (which calls
-/// the tools over MCP itself) or the scripted fallback with its client-side tool loop.
+/// the tools over MCP itself) or the scripted fallback with its client-side tool loop. The composer is
+/// the console's, not the session's, so a message — and the files staged with it — outlives the session
+/// it is written against.
 @MainActor @Observable
 final class AgentConsole {
     let services: AppServices
     let approvals: ApprovalCenter
+    let composer: AgentComposer
     private(set) var transcript: AgentTranscript?
     private(set) var error: String?
     private(set) var isStarting = false
@@ -79,9 +82,28 @@ final class AgentConsole {
     init(services: AppServices, approvals: ApprovalCenter) {
         self.services = services
         self.approvals = approvals
+        self.composer = AgentComposer(thumbnails: services.thumbnails)
     }
 
     var isRunning: Bool { transcript.map { !$0.isFinished } ?? false }
+
+    /// The composer's Send: the first message is the session's goal, every later one continues it. A
+    /// session that failed is not resumable, so the next message starts a fresh one.
+    func send(_ message: String) async throws {
+        if let transcript, transcript.failure == nil {
+            error = nil
+            try await transcript.send(message)
+        } else {
+            try await start(goal: message)
+        }
+    }
+
+    /// Drops the finished session so the next message starts a new one. The composer is left alone.
+    func newSession() {
+        transcript?.stop()
+        transcript = nil
+        error = nil
+    }
 
     /// Starts a session and returns once it is streaming.
     func start(goal: String) async throws {
@@ -92,6 +114,7 @@ final class AgentConsole {
             let session = try await services.agentRuntime.startSession(
                 goal: goal, tools: services.mcp.toolAccess, policy: services.runtimePolicy)
             let transcript = AgentTranscript(session: session, approvalCenter: approvals)
+            transcript.appendUserMessage(goal)
             transcript.start()
             self.transcript = transcript
         } catch {

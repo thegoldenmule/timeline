@@ -268,9 +268,22 @@ final class AppModel {
         perform { _ = try await tools.call("render_export", input: ToolInput(["preset": "reel9x16"])) }
     }
 
-    func startAgent(goal: String) {
+    /// The agent composer's Send: the first message starts the session, later ones continue it.
+    func sendToAgent(_ message: String) {
         guard let agent else { return }
-        perform { try await agent.start(goal: goal) }
+        perform { try await agent.send(message) }
+    }
+
+    /// Stages files for the next agent message. Unlike every other panel in the window this imports
+    /// nothing: the agent is handed the paths and decides what to do with them.
+    func presentAttachPanel() {
+        guard let agent else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.message = "Attach files to the next agent message — nothing is imported"
+        panel.prompt = "Attach"
+        if panel.runModal() == .OK { agent.composer.add(urls: panel.urls) }
     }
 
     private func selectedAssets(_ document: ProjectDocument) -> [Asset] {
@@ -309,7 +322,6 @@ struct EditorView: View {
     let tools: ToolConsole
     let agent: AgentConsole
     let publish: PublishConsole
-    @State private var goal = "Describe the project, then export a vertical reel of the active sequence."
     @AppStorage("showsLibrary") private var showsLibrary = true
 
     var body: some View {
@@ -371,15 +383,17 @@ struct EditorView: View {
                     Divider()
                     HistoryView(viewModel: document.viewModel)
                         .frame(height: 220)
-                    Divider()
-                    ToolSection(tools: tools)
+                    if !tools.lastTool.isEmpty {
+                        Divider()
+                        ToolSection(tools: tools)
+                    }
                     Divider()
                     MCPSection(services: services)
                 }
             }
             .frame(minHeight: 240)
-            AgentSection(agent: agent, goal: $goal, model: model)
-                .frame(minHeight: 200)
+            AgentSection(agent: agent, model: model)
+                .frame(minHeight: 260)
         }
     }
 
@@ -457,20 +471,33 @@ struct EditorView: View {
     }
 }
 
+/// The last tool the *window* called — Analyze, Align, Export, Publish — with its structured answer,
+/// collapsed until it is asked for. The agent's calls are not here: it reaches the MCP host itself and
+/// its calls are folded into the transcript. The section is hidden until a control has called something.
 struct ToolSection: View {
     let tools: ToolConsole
+    @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Last tool").font(.headline)
-            if tools.lastTool.isEmpty {
-                Text("No tool called yet").font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text(tools.lastTool).bold()
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 4) {
                 if let text = tools.lastOutput?.text { Text(text).font(.caption) }
                 Text(tools.structuredText).font(.caption2.monospaced()).textSelection(.enabled).lineLimit(30)
-                if let error = tools.error { Text(error).foregroundStyle(.red) }
+                if let error = tools.error { Text(error).font(.caption).foregroundStyle(.red) }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 2)
+        } label: {
+            HStack(spacing: 6) {
+                Image(
+                    systemName: tools.isCalling
+                        ? "hourglass" : (tools.error == nil ? "wrench.and.screwdriver" : "xmark.octagon")
+                )
+                .foregroundStyle(tools.error == nil ? Color.secondary : Color.red)
+                Text(tools.lastTool).font(.system(.caption, design: .monospaced))
+                Spacer(minLength: 0)
+            }
+            .help("The last tool this window called; the agent's calls are in its transcript")
         }
         .padding(8)
     }
@@ -596,25 +623,39 @@ struct MCPSection: View {
     }
 }
 
+/// The agent pane: what the session has said so far, and the composer under it. There is no "start"
+/// control — the first message starts the session — and files dropped on the composer are staged, not
+/// imported.
 struct AgentSection: View {
     let agent: AgentConsole
-    @Binding var goal: String
     let model: AppModel
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                TextField("Goal", text: $goal).textFieldStyle(.roundedBorder)
-                Button("Start agent", systemImage: "sparkles") { model.startAgent(goal: goal) }
-                    .disabled(agent.isRunning || agent.isStarting)
-            }
-            .padding(8)
+            AgentStatusBar(
+                transcript: agent.transcript, isStarting: agent.isStarting,
+                onStop: { model.perform { await agent.cancel() } },
+                onClear: { agent.newSession() })
+            Divider()
             if let transcript = agent.transcript {
                 AgentPanelView(transcript: transcript)
             } else {
-                Text(agent.error ?? "No session started").font(.caption).foregroundStyle(.secondary)
-                Spacer()
+                ContentUnavailableView {
+                    Label("No session yet", systemImage: "sparkles")
+                } description: {
+                    Text("Say what you want done. Drop clips on the box below to hand the agent their paths.")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            if let error = agent.error {
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
+            }
+            AgentComposerView(
+                composer: agent.composer, isBusy: agent.isRunning || agent.isStarting,
+                placeholder: agent.transcript == nil
+                    ? "Tell the agent what to do — drop clips here to attach them" : "Message the agent",
+                onSend: { model.sendToAgent($0) }, onAttach: { model.presentAttachPanel() })
         }
     }
 }

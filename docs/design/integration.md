@@ -29,7 +29,7 @@ without the window.
 | Preview | `RenderKit.PreviewPlayer` | owned by `ProjectDocument`: instruction-only edits update the live item, structural edits are compiled and swapped in on the second player; the window hosts its two `AVPlayerLayer`s (`PreviewLayerView`) |
 | Publishing: `accounts[.google]` | `PublishKit.GoogleAccountProvider` | `PublishingServices` (`Sources/TimelineApp/Services/`): the OAuth client from `GoogleClientConfiguration.load` (D3 lookup order), the token store from `TokenStoreSelection.resolve` (the 0600 file `google-tokens.json` for the unsigned binary, the Keychain from an `.app`), `accounts.json` next to it, the browser opened by `WorkspaceAuthorizationPresenter` (`NSWorkspace.shared.open`; AppKit stays in the app), PublishKit's loopback listener taking the redirect. Without a client the provider is registered unconfigured, so Settings shows the setup hint and `account_status` answers `configured: false` |
 | Publishing: `publishers[.youtube]` | `PublishKit.YouTubePublisher` | only when a client is configured (or under the fake): `QuotaMeter` at `<root>/Cache/publish-quota.json`, `audited` from the client file (false: uploads forced private, the sheet and the card say so). `TIMELINE_PUBLISHING=fake` boots the same two classes over `FakeYouTubeServer` with `FakeAuthorizationPresenter` (what the check uses); `TIMELINE_PUBLISHING=off` registers neither |
-| Timeline, inspector, approvals, jobs, agent, history, accounts, publish | `TimelineUI` | `TimelineView(viewModel:)`, `InspectorView`, `ApprovalStackView`, `JobList` (publish rows embed `PublishOutcomeView`), `AgentPanelView`, `HistoryView`, `AccountView` (Settings), `PublishSheetView`, `PublishHistoryView` |
+| Timeline, inspector, approvals, jobs, agent, history, accounts, publish | `TimelineUI` | `TimelineView(viewModel:)`, `InspectorView`, `ApprovalStackView`, `JobList` (publish rows embed `PublishOutcomeView`), `AgentStatusBar` / `AgentPanelView` / `AgentComposerView`, `HistoryView`, `AccountView` (Settings), `PublishSheetView`, `PublishHistoryView` |
 
 ### The preview path
 
@@ -111,14 +111,30 @@ The window: the media library pane on the left (⌥⌘L, remembered in `showsLib
 below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd-Z / Shift-Cmd-Z,
 Cmd-scroll zooms, N toggles snapping, M and S mute and solo the selected clips' tracks; every track
 header carries mute / solo / lock / remove buttons, one command per click), a status bar; the
-sidebar holds the inspector, the approval stack, the job list, the publishes, the history, the last tool
-result, the MCP section, and the agent panel. Toolbar: New, Open, Fork, Import (library import as a job;
+sidebar holds the inspector, the approval stack, the job list, the publishes, the history, the last
+window tool call (collapsed, and only once a control has called one — the agent's calls are in its own
+transcript), the MCP section, and the agent pane. Toolbar: New, Open, Fork, Import (library import as a job;
 the files land in the library and nowhere else, see below), Library (the pane), Split, Delete, Undo, Redo,
 Analyze (silence, onset envelope, shots on the selected clip's asset through `media_analyze`), Align (two
 selected clips: `align_audio` with the first as reference, then `moveClip` on the second), Export
 (`render_export`, gated by the approval stack, recorded in the render ledger), Publish (the sheet, then
 `publish_youtube` gated by the approval stack), Accounts (Settings). The player drives the playhead while
 playing; the timeline drives the player while paused.
+
+### The agent pane
+
+There is no start control: the first message is the session's goal, every later one continues it
+(`AgentConsole.send`), and a session that failed is not resumable so the next message starts a fresh one.
+The status bar names what the session is doing, what it has cost, Stop while it runs, and New session
+once it is done. Sent messages are echoed into the transcript (`AgentTranscript.appendUserMessage`), so
+the pane reads as the conversation it is.
+
+Files dropped on the composer — library rows or Finder files — are *staged*, not imported: `AgentComposer`
+holds them as `AgentAttachment` chips (poster, kind, duration, a badge when the file has gone missing),
+they come off again before Send, and `AgentComposer.message` appends their paths under a line saying
+plainly that nothing was imported. `MediaImporter` is never reached from here; importing is the agent's
+call, through the tools. This is the one drop target in the window that does not import — the library
+pane and the timeline both do.
 
 ### The media library
 
