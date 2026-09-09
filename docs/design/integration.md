@@ -1,30 +1,34 @@
 # Integration
 
-Status: Phase 2 integration done, 2026-09-08. Supersedes the Phase 0.5 walking-skeleton note: `TimelineApp`
-is wired to every real module end to end, RenderKit included. `swift run TimelineApp` opens the window;
+Status: Phase 2 integration done 2026-09-08; publishing (publish-plan.md 4.5) integrated 2026-09-09.
+Supersedes the Phase 0.5 walking-skeleton note: `TimelineApp` is wired to every real module end to end,
+RenderKit and PublishKit included. `swift run TimelineApp` opens the window;
 `swift run TimelineApp --skeleton-check` (`make e2e`) runs the end-to-end check headlessly against a
-temporary library root and exits 0.
+temporary library root and exits 0; `swift run TimelineApp --connect-google` connects a Google account
+without the window.
 
 ## What is real, what is fake
 
 | Service | Implementation | Notes |
 |---|---|---|
-| `opener: any ProjectStoreOpening` | `ProjectStore.SQLiteProjectStoreOpener` | `.tlproj` packages under `<root>/Projects/`; `libraryRootHint` set to the root |
+| `opener: any ProjectStoreOpening` | `ProjectStore.SQLiteProjectStoreOpener` | `.tlproj` packages under `<root>/Projects/`; `libraryRootHint` set to the root; the store also answers `RenderLedger` and `PublishLedger` (`ProjectDocument.renderLedger` / `.publishLedger` are the downcasts) |
 | `mediaLibrary` | `MediaKit.FileMediaLibrary` | copy into `Library/YYYY/YYYY-MM-DD/`, SHA-256, sidecar, `cache.sqlite` row |
 | `cache` | `MediaKit.CacheIndex` | one index for the library, the analyzer, and both providers |
 | `thumbnails`, `waveforms` | `AVThumbnailProvider`, `PeaksWaveformProvider` | over the same `CacheIndex`; TimelineUI draws filmstrips and peaks from them |
 | `analyzer` | `MediaKit.AppleMediaAnalyzer` | silence, shots, peaks, onset envelope, SpeechAnalyzer transcription |
 | `aligner` | `AudioAlign.OnsetAligner` | reads every tunable from `AlignmentParameters` (see contracts-notes.md) |
-| `jobRunner` | `BudgetedJobRunner` (`Sources/TimelineApp/Services/`) | FIFO admission against `JobBudget.conservative`: bytes per memory class and `maxConcurrent` per class; cancellation before admission dequeues |
-| `approvals` | `StandardApprovalGate` (`Sources/TimelineApp/Services/`) | random single-use tokens, `status(of:)` implemented, one gate shared by the tools, the MCP host, and the approval stack |
-| `registry` | `AgentKit.EditorTools.standard(context:)` | the 15 real tools; `DemoTools` is gone |
+| `jobRunner` | `BudgetedJobRunner` (`Sources/TimelineApp/Services/`) | FIFO admission against `JobBudget.conservative`: bytes per memory class and `maxConcurrent` per class; cancellation before admission dequeues; `handle(for:)` re-opens a handle over a job a tool submitted |
+| `approvals` | `StandardApprovalGate` (`Sources/TimelineApp/Services/`) | random single-use tokens, `status(of:)` implemented, the six-argument `check` keeps the tool's presentation on the request; one gate shared by the tools, the MCP host, and the approval stack |
+| `registry` | `AgentKit.EditorTools.standard(context:)` | the 18 real tools when publishing is configured (15 editor tools plus `publish_youtube`, `publish_status`, `account_status`); without a Google client only `account_status` of the three is registered |
 | Fork | toolbar button | `ProjectDocument.fork(to:name:)`: `ProjectStoreCopying.saveAs` copies the whole stream and projections into a new package, the window switches to the copy, and a `renameProject` transaction labelled "Fork of <name>" is the fork's first divergence; the original is untouched and both share the library |
-| `mcpHost` | `AgentKit.MCPServerHost` | started at launch on 127.0.0.1 with a per-launch bearer token; `claude mcp add` line shown in the window's MCP section and logged; proxy config written |
-| `agentRuntime` | `AgentKit.ClaudeCodeRuntime`, else `ToolLoopRuntime` over `FakeAgentRuntime` | `availability()` is probed at boot; when `claude` is missing or logged out the scripted fallback runs its tool calls through the registry itself (the client-side loop a Messages-API runtime has) |
-| `receipts` | `ReceiptLog` (`Sources/TimelineApp/Services/`) | in memory plus `<root>/Cache/receipts.jsonl`; ProjectStore does not expose the project's `commands` metadata yet |
+| `mcpHost` | `AgentKit.MCPServerHost` | started at launch on 127.0.0.1 with a per-launch bearer token; `claude mcp add` line shown in Settings and the window's MCP section and logged; proxy config written |
+| `agentRuntime` | `AgentKit.ClaudeCodeRuntime`, else `ToolLoopRuntime` over `FakeAgentRuntime` | `availability()` is probed at boot; when `claude` is missing or logged out the scripted fallback runs its tool calls through the registry itself (the client-side loop a Messages-API runtime has); its cards carry the tool's `details` and `warnings` |
+| `receipts` | `ReceiptLog` (`Sources/TimelineApp/Services/`) | in memory plus `<root>/Cache/receipts.jsonl`; renders and publishes have their own ledgers in `project.sqlite` now, the per-command receipt metadata still does not |
 | `renderer` | `RenderKit.AVFoundationRenderer` | compile, update, frame grabs, and export for the tools; built over the app's `LibraryLayout` |
 | Preview | `RenderKit.PreviewPlayer` | owned by `ProjectDocument`: instruction-only edits update the live item, structural edits are compiled and swapped in on the second player; the window hosts its two `AVPlayerLayer`s (`PreviewLayerView`) |
-| Timeline, inspector, approvals, jobs, agent, history | `TimelineUI` | `TimelineView(viewModel:)`, `InspectorView`, `ApprovalStackView`, `JobList`, `AgentPanelView`, `HistoryView` replace every placeholder view |
+| Publishing: `accounts[.google]` | `PublishKit.GoogleAccountProvider` | `PublishingServices` (`Sources/TimelineApp/Services/`): the OAuth client from `GoogleClientConfiguration.load` (D3 lookup order), the token store from `TokenStoreSelection.resolve` (the 0600 file `google-tokens.json` for the unsigned binary, the Keychain from an `.app`), `accounts.json` next to it, the browser opened by `WorkspaceAuthorizationPresenter` (`NSWorkspace.shared.open`; AppKit stays in the app), PublishKit's loopback listener taking the redirect. Without a client the provider is registered unconfigured, so Settings shows the setup hint and `account_status` answers `configured: false` |
+| Publishing: `publishers[.youtube]` | `PublishKit.YouTubePublisher` | only when a client is configured (or under the fake): `QuotaMeter` at `<root>/Cache/publish-quota.json`, `audited` from the client file (false: uploads forced private, the sheet and the card say so). `TIMELINE_PUBLISHING=fake` boots the same two classes over `FakeYouTubeServer` with `FakeAuthorizationPresenter` (what the check uses); `TIMELINE_PUBLISHING=off` registers neither |
+| Timeline, inspector, approvals, jobs, agent, history, accounts, publish | `TimelineUI` | `TimelineView(viewModel:)`, `InspectorView`, `ApprovalStackView`, `JobList` (publish rows embed `PublishOutcomeView`), `AgentPanelView`, `HistoryView`, `AccountView` (Settings), `PublishSheetView`, `PublishHistoryView` |
 
 ### The preview path
 
@@ -36,34 +40,73 @@ drag) is not driven yet: TimelineUI previews a drag on a scratch copy and emits 
 release, so there is no structural edit to compile mid-gesture. Both players carry a periodic time
 observer; the active one drives the timeline playhead while playing, the timeline drives `seek` while paused.
 
+### The publish path
+
+Toolbar Publish (enabled once the project has a done render row and a Google account is connected; the
+tooltip says which is missing) presents `PublishSheetView` over `PublishSheetModel` (newest done render,
+connected accounts, the sequence's caption tracks, the publisher's capabilities and quota, live
+`validate`, the thumbnail preview grabbed through `Renderer.frame`). Upload hands the `PublishDraft` to
+`PublishConsole`, which turns it into `publish_youtube` input (`waitSeconds: 0`) and calls it through
+`ToolConsole`: the tool answers `approval_required`, the card lands on the approval stack with the tool's
+rows (Channel, Account, Privacy, File, Render, Thumbnail, Captions, AI disclosure, Made for kids,
+Certification) and an "Upload" button, and the console retries with the token. The tool records the
+`publishes` row, submits the job, and answers with the `jobId`; the console finds the job through
+`jobRunner.handle(for:)` and tracks it in the `JobCenter`, so the job list shows the stages and, when done,
+`PublishOutcomeView` (View on YouTube, Open in Studio, the privacy reported, the audience reminder). The
+sidebar's Publishes section lists the project's rows newest first with Resume for a `failed` or `cancelled`
+row that still holds a session (the same tool with the row's `publishId`, D10). Export first: the Export
+button records a render row through `render_export`, which is what the sheet publishes.
+
+Settings (Cmd-, or the Accounts toolbar button) hosts `AccountView` with the two notices (unverified app,
+7-day Testing expiry), the publishing state (client id and the forced-private notice, or the setup hint,
+or the fake), where the refresh tokens live, and the MCP section with the `claude mcp add` line.
+
 ## Layout on disk
 
 Everything lives under one `LibraryLayout` root: `~/Movies/Timeline` by default, or `TIMELINE_ROOT` when
 set (tests and the headless check use a temporary root). `Library/`, `Cache/` (with `cache.sqlite`,
-`receipts.jsonl`, and the content-addressed artifacts), `Projects/`, `Exports/`, `Agent/` (the sidecar's
+`receipts.jsonl`, `publish-quota.json`, `publish/<publishId>-thumbnail.jpg`, and the content-addressed
+artifacts), `Projects/`, `Exports/` (the default `render_export` destination), `Agent/` (the sidecar's
 working directories with the installed Skills), and `mcp.json` when `TIMELINE_ROOT` is set (otherwise the
 proxy config goes to `~/Library/Application Support/Timeline/mcp.json`).
+
+Per user, outside the root unless `TIMELINE_ROOT` is set: `~/Library/Application Support/Timeline/`
+holds `google-oauth-client.json` (the OAuth client, never in the repo), `google-tokens.json` (the file
+token store, 0600), and `accounts.json` (the non-secret account records). Under `TIMELINE_ROOT` all
+three sit in the root.
 
 The window opens (or creates) `<root>/Projects/Untitled.tlproj`; New and Open in the toolbar switch projects.
 
 ## How to run
 
 ```
-swift run TimelineApp                       # the window over ~/Movies/Timeline
-TIMELINE_ROOT=/tmp/tl swift run TimelineApp # the window over another root
-make e2e                                    # swift run TimelineApp --skeleton-check
-./ci.sh                                     # lint, swift test, e2e
+swift run TimelineApp                         # the window over ~/Movies/Timeline
+TIMELINE_ROOT=/tmp/tl swift run TimelineApp   # the window over another root
+TIMELINE_PUBLISHING=fake swift run TimelineApp  # the window with the in-process fake YouTube
+swift run TimelineApp --connect-google        # connect a Google account from the terminal
+make e2e                                      # swift run TimelineApp --skeleton-check
+./ci.sh                                       # lint, swift test, e2e
 ```
+
+Environment: `TIMELINE_ROOT` (the library root); `TIMELINE_GOOGLE_CLIENT_ID` and
+`TIMELINE_GOOGLE_CLIENT_SECRET`, or `TIMELINE_GOOGLE_CLIENT_JSON` (a path), else the client JSON at
+`<TIMELINE_ROOT>/google-oauth-client.json` or `~/Library/Application Support/Timeline/google-oauth-client.json`
+(docs/design/publish-setup.md); `TIMELINE_GOOGLE_AUDITED=1` once the compliance audit passed;
+`TIMELINE_TOKEN_STORE=file|keychain` (default: file unbundled, Keychain from an `.app`);
+`TIMELINE_PUBLISHING=auto|fake|off`; `TIMELINE_LIVE_YOUTUBE=1` and `TIMELINE_KEYCHAIN_TESTS=1` for the
+opt-in PublishKit tests (never run by the agents).
 
 The window: the preview on top (Play in the status bar or the space bar), TimelineUI's Metal timeline
 below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd-Z / Shift-Cmd-Z,
 Cmd-scroll zooms, N toggles snapping), a status bar; the
-sidebar holds the inspector, the approval stack, the job list, the history, the last tool result, the MCP
-section, and the agent panel. Toolbar: New, Open, Import (library import as a job, then the asset is
-appended to the timeline, video auto-linking its audio), Split, Delete, Undo, Redo, Analyze (silence,
-onset envelope, shots on the selected clip's asset through `media_analyze`), Align (two selected clips:
-`align_audio` with the first as reference, then `moveClip` on the second), Export (`render_export`, gated by
-the approval stack). The player drives the playhead while playing; the timeline drives the player while paused.
+sidebar holds the inspector, the approval stack, the job list, the publishes, the history, the last tool
+result, the MCP section, and the agent panel. Toolbar: New, Open, Fork, Import (library import as a job,
+then the asset is appended to the timeline, video auto-linking its audio), Split, Delete, Undo, Redo,
+Analyze (silence, onset envelope, shots on the selected clip's asset through `media_analyze`), Align (two
+selected clips: `align_audio` with the first as reference, then `moveClip` on the second), Export
+(`render_export`, gated by the approval stack, recorded in the render ledger), Publish (the sheet, then
+`publish_youtube` gated by the approval stack), Accounts (Settings). The player drives the playhead while
+playing; the timeline drives the player while paused.
 
 ### Connecting Claude Code
 
@@ -76,14 +119,15 @@ claude mcp add timeline -- timeline-mcp          # the stdio proxy reads mcp.jso
 
 The port and token change per launch; the log line `MCP: claude mcp add ...` is printed to stderr at boot.
 The embedded agent uses the same endpoint through `ClaudeCodeRuntime` when `claude --version` and
-`claude auth status` say it is usable.
+`claude auth status` say it is usable. The `publish-to-youtube` Skill is installed with the others.
 
 ## The end-to-end check
 
-`--skeleton-check` boots the composition root over a temporary root with the scripted agent, then:
+`--skeleton-check` boots the composition root over a temporary root with the scripted agent and the fake
+YouTube (`PublishingMode.fake`), then:
 
 ```
-ok   boot: root TimelineSkeleton-C7EE96E4, MCP http://127.0.0.1:60077/mcp, 15 tools, agent fallback
+ok   boot: root TimelineSkeleton-7E4D6B9A, MCP http://127.0.0.1:54372/mcp, 18 tools, agent fallback, publishing fake
 ok   create: Skeleton v3 at Skeleton.tlproj; empty sequence, nothing to preview yet
 ok   import: 4 assets copied into Library/ with sidecars and cache rows; av 2.0s 1280x720, tone 3.0s @48000 Hz
 ok   edit: linked clips v12, split via TimelineViewModel v14, dissolve v15; scene draws 7 clips, 1 transition
@@ -91,12 +135,14 @@ ok   render: compiled 6.00s, item readyToPlay, frame at 0.5 s 320x180 not blank,
 ok   analyze: silence + onset-8k on av-tone.mov: 122 envelope frames, 2 artifacts under Cache/, recorded at v17
 ok   align: offset 7.3447 s (truth 7.345, error 0.255 ms), drift 0.0 ppm (truth 23), confidence 0.81
 ok   tools: project_describe v18 with 4 assets; timeline_apply v18 instructions-only; stale expectedVersion rejected with changedSince
-ok   mcp: 401 without token; initialize -> timeline session F627DC6B; tools/list 15 tools; project_list over HTTP sees 1 project
+ok   mcp: 401 without token; initialize -> timeline session F4CC598E; tools/list 18 tools; project_list over HTTP sees 1 project
 ok   agent: 8 items, finished "Exported Reel 9:16."; export gated, approved on the stack, retried, wrote Reel 9x16.mp4
 ok   undo/redo: v18 -> v20 -> v22, 11 live transactions
-ok   reopen: v22 after close and reopen, state and history equal; 9 tool receipts logged
+ok   fork: Skeleton fork.tlproj at v23 with 12 live transactions; original still v22
+ok   publish: connected sub-1 (Skeleton Channel @skeleton); render 01a086d6… done (h264_1080p, v24, sha256-f813f1f4…); publish_youtube -> approval_required (Channel, Account, Privacy, File, Render, Thumbnail, Captions, AI disclosure, Made for kids, Certification); approved on the stack, retried; 0.2 MiB in 256 KiB chunks, dropped after 0.12 MiB, resumed 1; done fake-video-1 https://youtu.be/fake-video-1 private, 1 caption, thumbnail set; row done, no session; publish_status over MCP lists it; account_status shows @skeleton
+ok   reopen: v24 after close and reopen, state and history equal, publish row done; 15 tool receipts logged
 
-Skeleton check passed: 12 steps in 5.43 seconds
+Skeleton check passed: 14 steps in 6.15 seconds
 ```
 
 Step by step: `SQLiteProjectStoreOpener.create` plus V1/A1; `TestMedia.videoWithAudio` (2 s: the generator
@@ -112,8 +158,23 @@ checked in `cache.sqlite` and on disk; `align_audio` on the real aligner, offset
 generator's truth; `project_describe` and `timeline_apply` (instructions-only path, then a stale
 `expectedVersion` rejected); the MCP host over HTTP (401 without the token, `initialize`, `tools/list`,
 `tools/call project_list`); the scripted agent's `render_export` gated by the real gate, approved on the
-`ApprovalCenter`, retried with the token; undo and redo through the view model; close, reopen from the
-package, canonical state and history equal.
+`ApprovalCenter`, retried with the token; undo and redo through the view model; fork.
+
+The publish step: `GoogleAccountProvider.connect` through PublishKit's real loopback listener, the fake
+presenter performing the callback and the fake server exchanging the code (the token file appears under
+the root); a caption track with two cues; `render_export` (h264_1080p) through `ToolConsole` with the
+card approved on the stack, the render row `done` with `outputHash == FileHash.sha256(of: file)`;
+`publish_youtube` as the human with `renderId`, `captionTrackIds`, `thumbnailAt`, `waitSeconds: 60`:
+the first call answers `approval_required` with the ten rows above and no warnings, the card reaches the
+`ApprovalCenter` with the same rows and token, `dropConnection(afterBytes: half the file)` is armed, the
+retry with the token and the same `publishId` answers `done` with a receipt (`fake-video-1`,
+`https://youtu.be/fake-video-1`, private requested and reported, `resumedCount >= 1`, every byte and the
+file's hash, one caption id, thumbnail set, `madeForKids` nil) and no `upload/youtube` or token in the
+output; the fake saw one status query, no overlapping chunk ranges, one dropped chunk, one SRT caption
+body with the cue text, and a private video; the `publishes` row is `done` with the receipt and no
+session, and the project version did not move; `publish_status` over the MCP probe lists the row without
+its session; `account_status` shows `@skeleton` on "Skeleton Channel"; the gate has nothing pending. After
+close and reopen the publish row is still `done` without a session and the render row `done`.
 
 ## Known issues
 
@@ -125,11 +186,9 @@ package, canonical state and history equal.
   progress instead of hanging. `make test` therefore runs the test targets one at a time (each target's
   tests still run in parallel), which passes; `make test-parallel` is the one-process run for anyone
   who wants to chase the CoreMedia interaction.
-- `render_export` without `outputPath` writes to `LibraryLayout.default.root/Exports`, not the app's root
-  (AgentKit uses the default layout for that path). The fallback script passes `outputPath`; the toolbar
-  Export button does not yet, so under `TIMELINE_ROOT` its file lands in `~/Movies/Timeline/Exports`.
 - Tool receipts are logged to `Cache/receipts.jsonl`, not to the project's `commands` metadata: ProjectStore
-  has no public receipt API. Open question for the ProjectStore owner.
+  has no public receipt API. Renders and publishes now have their own tables (`renders`, `publishes`) in
+  `project.sqlite`, written by `render_export` and `publish_youtube`.
 - `MCPServerHost`'s `PreToolUse` hook only sees denials issued through its own `RecordingApprovalGate`; a
   denial from the approval stack (the app's gate) makes the hook answer `allow`, after which the server-side
   gate refuses the consumed-or-denied token. `ApprovalGate.status(of:)` now exists so AgentKit can answer
@@ -138,9 +197,22 @@ package, canonical state and history equal.
   headless check skips the probe (`AgentMode.fallback`).
 - The aligner reports drift 0 on the check's 20 s render (23 ppm is under what 20 s of fine windows can
   resolve at the default tolerances); the offset is what the check asserts.
-- Two module fixes were needed for the check and are recorded in contracts-notes.md: `AlignmentCandidate`
-  fields are now always finite (a candidate with no residuals produced `NaN`, which JSON cannot encode) and
-  MediaKit's `Probe.capturedAt` is whole seconds (file dates carry nanoseconds; the event log stores
-  milliseconds, so the in-memory state differed from the reloaded one).
+- Module fixes needed for the check are recorded in contracts-notes.md: `AlignmentCandidate` fields are
+  always finite, MediaKit's `Probe.capturedAt` is whole seconds, and PublishKit's default `Sleeper` is
+  formed in the init body rather than as a default argument (the default-argument async closure aborted
+  the task allocator on the first real publish; see "Publishing integration").
+- The Publish sheet's "Made for kids" toggle and playlist field are not sent: `publish_youtube` has no
+  `madeForKids` property (publish-plan.md D9, the agent must never set it) and no `playlistId`. The card,
+  the tool output, and `PublishOutcomeView` say to set the audience in YouTube Studio after the upload.
+  Open for the AgentKit owner if the human path should declare it (contracts-notes.md).
+- The scripted fallback agent still exports only; it does not call `publish_youtube` (the plan's optional
+  `DemoAgentScript.events(exportPath:publish:)`), so the window's demo agent never uploads on its own. The
+  fallback loop's card does carry a tool's presentation when one is supplied.
+- No live Google traffic has been exercised (publish-plan.md section 7): the real `GoogleAccountProvider`
+  and `YouTubePublisher` have run only against `FakeYouTubeServer`, in `make e2e` and PublishKit's tests.
+  The first real connect is publish-setup.md step 6; `LiveYouTubeTests` stays opt-in.
+- Uploads outlive the sheet but not the project: closing the project mid-upload lets the job finish while
+  the ledger row's terminal update fails (logged); the window does not yet hold a document open for a
+  running publish (publish-plan.md 6.9).
 - Filmstrips and peaks appear in the timeline as the providers finish (TimelineUI's media cache); the
   headless check builds the scene without a Metal device and does not assert them.
