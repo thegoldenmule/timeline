@@ -1,119 +1,133 @@
-# Walking skeleton
+# Integration
 
-Status: done, 2026-09-08. Phase 0.5 of `implementation-plan.md` section 2b: `TimelineApp` wired end to end
-against the fakes in `ContractsTestSupport`, before any Phase 1 module exists. `swift run TimelineApp`
-opens the window; `swift run TimelineApp --skeleton-check` runs the same flow headlessly and exits 0.
+Status: Phase 2 in progress, 2026-09-08. Supersedes the Phase 0.5 walking-skeleton note: `TimelineApp` is
+now wired to the real modules end to end, with one fake left (the renderer, until RenderKit merges).
+`swift run TimelineApp` opens the window; `swift run TimelineApp --skeleton-check` (`make e2e`) runs the
+end-to-end check headlessly against a temporary library root and exits 0.
 
-## What is wired
+## What is real, what is fake
 
-`Sources/TimelineApp`, an SPM `executableTarget` with no Xcode project and no `Info.plist`:
-
-| File | Role |
-|---|---|
-| `TimelineApp.swift` | `@main` entry. `--skeleton-check` runs `SkeletonCheck` on the main actor under `dispatchMain()` and exits with its verdict; otherwise the SwiftUI `App` starts. The `NSApplicationDelegate` sets `NSApplication.shared.setActivationPolicy(.regular)` and activates, which an unbundled executable needs before a window appears. |
-| `AppServices.swift` | The composition root: one `any` existential per service, built by `AppServices.fakes()`. `OpenProjects` is the app-owned `ProjectDirectory` tools resolve `projectId` against. `callTool` is the single registry entry point. |
-| `DemoTools.swift` | Three thin tools registered in the `InMemoryToolRegistry`: `project_describe` (read-only summary), `timeline_apply` (one `Command.Operation` through `ProjectStore.apply`, `commandId` defaulting to a hash of the input so a retry replays), `render_export` (gated by the standard `ApprovalPolicy`; with a granted token it compiles the active sequence and runs the renderer's export job through the runner). `DemoAgentScript` is what the fake runtime replays. |
-| `ProjectDocument.swift` | `@MainActor @Observable` mirror of one open store: `state()`, `history()`, a subscription to `changes`, the compiled active sequence, and an `AVPlayer` holding `Renderer.playerItem(for:)`. On every change it re-reads state, runs `Renderer.update`, and either calls `Renderer.apply(_:to:)` on the live item (`.instructionsOnly`) or builds a new item, seeks it while detached, and `replaceCurrentItem` (`.structural`). `renderedVersion` says which project version the player reflects. |
-| `Consoles.swift` | `JobConsole` (submits a job that calls the fake analyzer and waveform provider and mirrors `JobHandle.progress`), `ToolConsole` (calls a tool as `.human`), `AgentConsole` (streams `AgentEvent`s, executes announced tool calls through the registry, turns `.approvalRequested` into an approval card, grants through the gate). |
-| `Views.swift` | The window: an `AVPlayerView` wrapped in `NSViewRepresentable`, a `Canvas` placeholder timeline (tracks as rows, clips as rectangles shaded by opacity, the playhead from a periodic time observer), a status bar showing the last render path and player item generation, a sidebar with the agent transcript and approval card, job progress, the last tool result, and the history fold. Toolbar: Nudge clip (`moveClip`, structural), Fade clip (`setClipOpacity`, instructions-only), Undo, Redo, Run fake job, Call tool, Start agent. |
-| `SkeletonCheck.swift` | The headless flow: open the fixture, wait for `readyToPlay`, nudge (assert version bump, change on the stream, structural update, new item ready), `timeline_apply` an opacity change (assert instructions-only, same item), `project_describe`, a job with progress, the scripted agent session including the approval round-trip, undo and redo. |
-
-The headless output on this machine:
-
-```
-ok   open: Three clips v10, 3 assets, 2 tracks
-ok   compile: structural 89fcaf97 duration 11.25s hasAudio true
-ok   playerItem: readyToPlay, seekingWaitsForVideoCompositionRendering=true
-ok   moveClip: v11 txn 00002a changed 1 ids; structural update, new player item ready
-ok   timeline_apply: v12 via registry; instructions-only update applied to the live item
-ok   project_describe: Three clips v12: 3 assets; V1 (3 clips), A1 (1 clips); 2 tracks in structured output
-ok   job: Analyze IMG_1575.MOV: 4 progress events, silence 2 shots 3 peaks 301
-ok   agent: 13 entries, finished "Exported Reel 9:16." cost $0.03; export gated, granted, retried, wrote Reel 9:16.mp4
-ok   undo/redo: v12 -> v14 -> v16, 12 live transactions
-
-Skeleton check passed: 9 steps in 0.59 seconds
-```
-
-### How the agent round-trip works
-
-The fake runtime only replays a script; it never calls tools. The app therefore runs the tool calls the
-runtime announces (`.toolCall`) through the registry itself, which is the shape a Messages-API runtime
-has anyway (the client executes tools). The script's `render_export` call hits the gate without a token,
-so the registry answers `approval_required` and the gate publishes an `ApprovalRequest` on `requests`.
-When the runtime then emits `.approvalRequested`, the console pairs it with the gate's pending request
-for the same tool and shows one card. Approve does three things in order: `ApprovalGate.grant(token)`,
-retry the held call with `approvalToken` (the gate consumes the token and the export runs), then
-`AgentSession.approve(_:verdict:)` so the script continues to `.finished`. Deny denies the gate request
-and answers the session with `.deny`.
-
-With the CLI sidecar the tool calls happen inside the MCP server instead, and the `PreToolUse` hook
-forwards the gate's request; the console's `.toolCall` branch then becomes a no-op. See the proposal
-below about which `ApprovalRequest` the event should carry.
-
-## Phase 2 swap points
-
-All in `AppServices.fakes()`; each is one line. Nothing outside that function names a concrete type.
-
-| Service | Skeleton | Phase 2 |
+| Service | Implementation | Notes |
 |---|---|---|
-| `opener: any ProjectStoreOpening` | `FakeProjectStoreOpener` with the `three-clips` fixture registered at `/fixtures/three-clips.tlproj` | ProjectStore's SQLite opener over a real `.tlproj`; `ProjectDocument.open(at:using:)` stays as is |
-| `renderer: any Renderer` | `FakeRenderer` (synthetic clip, fingerprint-based `update`) | RenderKit |
-| `jobRunner: any JobRunner` | `FakeJobRunner` (unlimited budget, `.concurrent`) | the budgeted runner (`JobBudget.conservative`) |
-| `mediaLibrary`, `thumbnails`, `waveforms`, `analyzer` | `FakeMediaLibrary`, `FakeThumbnailProvider`, `FakeWaveformProvider`, `FakeAnalyzer` | MediaKit |
-| `aligner: any AudioAligner` | `FakeAudioAligner` | AudioAlign |
-| `approvals: any ApprovalGate` | `FakeApprovalGate(policy: .standard)` | AgentKit's gate (same protocol; the UI only uses `grant`, `deny`, `pending`, `requests`) |
-| `registry: any ToolRegistry` | `InMemoryToolRegistry` + `DemoTools` | AgentKit's registry with the real tools; `DemoTools` is deleted |
-| `agentRuntime: any AgentRuntime` | `FakeAgentRuntime(script:)` | AgentKit's Claude Code sidecar; `ToolAccess` then carries the real MCP endpoint and bearer token |
-| `receipts: any ToolReceiptSink` | `FakeToolReceiptSink` | the project's `commands` metadata via ProjectStore |
-| `TimelineCanvas` | SwiftUI `Canvas` placeholder | TimelineUI's Metal `NSViewRepresentable`; it takes the same `ProjectDocument` (`project`, `sequence`, `playheadSeconds`) plus the providers |
-| `PlayerView` | `AVPlayerView` wrapper | unchanged, or RenderKit's second-player swap for structural edits while playing |
+| `opener: any ProjectStoreOpening` | `ProjectStore.SQLiteProjectStoreOpener` | `.tlproj` packages under `<root>/Projects/`; `libraryRootHint` set to the root |
+| `mediaLibrary` | `MediaKit.FileMediaLibrary` | copy into `Library/YYYY/YYYY-MM-DD/`, SHA-256, sidecar, `cache.sqlite` row |
+| `cache` | `MediaKit.CacheIndex` | one index for the library, the analyzer, and both providers |
+| `thumbnails`, `waveforms` | `AVThumbnailProvider`, `PeaksWaveformProvider` | over the same `CacheIndex`; TimelineUI draws filmstrips and peaks from them |
+| `analyzer` | `MediaKit.AppleMediaAnalyzer` | silence, shots, peaks, onset envelope, SpeechAnalyzer transcription |
+| `aligner` | `AudioAlign.OnsetAligner` | reads every tunable from `AlignmentParameters` (see contracts-notes.md) |
+| `jobRunner` | `BudgetedJobRunner` (`Sources/TimelineApp/Services/`) | FIFO admission against `JobBudget.conservative`: bytes per memory class and `maxConcurrent` per class; cancellation before admission dequeues |
+| `approvals` | `StandardApprovalGate` (`Sources/TimelineApp/Services/`) | random single-use tokens, `status(of:)` implemented, one gate shared by the tools, the MCP host, and the approval stack |
+| `registry` | `AgentKit.EditorTools.standard(context:)` | the 15 real tools; `DemoTools` is gone |
+| `mcpHost` | `AgentKit.MCPServerHost` | started at launch on 127.0.0.1 with a per-launch bearer token; `claude mcp add` line shown in the window's MCP section and logged; proxy config written |
+| `agentRuntime` | `AgentKit.ClaudeCodeRuntime`, else `ToolLoopRuntime` over `FakeAgentRuntime` | `availability()` is probed at boot; when `claude` is missing or logged out the scripted fallback runs its tool calls through the registry itself (the client-side loop a Messages-API runtime has) |
+| `receipts` | `ReceiptLog` (`Sources/TimelineApp/Services/`) | in memory plus `<root>/Cache/receipts.jsonl`; ProjectStore does not expose the project's `commands` metadata yet |
+| `renderer` | **`FakeRenderer`** | the RenderKit swap point; see below |
+| Timeline, inspector, approvals, jobs, agent, history | `TimelineUI` | `TimelineView(viewModel:)`, `InspectorView`, `ApprovalStackView`, `JobList`, `AgentPanelView`, `HistoryView` replace every placeholder view |
 
-`OpenProjects` and `ProjectDocument` are app code in every phase. `ProjectDocument.refreshRender` is the
-place RenderKit's gesture path (video-only compile during a drag, audio on release) plugs in.
+### The RenderKit swap point
 
-## Friction with Contracts
+`AppServices.boot` builds `let renderer = FakeRenderer()`; that line and the `renderer` field's doc comment
+are the only places that name it. `ProjectDocument.refreshRender` runs `Renderer.update` on every change and
+either applies instructions to the live `AVPlayerItem` or swaps in a new item (seeking it while detached);
+RenderKit's gesture path (video-only compile during a drag, audio on release) and its second-player swap
+for structural edits while playing plug in there. The `render_export` and `render_preview` tools already go
+through `ToolServices.renderer`, so they switch with the same line. Until then exports are the fake's
+half-second synthetic clip plus a real `ExportReceipt`.
 
-Nothing in `Contracts` blocked the skeleton, and the isolation annotations were right in every case the
-app exercised:
+## Layout on disk
 
-- `Renderer.playerItem(for:)` and `apply(_:to:)` being synchronous `@MainActor` is exactly what a
-  main-actor document wants: no hop, no `await`, and the `AVPlayerItem` never leaves the actor.
-  `compile` and `update` being `nonisolated async` with `Sendable` `Compiled` tokens means the document
-  awaits them without any `nonisolated(unsafe)` or `@unchecked`.
-- `ProjectStore.changes` as a synchronous `var` was essential: the document subscribes *before* reading
-  `state()`, so no transaction can slip between the two. `ProjectChange` not carrying the new state is
-  fine; the document re-reads `state()` and `history()` (two actor hops per change, cheap on the fake).
-- `JobHandle.progress` buffering unbounded means the UI can start mirroring after `submit` returns and
-  still see every event; `AgentSession.events` and `ApprovalGate.requests` behave the same way.
-- `ToolServices` optionals and `ToolContext.store(for:)` composed without ceremony; `OpenProjects` is
-  30 lines.
-- `AgentSession.approve` being `async` in the protocol while the fake is synchronous cost nothing.
+Everything lives under one `LibraryLayout` root: `~/Movies/Timeline` by default, or `TIMELINE_ROOT` when
+set (tests and the headless check use a temporary root). `Library/`, `Cache/` (with `cache.sqlite`,
+`receipts.jsonl`, and the content-addressed artifacts), `Projects/`, `Exports/`, `Agent/` (the sidecar's
+working directories with the installed Skills), and `mcp.json` when `TIMELINE_ROOT` is set (otherwise the
+proxy config goes to `~/Library/Application Support/Timeline/mcp.json`).
 
-Things worth knowing, none of which need a `Contracts` change:
+The window opens (or creates) `<root>/Projects/Untitled.tlproj`; New and Open in the toolbar switch projects.
 
-- `Project.version` counts events, not transactions. An undo transaction is the `TransactionUndone`
-  marker plus the compensating events, so `undo` advances the version by at least 2. The first version
-  of the headless check asserted `+1` and failed; tools and agents must compare versions, never add.
-- A `ProjectChange` arrives before the consumer has necessarily refreshed anything derived from it. The
-  document exposes `renderedVersion`, set after `Renderer.update` has run, and the headless check waits
-  on that rather than on the change itself. TimelineUI should do the same for "the picture reflects
-  version N" assertions.
-- SwiftUI exports `Transaction`; any view file that names TimelineCore's has to write
-  `TimelineCore.Transaction`. `Sequence`, `Clock`, and `Actor` still resolve to TimelineCore's in files
-  that import SwiftUI. TimelineUI will hit the same thing.
-- The runtime's `.approvalRequested` and the gate's `ApprovalRequest` are two different values with two
-  different tokens unless the runtime deliberately forwards the gate's. The app copes by matching on
-  tool name, but see `contracts-proposals/app.md` for the doc-comment clarification that would make
-  AgentKit forward the gate's request so the card can grant by id.
+## How to run
 
-## Package.swift follow-ups (integration owner, not done here)
+```
+swift run TimelineApp                       # the window over ~/Movies/Timeline
+TIMELINE_ROOT=/tmp/tl swift run TimelineApp # the window over another root
+make e2e                                    # swift run TimelineApp --skeleton-check
+./ci.sh                                     # lint, swift test, e2e
+```
 
-- `TimelineApp` should declare `linkerSettings: [.linkedFramework("AVKit"), .linkedFramework("AppKit")]`.
-  Today AVKit links only because `Views.swift` references `AVPlayerView` directly. Using the SwiftUI
-  overlay's `VideoPlayer` alone links `_AVKit_SwiftUI` but not `AVKit`, and the process aborts at launch
-  with `failed to demangle superclass of VideoPlayerView from mangled name 'So12AVPlayerViewC'`. The
-  `PlayerView` wrapper stays regardless (it will host the second-player swap), but the explicit link
-  removes the trap for the next person who reaches for `VideoPlayer`.
-- `swift run TimelineApp --skeleton-check` belongs in `ci.sh` once CI runs on a machine with a window
-  server session (AVFoundation playback needs one for `readyToPlay`; `swift test` already has the same
-  requirement through `FakeRendererTests.playerItemReachesReadyToPlay`).
+The window: player on top, TimelineUI's Metal timeline below (drag to move, trim handles, B splits at the
+playhead, Delete removes, Cmd-Z / Shift-Cmd-Z, Cmd-scroll zooms, N toggles snapping), a status bar; the
+sidebar holds the inspector, the approval stack, the job list, the history, the last tool result, the MCP
+section, and the agent panel. Toolbar: New, Open, Import (library import as a job, then the asset is
+appended to the timeline, video auto-linking its audio), Split, Delete, Undo, Redo, Analyze (silence,
+onset envelope, shots on the selected clip's asset through `media_analyze`), Align (two selected clips:
+`align_audio` with the first as reference, then `moveClip` on the second), Export (`render_export`, gated by
+the approval stack). The player drives the playhead while playing; the timeline drives the player while paused.
+
+### Connecting Claude Code
+
+The MCP section shows both forms with this launch's token:
+
+```
+claude mcp add --transport http timeline http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
+claude mcp add timeline -- timeline-mcp          # the stdio proxy reads mcp.json
+```
+
+The port and token change per launch; the log line `MCP: claude mcp add ...` is printed to stderr at boot.
+The embedded agent uses the same endpoint through `ClaudeCodeRuntime` when `claude --version` and
+`claude auth status` say it is usable.
+
+## The end-to-end check
+
+`--skeleton-check` boots the composition root over a temporary root with the scripted agent, then:
+
+```
+ok   boot: root TimelineSkeleton-46B555EA, MCP http://127.0.0.1:55957/mcp, 15 tools, agent fallback
+ok   create: Skeleton v3 at Skeleton.tlproj; player item readyToPlay (fake renderer)
+ok   import: 4 assets copied into Library/ with sidecars and cache rows; av 4.0s 1280x720, tone 3.0s @48000 Hz
+ok   edit: linked clips v12, split via TimelineViewModel v14, dissolve v15; scene draws 7 clips, 1 transition
+ok   analyze: silence + onset-8k on av-tone.mov: 247 envelope frames, 2 artifacts under Cache/, recorded at v17
+ok   align: offset 7.3447 s (truth 7.345, error 0.255 ms), drift 0.0 ppm (truth 23), confidence 0.81
+ok   tools: project_describe v18 with 4 assets; timeline_apply v18 instructions-only; stale expectedVersion rejected with changedSince
+ok   mcp: 401 without token; initialize -> timeline session 83C85B2B; tools/list 15 tools; project_list over HTTP sees 1 project
+ok   agent: 8 items, finished "Exported Reel 9:16."; export gated, approved on the stack, retried, wrote Reel 9x16.mp4
+ok   undo/redo: v18 -> v20 -> v22, 11 live transactions
+ok   reopen: v22 after close and reopen, state and history equal; 9 tool receipts logged
+
+Skeleton check passed: 11 steps in 5.66 seconds
+```
+
+Step by step: `SQLiteProjectStoreOpener.create` plus V1/A1; `TestMedia.videoWithAudio`, `tone`, and
+`alignmentPair` (60 s camera, 20 s render: the default parameters want 10 s fine windows and 10 s of
+overlap) imported through `FileMediaLibrary.importJob` on the budgeted runner, with the library path,
+sidecar, `sha256-` hash, and cache row asserted before `importAsset` is applied; two auto-linked clips and a
+tone clip, a split through `TimelineViewModel.splitAtPlayhead` (the linked audio splits too), a dissolve, and
+a `TimelineSceneBuilder` scene; `media_analyze` for silence and the onset envelope, with the artifacts
+checked in `cache.sqlite` and on disk; `align_audio` on the real aligner, offset within 1 ms of the
+generator's truth; `project_describe` and `timeline_apply` (instructions-only path, then a stale
+`expectedVersion` rejected); the MCP host over HTTP (401 without the token, `initialize`, `tools/list`,
+`tools/call project_list`); the scripted agent's `render_export` gated by the real gate, approved on the
+`ApprovalCenter`, retried with the token; undo and redo through the view model; close, reopen from the
+package, canonical state and history equal.
+
+## Known issues
+
+- The renderer is `FakeRenderer`: playback shows a synthetic clip, `render_preview` returns hue frames,
+  exports are half-second clips. RenderKit replaces it at the swap point above.
+- `render_export` without `outputPath` writes to `LibraryLayout.default.root/Exports`, not the app's root
+  (AgentKit uses the default layout for that path). The fallback script passes `outputPath`; the toolbar
+  Export button does not yet, so under `TIMELINE_ROOT` its file lands in `~/Movies/Timeline/Exports`.
+- Tool receipts are logged to `Cache/receipts.jsonl`, not to the project's `commands` metadata: ProjectStore
+  has no public receipt API. Open question for the ProjectStore owner.
+- `MCPServerHost`'s `PreToolUse` hook only sees denials issued through its own `RecordingApprovalGate`; a
+  denial from the approval stack (the app's gate) makes the hook answer `allow`, after which the server-side
+  gate refuses the consumed-or-denied token. `ApprovalGate.status(of:)` now exists so AgentKit can answer
+  from the gate itself.
+- Boot probes `claude --version` and `claude auth status` (a second or two) before the window opens. The
+  headless check skips the probe (`AgentMode.fallback`).
+- The aligner reports drift 0 on the check's 20 s render (23 ppm is under what 20 s of fine windows can
+  resolve at the default tolerances); the offset is what the check asserts.
+- Two module fixes were needed for the check and are recorded in contracts-notes.md: `AlignmentCandidate`
+  fields are now always finite (a candidate with no residuals produced `NaN`, which JSON cannot encode) and
+  MediaKit's `Probe.capturedAt` is whole seconds (file dates carry nanoseconds; the event log stores
+  milliseconds, so the in-memory state differed from the reloaded one).
+- Filmstrips and peaks appear in the timeline as the providers finish (TimelineUI's media cache); the
+  headless check builds the scene without a Metal device and does not assert them.
