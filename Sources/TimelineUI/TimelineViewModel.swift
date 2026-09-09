@@ -107,6 +107,8 @@ public final class TimelineViewModel {
     public internal(set) var dropTarget: TimelineDropTarget?
     /// Receives the media files dropped on the timeline and where they landed (`TimelineDrop.swift`).
     public var onDropMedia: (([URL], TimelineDropTarget) -> Void)?
+    /// Receives rows dragged out of the library panel; the app duplicates a foreign asset first.
+    public var onDropLibraryItems: (([LibraryDragItem], TimelineDropTarget) -> Void)?
 
     private let ids: any IDGenerator
     private var observation: Task<Void, Never>?

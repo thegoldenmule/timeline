@@ -147,3 +147,175 @@ struct DropTests {
         #expect(view.registeredDraggedTypes.contains(.fileURL))
     }
 }
+
+/// A drag from the library panel, without AppKit's private dragging session: a real `NSPasteboard` with
+/// the types under test, handed to the view's `NSDraggingDestination` methods.
+@MainActor
+final class FakeDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
+    let pasteboard: NSPasteboard
+    var location: CGPoint
+
+    init(pasteboard: NSPasteboard, location: CGPoint) {
+        self.pasteboard = pasteboard
+        self.location = location
+    }
+
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggingLocation: NSPoint { location }
+    var draggedImageLocation: NSPoint { location }
+    var draggedImage: NSImage? { nil }
+    var draggingPasteboard: NSPasteboard { pasteboard }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    var draggingFormation: NSDraggingFormation {
+        get { .default }
+        set { _ = newValue }
+    }
+    var animatesToDestination: Bool {
+        get { false }
+        set { _ = newValue }
+    }
+    var numberOfValidItemsForDrop: Int {
+        get { 1 }
+        set { _ = newValue }
+    }
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func enumerateDraggingItems(
+        options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+        using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
+    func resetSpringLoading() {}
+}
+
+/// Drags out of the library panel take the same path as file drags: the same snapped target, the same
+/// indicator, one different callback.
+@MainActor
+@Suite("Library drags land like file drags")
+struct LibraryDropTests {
+    private func item(_ name: String = "cam.mov", hash: String = "sha256-cam", project: ProjectID? = "project-2")
+        -> LibraryDragItem
+    {
+        LibraryDragItem(
+            contentHash: hash, displayName: name, kind: .video, duration: Fixtures.frames(240), hasVideo: true,
+            hasAudio: true, assetId: "asset-cam", projectId: project,
+            url: URL(fileURLWithPath: "/tmp/Library/\(name)"))
+    }
+
+    /// A pasteboard carrying the given types, named so the tests never touch the general pasteboard.
+    private func pasteboard(library: [LibraryDragItem]? = nil, files: [URL] = []) throws -> NSPasteboard {
+        let board = NSPasteboard(name: NSPasteboard.Name("timeline-drop-tests-\(UUID().uuidString)"))
+        board.clearContents()
+        if let library {
+            board.setData(try LibraryDragPayload(items: library).data(), forType: LibraryDragPayload.pasteboardType)
+        }
+        if !files.isEmpty { board.writeObjects(files.map { $0 as NSURL }) }
+        return board
+    }
+
+    @Test func metalViewRegistersForFileAndLibraryDrags() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        #expect(view.registeredDraggedTypes.contains(.fileURL))
+        #expect(view.registeredDraggedTypes.contains(LibraryDragPayload.pasteboardType))
+        // AppKit reorders the registered list, so precedence is decided by the branch in
+        // performDragOperation, not by registration order (aDragCarryingBothTypesIsTreatedAsALibraryDrag).
+    }
+
+    @Test func droppingLibraryItemsHandsThemToTheCallbackAtTheSnappedTarget() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let clip = f.clips(.video)[1]
+        let edge = f.sequence.end(of: clip)
+        let l = f.viewModel.layout
+        let row = l.rows[0]
+        var received: [(items: [LibraryDragItem], target: TimelineDropTarget)] = []
+        f.viewModel.onDropLibraryItems = { items, target in received.append((items, target)) }
+
+        let point = CGPoint(x: l.x(for: edge) + 5, y: row.midY)
+        f.viewModel.updateDrop(at: point)
+        #expect(f.viewModel.dropLibraryItems([item(), item("band.wav")], at: point))
+        #expect(f.viewModel.dropTarget == nil)
+        #expect(received.count == 1)
+        #expect(received[0].items.map(\.displayName) == ["cam.mov", "band.wav"])
+        #expect(received[0].items[0].projectId == "project-2")
+        #expect(received[0].items[0].contentHash == "sha256-cam")
+        // Snapped exactly like a file drag, on the row under the pointer.
+        #expect(received[0].target.trackId == row.trackId)
+        #expect(received[0].target.at == edge)
+        #expect(received[0].target.snappedTo == edge)
+        // A library drop is not an edit by itself: the app decides what to apply.
+        #expect(await f.receivedCommands.isEmpty)
+    }
+
+    @Test func aLibraryDragDrawsTheSameIndicatorAsAFileDrag() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        let l = f.viewModel.layout
+        let point = CGPoint(x: l.x(forSeconds: 20), y: l.rows[0].midY)
+
+        let files = FakeDraggingInfo(
+            pasteboard: try pasteboard(files: [URL(fileURLWithPath: "/tmp/one.mov")]), location: point)
+        #expect(view.draggingEntered(files) == .copy)
+        let fileScene = TimelineSceneBuilder.build(from: f.viewModel)
+        let fileTarget = f.viewModel.dropTarget
+        view.draggingExited(files)
+
+        let library = FakeDraggingInfo(pasteboard: try pasteboard(library: [item()]), location: point)
+        #expect(view.draggingEntered(library) == .copy)
+        let libraryScene = TimelineSceneBuilder.build(from: f.viewModel)
+        #expect(f.viewModel.dropTarget == fileTarget)
+        #expect(
+            libraryScene.overlayQuads.filter { $0.color == TimelineTheme.dropIndicator }
+                == fileScene.overlayQuads.filter { $0.color == TimelineTheme.dropIndicator })
+        #expect(
+            libraryScene.overlayQuads.filter { $0.color == TimelineTheme.dropHighlight }
+                == fileScene.overlayQuads.filter { $0.color == TimelineTheme.dropHighlight })
+
+        // Nothing either branch accepts: no operation, no indicator.
+        let text = FakeDraggingInfo(
+            pasteboard: try pasteboard(files: [URL(fileURLWithPath: "/tmp/notes.txt")]), location: point)
+        #expect(view.draggingUpdated(text) == [])
+        #expect(f.viewModel.dropTarget == nil)
+    }
+
+    @Test func aDragCarryingBothTypesIsTreatedAsALibraryDrag() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        let l = f.viewModel.layout
+        let point = CGPoint(x: l.x(forSeconds: 20), y: l.rows[0].midY)
+        var libraryDrops: [[LibraryDragItem]] = []
+        var fileDrops: [[URL]] = []
+        f.viewModel.onDropLibraryItems = { items, _ in libraryDrops.append(items) }
+        f.viewModel.onDropMedia = { urls, _ in fileDrops.append(urls) }
+
+        let board = try pasteboard(library: [item()], files: [URL(fileURLWithPath: "/tmp/one.mov")])
+        let sender = FakeDraggingInfo(pasteboard: board, location: point)
+        #expect(view.draggingEntered(sender) == .copy)
+        #expect(view.performDragOperation(sender))
+        #expect(libraryDrops.map { $0.map(\.displayName) } == [["cam.mov"]])
+        #expect(fileDrops.isEmpty)
+    }
+
+    @Test func anEmptyLibraryPayloadIsRefusedAndLeavesNoIndicator() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        let l = f.viewModel.layout
+        let point = CGPoint(x: l.x(forSeconds: 20), y: l.rows[0].midY)
+        var libraryDrops: [[LibraryDragItem]] = []
+        f.viewModel.onDropLibraryItems = { items, _ in libraryDrops.append(items) }
+
+        #expect(!f.viewModel.dropLibraryItems([], at: point))
+        #expect(f.viewModel.dropTarget == nil)
+        #expect(libraryDrops.isEmpty)
+
+        let sender = FakeDraggingInfo(pasteboard: try pasteboard(library: []), location: point)
+        #expect(view.draggingEntered(sender) == [])
+        #expect(!view.performDragOperation(sender))
+        #expect(f.viewModel.dropTarget == nil)
+        #expect(libraryDrops.isEmpty)
+        #expect(await f.receivedCommands.isEmpty)
+    }
+}

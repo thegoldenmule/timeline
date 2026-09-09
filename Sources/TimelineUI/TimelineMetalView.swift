@@ -56,7 +56,7 @@ public final class TimelineMetalView: MTKView {
                 renderError = error
             }
         }
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([LibraryDragPayload.pasteboardType, .fileURL])
         observe()
     }
 
@@ -156,8 +156,18 @@ public final class TimelineMetalView: MTKView {
             as? [URL] ?? []
     }
 
+    /// The library rows on the drag's pasteboard, if it carries the library type.
+    private func libraryItems(_ sender: any NSDraggingInfo) -> [LibraryDragItem] {
+        guard let data = sender.draggingPasteboard.data(forType: LibraryDragPayload.pasteboardType),
+            let payload = try? LibraryDragPayload(data: data)
+        else { return [] }
+        return payload.items
+    }
+
+    /// Library rows are checked before file URLs: a row may also offer a `.fileURL` representation so a
+    /// drag to Finder works, and only the library branch knows where the media came from.
     private func dragOperation(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard MediaFileTypes.mediaURLs(fileURLs(sender)).isEmpty == false else {
+        guard !libraryItems(sender).isEmpty || !MediaFileTypes.mediaURLs(fileURLs(sender)).isEmpty else {
             viewModel.endDrop()
             return []
         }
@@ -174,7 +184,12 @@ public final class TimelineMetalView: MTKView {
     public override func draggingEnded(_ sender: any NSDraggingInfo) { viewModel.endDrop() }
 
     public override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        viewModel.dropMedia(fileURLs(sender), at: convert(sender.draggingLocation, from: nil))
+        let point = convert(sender.draggingLocation, from: nil)
+        let items = libraryItems(sender)
+        if sender.draggingPasteboard.data(forType: LibraryDragPayload.pasteboardType) != nil {
+            return viewModel.dropLibraryItems(items, at: point)
+        }
+        return viewModel.dropMedia(fileURLs(sender), at: point)
     }
 
     public override func keyDown(with event: NSEvent) {
