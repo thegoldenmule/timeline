@@ -103,6 +103,10 @@ public final class TimelineViewModel {
     public private(set) var lastError: EditorError?
     /// Commands accepted by the store through this view model.
     public private(set) var commandCount = 0
+    /// Where a file drag over the view would land; the scene draws it until the drag leaves or drops.
+    public internal(set) var dropTarget: TimelineDropTarget?
+    /// Receives the media files dropped on the timeline and where they landed (`TimelineDrop.swift`).
+    public var onDropMedia: (([URL], TimelineDropTarget) -> Void)?
 
     private let ids: any IDGenerator
     private var observation: Task<Void, Never>?
@@ -579,5 +583,6 @@ public final class TimelineViewModel {
         _ = viewSize
         _ = preview?.isValid
         _ = pending?.current
+        _ = dropTarget
     }
 }
