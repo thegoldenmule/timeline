@@ -98,7 +98,9 @@ public enum MediaProbe {
         }
 
         let capturedAt = await captureMetadata(asset, into: &probe)
-        probe.capturedAt = capturedAt ?? (attributes?[.creationDate] as? Date)
+        // Whole seconds: file dates carry nanoseconds, the project codec stores milliseconds, and the
+        // in-memory state must equal what the event log decodes to.
+        probe.capturedAt = (capturedAt ?? (attributes?[.creationDate] as? Date)).map(MediaProbe.wholeSeconds)
 
         return MediaInspection(
             kind: video.isEmpty ? .audio : .video,
@@ -109,6 +111,11 @@ public enum MediaProbe {
 
     /// The track the editor plays and analyses: prefer a non-spatial (not `apac`) track with at most two
     /// channels, in track order; otherwise the first track.
+    /// `date` truncated to whole seconds, the precision a capture date carries.
+    static func wholeSeconds(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
+    }
+
     public static func primaryAudioTrackIndex(_ tracks: [AudioTrackInfo]) -> Int? {
         if let i = tracks.firstIndex(where: { $0.codec != "apac" && $0.channels <= 2 }) { return i }
         if let i = tracks.firstIndex(where: { $0.codec != "apac" }) { return i }
@@ -279,7 +286,7 @@ public enum MediaProbe {
         let props = image.properties
         var probe = Probe(
             width: Int(image.extent.width), height: Int(image.extent.height),
-            capturedAt: attributes?[.creationDate] as? Date)
+            capturedAt: (attributes?[.creationDate] as? Date).map(MediaProbe.wholeSeconds))
         probe.codec = url.pathExtension.lowercased()
         probe.extra["fileSize"] = .number(Double(fileSize))
         if let colorModel = props[kCGImagePropertyColorModel as String] as? String {
