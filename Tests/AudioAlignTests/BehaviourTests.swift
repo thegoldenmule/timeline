@@ -264,9 +264,14 @@ func rms(_ x: ArraySlice<Float>) -> Float {
         // (noise + performance + rumble + AGC) spliced in at a known position deep inside the second hour.
         let t0 = now()
         let fs = 48_000.0
-        var camera = pinkNoise(count: Int(cameraDuration * fs), seed: 52)
+        // A 10-minute pink-noise block tiled twelve times: the render never contains this noise, so its
+        // repetition is invisible to the alignment and keeps the debug-mode synthesis short.
         let noiseLevel = rms(performance[0..<Int(4 * fs)])
-        for i in camera.indices { camera[i] *= noiseLevel }
+        var block = pinkNoise(count: Int(600 * fs), seed: 52)
+        for i in block.indices { block[i] *= noiseLevel }
+        var camera: [Float] = []
+        camera.reserveCapacity(Int(cameraDuration * fs))
+        while camera.count < Int(cameraDuration * fs) { camera.append(contentsOf: block) }
         let splice = 97 * 60 + 41.5
         let at = Int(splice * fs)
         camera.replaceSubrange(at..<(at + performance.count), with: performance)
