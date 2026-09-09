@@ -130,6 +130,18 @@ public final class CacheIndex: Sendable {
         }
     }
 
+    /// Every indexed file, newest first. This is the whole machine's media, with no notion of which
+    /// project uses it, so the library panel lists what it does not already know from a project as
+    /// library-only media (docs/plans/media-library.md section 2.4).
+    public func allMedia(limit: Int = 5000) throws -> [MediaRecord] {
+        try writer.read { db in
+            try Row.fetchAll(
+                db, sql: "SELECT * FROM media ORDER BY first_seen DESC, content_hash LIMIT ?",
+                arguments: [max(0, limit)]
+            ).map(CacheIndex.mediaRecord)
+        }
+    }
+
     /// Inserts or updates the media row. `asset` and `probe` are replaced when given and kept otherwise.
     public func upsertMedia(
         contentHash: String, size: Int64, identity: FileIdentity?, libraryPath: String?, probe: Probe?,
