@@ -36,14 +36,17 @@ public final class AVFoundationRenderer: Renderer, Sendable {
         let options = compiled.options
         let structural = RenderFingerprint.structural(sequence, assets: assets, layout: layout, audio: options.audio)
         if structural == compiled.structuralFingerprint {
-            let next = make(sequence, assets: assets, options: options, structure: payload.structure)
+            let next = make(
+                sequence, assets: assets, options: options, structure: payload.structure,
+                structuralFingerprint: structural)
             if next.hasAudio == compiled.hasAudio { return .instructionsOnly(next) }
         }
         return .structural(try await compile(sequence, assets: assets, options: options))
     }
 
     private func make(
-        _ sequence: Sequence, assets: [AssetID: Asset], options: RenderOptions, structure: CompositionStructure
+        _ sequence: Sequence, assets: [AssetID: Asset], options: RenderOptions, structure: CompositionStructure,
+        structuralFingerprint: String? = nil
     ) -> Compiled {
         let blend = options.blendSpace ?? blendSpace
         let id = CompiledID(minting: UUIDv7Generator())
@@ -60,8 +63,8 @@ public final class AVFoundationRenderer: Renderer, Sendable {
             options: options)
         return Compiled(
             id: id, sequenceId: sequence.id,
-            structuralFingerprint: RenderFingerprint.structural(
-                sequence, assets: assets, layout: layout, audio: options.audio),
+            structuralFingerprint: structuralFingerprint
+                ?? RenderFingerprint.structural(sequence, assets: assets, layout: layout, audio: options.audio),
             instructionFingerprint: RenderFingerprint.instruction(
                 sequence, assets: assets, blendSpace: blend, quality: options.quality),
             duration: RationalTime(structure.duration), hasAudio: structure.hasAudio, options: options, payload: payload

@@ -5,8 +5,11 @@ import TimelineCore
 /// The two fingerprints `Renderer.update` diffs. Structural covers exactly what changes a composition track
 /// segment (the same split as `SequenceFingerprint` in ContractsTestSupport, plus whether the file exists,
 /// because a missing file becomes a slate); instruction covers the whole sequence.
+///
+/// Hashed with `Hasher`, not the canonical JSON encoder: a `Compiled` is an in-memory token compared only
+/// against tokens from the same process, and JSON-encoding a 200-clip sequence cost 10 ms of a 10 ms budget.
 enum RenderFingerprint {
-    private struct Segment: Encodable {
+    private struct Segment: Hashable {
         var clipId: ClipID
         var linkGroupId: LinkGroupID?
         var assetId: AssetID?
@@ -17,13 +20,13 @@ enum RenderFingerprint {
         var speed: Rational
     }
 
-    private struct TrackSegments: Encodable {
+    private struct TrackSegments: Hashable {
         var trackId: TrackID
         var kind: TrackKind
         var segments: [Segment]
     }
 
-    private struct Overlap: Encodable {
+    private struct Overlap: Hashable {
         var transitionId: TransitionID
         var left: ClipID
         var right: ClipID
@@ -31,7 +34,7 @@ enum RenderFingerprint {
         var alignment: TransitionAlignment
     }
 
-    private struct Structure: Encodable {
+    private struct Structure: Hashable {
         var frameDuration: RationalTime
         var width: Int
         var height: Int
@@ -67,21 +70,23 @@ enum RenderFingerprint {
                     transitionId: $0.id, left: $0.leftClipId, right: $0.rightClipId, duration: $0.duration,
                     alignment: $0.alignment)
             })
-        return (try? StableHash.fnv1a(encoding: structure)) ?? "structure-unencodable"
+        var hasher = Hasher()
+        hasher.combine(structure)
+        return "s" + hex(hasher.finalize())
     }
 
     static func instruction(
         _ sequence: Sequence, assets: [AssetID: Asset], blendSpace: BlendSpace, quality: RenderQuality
     ) -> String {
-        struct Everything: Encodable {
-            var sequence: Sequence
-            var assets: [AssetID: Asset]
-            var blendSpace: BlendSpace
-            var quality: RenderQuality
-        }
-        return
-            (try? StableHash.fnv1a(
-                encoding: Everything(sequence: sequence, assets: assets, blendSpace: blendSpace, quality: quality)))
-            ?? "instruction-unencodable"
+        var hasher = Hasher()
+        hasher.combine(sequence)
+        hasher.combine(assets)
+        hasher.combine(blendSpace)
+        hasher.combine(quality)
+        return "i" + hex(hasher.finalize())
+    }
+
+    private static func hex(_ value: Int) -> String {
+        String(UInt(bitPattern: value), radix: 16)
     }
 }
