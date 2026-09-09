@@ -444,6 +444,17 @@ public actor RecordingApprovalGate: ApprovalGate {
         await base.check(tool: tool, input: input, estimate: estimate, actor: actor, sessionId: sessionId)
     }
 
+    /// Forwards the tool's card content to the underlying gate, which stores it on the request, so the
+    /// card raised for a hook-path call shows the same details as the embedded path.
+    public func check(
+        tool: String, input: ToolInput, estimate: Estimate, presentation: ApprovalPresentation?, actor: Actor,
+        sessionId: String?
+    ) async -> ApprovalDecision {
+        await base.check(
+            tool: tool, input: input, estimate: estimate, presentation: presentation, actor: actor,
+            sessionId: sessionId)
+    }
+
     public func grant(_ token: ApprovalToken) async {
         granted.insert(token)
         await base.grant(token)

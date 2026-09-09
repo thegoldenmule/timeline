@@ -100,7 +100,7 @@ enum RenderTools {
     static let renderExport = Tool(
         name: "render_export",
         description:
-            "Exports a sequence to a file with a preset (hevcHLG4K, h264_1080p, reel9x16, proRes, or a full ExportPreset object). Always requires approval: the first call returns status approval_required with an approvalToken and an estimate; the user approves in the app; retry the identical call with approvalToken added. Runs as a background job and returns the output path and receipt when done.",
+            "Exports a sequence to a file with a preset (hevcHLG4K, h264_1080p, reel9x16, proRes, or a full ExportPreset object). Always requires approval: the first call returns status approval_required with an approvalToken and an estimate; the user approves in the app; retry the identical call with approvalToken added. Runs as a background job, records the render in the project's render ledger, and returns the output path, the renderId (what publish_youtube takes), the file hash, and the receipt when done.",
         inputSchema: Schema.object(
             "Export request.",
             properties: ToolSupport.inputProperties(
@@ -114,7 +114,8 @@ enum RenderTools {
                             Schema.object("Full preset.", properties: [:], additionalProperties: true),
                         ]),
                     "outputPath": Schema.string(
-                        "Destination file path (default: ~/Movies/Timeline/Exports/<sequence>-<preset>.<ext>)."),
+                        "Destination file path (default: <library root>/Exports/<sequence>-<preset>.<ext>, where the library root is ~/Movies/Timeline unless TIMELINE_ROOT points elsewhere)."
+                    ),
                     "approvalToken": Schema.string("Token from the approval_required result, once granted."),
                 ]), required: ["preset"]),
         outputSchema: Schema.object(
@@ -122,11 +123,15 @@ enum RenderTools {
             properties: [
                 "status": Schema.string("done or approval_required."),
                 "outputPath": Schema.string("Where the file was written."),
+                "renderId": Schema.string(
+                    "The render ledger row id; pass it to publish_youtube. Absent when the store keeps no ledger."),
+                "outputHash": Schema.string("sha256-<hex> of the written file, what a publish verifies against."),
                 "durationSeconds": Schema.number("Sequence duration exported."),
                 "preset": Schema.any("The preset used."),
                 "receipt": Schema.any("The ExportReceipt."),
                 "jobId": Schema.string("Export job id."),
                 "version": Schema.integer("Project version exported."),
+                "warnings": Schema.array("Non-fatal notes.", items: Schema.string("Warning.")),
                 "approvalToken": Schema.string("Present when approval is required."),
                 "estimate": Schema.any("Estimated seconds and bytes when approval is required."),
             ], required: ["status"], additionalProperties: true),
@@ -167,28 +172,65 @@ enum RenderTools {
             outputURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         } else {
             let name = "\(sequence.name)-\(preset.name)".replacingOccurrences(of: "/", with: "-")
-            outputURL = LibraryLayout.default.root.appendingPathComponent("Exports/\(name).\(preset.fileExtension)")
+            let layout = context.services.mediaLibrary?.layout ?? LibraryLayout.default
+            outputURL = layout.exportsDir.appendingPathComponent("\(name).\(preset.fileExtension)")
         }
-        let compiled = try await renderer.compile(sequence, assets: resolved.project.assets, options: .full)
+        let version = resolved.project.version
+        var warnings: [String] = []
+        // The render ledger (storage.md section 5): a row per export, so publish_youtube can find the file
+        // and its hash later. A store without one still exports; it just cannot hand out a renderId.
+        let ledger = resolved.store as? any RenderLedger
+        if ledger == nil { warnings.append("store keeps no render ledger; no renderId") }
+        let record = try await ledger?.recordRender(
+            id: nil, sequenceId: sequence.id, preset: preset, projectVersion: version)
+        func markRender(_ status: RenderStatus) async {
+            guard let ledger, let record else { return }
+            _ = try? await ledger.updateRender(record.id, status: status, outputURL: nil, outputHash: nil, receipt: nil)
+        }
+        let compiled: Compiled
+        do {
+            compiled = try await renderer.compile(sequence, assets: resolved.project.assets, options: .full)
+        } catch {
+            await markRender(.failed)
+            throw error
+        }
         let handle = await runner.submit(renderer.export(compiled, preset: preset, to: outputURL))
+        await markRender(.running)
         let outcome: JobOutcome
         do {
             outcome = try await handle.wait()
         } catch let error as RenderError {
+            await markRender(.failed)
             return .error(code: "renderFailed", message: String(describing: error))
         } catch let error as JobError {
+            await markRender(.failed)
             return .error(code: "jobFailed", message: error.message)
+        } catch is CancellationError {
+            await markRender(.cancelled)
+            return .error(code: "cancelled", message: "The export was cancelled")
+        } catch {
+            await markRender(.failed)
+            return .error(code: "renderFailed", message: ToolSupport.describe(error))
         }
+        let written = outcome.urls.first ?? outputURL
+        let outputHash = try FileHash.sha256(of: written)
         var receipt = try outcome.payload(as: ExportReceipt.self)
-        receipt?.projectVersion = resolved.project.version
+        receipt?.projectVersion = version
+        receipt?.outputHash = outputHash
+        if let ledger, let record {
+            _ = try await ledger.updateRender(
+                record.id, status: .done, outputURL: written, outputHash: outputHash, receipt: receipt)
+        }
+        warnings.append(contentsOf: outcome.warnings)
         var o: [String: JSONValue] = [
-            "status": .string("done"), "outputPath": .string((outcome.urls.first ?? outputURL).path),
+            "status": .string("done"), "outputPath": .string(written.path), "outputHash": .string(outputHash),
             "durationSeconds": .number(duration.seconds), "preset": ToolSupport.json(preset),
-            "jobId": .string(handle.id.rawValue), "version": .number(Double(resolved.project.version)),
-            "projectId": .string(resolved.projectId.rawValue), "warnings": .array(outcome.warnings.map { .string($0) }),
+            "jobId": .string(handle.id.rawValue), "version": .number(Double(version)),
+            "projectId": .string(resolved.projectId.rawValue), "warnings": .array(warnings.map { .string($0) }),
         ]
+        if let record { o["renderId"] = .string(record.id) }
         if let receipt { o["receipt"] = ToolSupport.json(receipt) }
         return ToolOutput(
-            structured: .object(o), text: "Exported \(sequence.name) with \(preset.name) to \(outputURL.path).")
+            structured: .object(o), text: "Exported \(sequence.name) with \(preset.name) to \(written.path).")
     }
 }

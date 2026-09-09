@@ -14,6 +14,7 @@ public enum EditorTools {
             AlignTools.alignAudio,
             MediaTools.mediaImport, MediaTools.mediaAnalyze, MediaTools.transcriptSearch, MediaTools.lookAt,
             RenderTools.renderPreview, RenderTools.renderExport,
+            PublishTools.publishYouTube, PublishTools.publishStatus, PublishTools.accountStatus,
             ApplyTools.undo, ApplyTools.redo,
         ]
     }
@@ -24,7 +25,8 @@ public enum EditorTools {
     static let requiredService: [String: @Sendable (ToolServices) -> Bool] = [
         "align_audio": { $0.hasAligner }, "media_import": { $0.hasMediaLibrary }, "media_analyze": { $0.hasAnalyzer },
         "transcript_search": { $0.hasAnalyzer }, "look_at": { $0.hasThumbnails }, "render_preview": { $0.hasRenderer },
-        "render_export": { $0.hasRenderer },
+        "render_export": { $0.hasRenderer }, "publish_youtube": { $0.hasPublishing },
+        "publish_status": { $0.hasPublisher }, "account_status": { $0.hasAccounts },
     ]
 
     /// A registry with the standard tools registered. Tools whose service is missing from
@@ -57,4 +59,8 @@ extension ToolServices {
     var hasAnalyzer: Bool { analyzer != nil }
     var hasThumbnails: Bool { thumbnails != nil }
     var hasRenderer: Bool { renderer != nil }
+    var hasPublisher: Bool { publishers[.youtube] != nil }
+    var hasAccounts: Bool { !accounts.isEmpty }
+    /// `publish_youtube` needs the publisher, the Google account provider, and a job runner.
+    var hasPublishing: Bool { hasPublisher && accounts[.google] != nil && jobRunner != nil }
 }

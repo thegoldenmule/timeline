@@ -58,7 +58,7 @@ import TimelineCore
 
     @Test func everyToolHasAStrictSchemaAndValidExamples() {
         let tools = EditorTools.all
-        #expect(tools.count == 15)
+        #expect(tools.count == 18)
         #expect(Set(tools.map(\.name)).count == tools.count)
         for tool in tools {
             #expect(tool.inputSchema["type"] == "object", "\(tool.name) input is an object schema")
@@ -66,7 +66,7 @@ import TimelineCore
             #expect(tool.outputSchema != nil, "\(tool.name) has an outputSchema")
             #expect(!tool.examples.isEmpty, "\(tool.name) has an example")
             #expect(!tool.description.isEmpty)
-            if tool.name != "project_list" {
+            if !["project_list", "account_status"].contains(tool.name) {
                 #expect(tool.inputSchema["properties"]?["projectId"] != nil, "\(tool.name) takes projectId")
             }
             let validator = JSONSchemaValidator(root: tool.inputSchema)
