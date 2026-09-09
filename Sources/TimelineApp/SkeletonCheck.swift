@@ -37,7 +37,7 @@ enum SkeletonCheck {
         do {
             // 1. Composition root over a temporary library root; the MCP host is listening after boot.
             let log = AppLog(echo: false)
-            let services = try await AppServices.boot(root: root, agent: .fallback, log: log)
+            let services = try await AppServices.boot(root: root, agent: .fallback, publishing: .fake, log: log)
             try require(await services.mcpHost.isRunning, "boot", "MCP host is not running")
             try require(
                 FileManager.default.fileExists(atPath: services.proxyConfigurationURL.path), "boot",
@@ -45,7 +45,7 @@ enum SkeletonCheck {
             ok(
                 "boot",
                 "root \(root.lastPathComponent), MCP \(services.mcp.url.absoluteString), "
-                    + "\(await services.registry.list().count) tools, agent fallback")
+                    + "\(await services.registry.list().count) tools, agent fallback, publishing fake")
 
             // 2. Create a project in the temp root (SQLite package), open it, reach readyToPlay.
             let projectURL = services.layout.projectsDir.appendingPathComponent("Skeleton.tlproj", isDirectory: true)
@@ -362,7 +362,175 @@ enum SkeletonCheck {
                 "Skeleton fork.tlproj at v\(fork.version) with \(fork.history.live.count) live transactions; original still v\(preForkVersion)"
             )
 
-            // 12. Close, reopen from disk, same version and state; then shut down.
+            // 12. Publish: connect the fixture Google account through the real loopback flow, export through
+            //     render_export (a render row), then publish_youtube through the registry: approval_required
+            //     with the card's rows, approved on the stack, retried with the token; the fake drops the
+            //     connection once mid-upload and the upload resumes; the receipt, the ledger rows, the caption
+            //     insert, publish_status over MCP, and account_status are asserted.
+            let provider = try unwrap(services.accounts, "publish", "no account provider")
+            let publisher = try unwrap(services.publisher, "publish", "no publisher")
+            let fakeYouTube = try unwrap(services.publishing.fakeServer, "publish", "no fake YouTube server")
+            let connected = try await provider.connect(scopes: publisher.requiredScopes, loginHint: nil)
+            try require(connected.id == "sub-1", "publish", "connected \(connected.id)")
+            try require(
+                connected.channelHandle == "@skeleton", "publish", "handle \(connected.channelHandle ?? "nil")")
+            try require(
+                FileManager.default.fileExists(atPath: root.appendingPathComponent("google-tokens.json").path),
+                "publish", "no token file under the root")
+            // A caption track with two cues, so the publish inserts an SRT track (D7).
+            let publishSequence = try unwrap(original.sequence, "publish", "no sequence")
+            let captionTrackId = TrackID(minting: UUIDv7Generator())
+            let captioned = try await original.apply(
+                .addCaptionTrack(
+                    .init(id: captionTrackId, sequenceId: .id(publishSequence.id), name: "English", language: "en")),
+                label: "Add captions")
+            try await original.waitForVersion(captioned.version)
+            let cues = try await original.apply(
+                .replaceCaptions(
+                    .init(
+                        trackId: .id(captionTrackId),
+                        items: [
+                            .init(start: RationalTime(1, 2), duration: RationalTime(3, 2), text: "Hello there"),
+                            .init(start: RationalTime(5, 2), duration: RationalTime(2, 1), text: "and welcome"),
+                        ])), label: "Caption text")
+            try await original.waitForVersion(cues.version)
+            // The export, gated like the toolbar button's, records a render row with the file's hash.
+            let publishExportURL = root.appendingPathComponent("Exports/skeleton-publish.mp4")
+            let exportApproval = approveNext("render_export", on: approvals)
+            let exported = try await tools.call(
+                "render_export",
+                input: ToolInput(["preset": "h264_1080p", "outputPath": .string(publishExportURL.path)]))
+            try require(await exportApproval.value != nil, "publish", "render_export raised no approval")
+            try require(exported.structured?["status"]?.stringValue == "done", "publish", exported.text ?? "export")
+            let renderId = try unwrap(exported.structured?["renderId"]?.stringValue, "publish", "no renderId")
+            let renderLedger = try unwrap(original.renderLedger, "publish", "the store keeps no render ledger")
+            let renderRow = try unwrap(
+                try await renderLedger.render(renderId), "publish", "no render row \(renderId)")
+            let exportHash = try FileHash.sha256(of: publishExportURL)
+            try require(renderRow.status == .done, "publish", "render row is \(renderRow.status)")
+            try require(renderRow.outputHash == exportHash, "publish", "render row hash differs from the file")
+            try require(
+                renderRow.outputURL?.path == publishExportURL.path, "publish",
+                "render row path \(renderRow.outputURL?.path ?? "nil")")
+            let exportBytes =
+                (try FileManager.default.attributesOfItem(atPath: publishExportURL.path)[.size] as? Int64) ?? 0
+            // publish_youtube as the human: approval_required first, with the card's rows.
+            let publishInput = ToolInput([
+                "renderId": .string(renderId), "title": "Skeleton publish",
+                "captionTrackIds": [.string(captionTrackId.rawValue)],
+                "thumbnailAt": try JSONValue(encoding: RationalTime(1, 2)), "waitSeconds": 60,
+            ])
+            let asked = try await services.callTool("publish_youtube", input: publishInput, actor: .human)
+            try require(asked.isApprovalRequired, "publish", "expected approval_required, got \(asked.text ?? "")")
+            let publishId = try unwrap(asked.structured?["publishId"]?.stringValue, "publish", "no publishId")
+            let askedRequest = try unwrap(ToolLoopSession.request(from: asked), "publish", "no request in the output")
+            let detailLabels = askedRequest.presentation?.details.map(\.label) ?? []
+            for label in ["Channel", "Privacy", "Captions", "Thumbnail", "Certification"] {
+                try require(detailLabels.contains(label), "publish", "card has no \(label) row: \(detailLabels)")
+            }
+            let cardPrivacy = askedRequest.presentation?.details.first { $0.label == "Privacy" }?.value
+            try require(cardPrivacy == "private", "publish", "card privacy \(cardPrivacy ?? "nil")")
+            try require(askedRequest.presentation?.warnings.isEmpty == true, "publish", "unexpected warnings")
+            // Approved on the stack (the card the window shows), then retried with the token and the same id.
+            let publishApproval = approveNext("publish_youtube", on: approvals)
+            let approvedRequest = try unwrap(await publishApproval.value, "publish", "the card never reached the stack")
+            try require(approvedRequest.token == askedRequest.token, "publish", "the stack saw another request")
+            try require(
+                approvedRequest.presentation?.details.count == detailLabels.count, "publish",
+                "the stack's card lost its rows")
+            let chunk = services.publishing.uploadOptions.chunkBytes
+            let dropAfter = max(1, exportBytes / 2)
+            await fakeYouTube.dropConnection(afterBytes: dropAfter)
+            var retryInput = publishInput
+            retryInput.arguments["approvalToken"] = .string(askedRequest.token.rawValue)
+            retryInput.arguments["publishId"] = .string(publishId)
+            let published = try await services.callTool("publish_youtube", input: retryInput, actor: .human)
+            try require(!published.isError, "publish", published.text ?? "publish error")
+            let publishedStatus = published.structured?["status"]?.stringValue
+            try require(
+                publishedStatus == "done", "publish", "status \(publishedStatus ?? "nil"): \(published.text ?? "")")
+            let receipt = try unwrap(
+                try published.structured?["receipt"]?.decoded(as: PublishReceipt.self), "publish", "no receipt")
+            try require(receipt.remoteId == "fake-video-1", "publish", "remoteId \(receipt.remoteId)")
+            try require(
+                receipt.remoteURL.absoluteString == "https://youtu.be/fake-video-1", "publish",
+                "url \(receipt.remoteURL)")
+            try require(
+                receipt.privacy == .private && receipt.requestedPrivacy == .private, "publish",
+                "privacy \(receipt.privacy)")
+            try require(receipt.resumedCount >= 1, "publish", "resumedCount \(receipt.resumedCount)")
+            try require(
+                receipt.bytesUploaded == exportBytes, "publish", "uploaded \(receipt.bytesUploaded) of \(exportBytes)")
+            try require(receipt.contentHash == exportHash, "publish", "receipt hash differs from the file")
+            try require(receipt.captionIds.count == 1, "publish", "captions \(receipt.captionIds)")
+            try require(receipt.thumbnailSet, "publish", "thumbnail not set")
+            try require(receipt.madeForKids == nil, "publish", "madeForKids was sent")
+            try require(published.structured?["publishId"]?.stringValue == publishId, "publish", "publishId changed")
+            let publishJSON = PrettyJSON.string(published.structured)
+            try require(
+                !publishJSON.contains("upload/youtube") && !publishJSON.contains("fake-token"), "publish",
+                "the output leaks the session or a token")
+            // What the fake saw: one status query after the drop, no overlapping ranges, one SRT caption body.
+            let statusQueries = await fakeYouTube.statusQueries.count
+            try require(statusQueries == 1, "publish", "\(statusQueries) status queries")
+            try require(await !fakeYouTube.hasOverlappingChunks, "publish", "overlapping chunk ranges")
+            let dropped = await fakeYouTube.chunkRequests.filter(\.dropped).count
+            try require(dropped == 1, "publish", "\(dropped) dropped chunks")
+            let insertedCaptions = await fakeYouTube.captions(forVideo: "fake-video-1")
+            try require(insertedCaptions.count == 1, "publish", "\(insertedCaptions.count) captions on the video")
+            try require(
+                insertedCaptions[0].body.contains("Hello there") && insertedCaptions[0].body.contains("-->"), "publish",
+                "caption body is not SRT: \(insertedCaptions[0].body.prefix(60))")
+            try require(
+                await fakeYouTube.video("fake-video-1")?.privacy == "private", "publish", "the video is not private")
+            // The ledger: the publish row done with the receipt and no session; no project version bump.
+            let publishLedger = try unwrap(original.publishLedger, "publish", "the store keeps no publish ledger")
+            let publishRow = try unwrap(try await publishLedger.publish(publishId), "publish", "no publish row")
+            try require(
+                publishRow.status == .done && publishRow.receipt != nil && publishRow.session == nil, "publish",
+                "row \(publishRow.status), receipt \(publishRow.receipt != nil), session \(publishRow.session != nil)")
+            try require(
+                publishRow.renderId == renderId && publishRow.remoteId == "fake-video-1", "publish", "row links")
+            try require(original.version == cues.version, "publish", "publishing bumped the project version")
+            // publish_status over MCP lists it, without the session; account_status shows the channel.
+            let statusReply = try await probe.post(MCPProbe.call(4, "publish_status", [:]))
+            let statusContent = statusReply.result?["structuredContent"]
+            let statusRows = statusContent?["publishes"]?.arrayValue ?? []
+            try require(
+                statusRows.first?["publishId"]?.stringValue == publishId, "publish",
+                "publish_status over MCP lists \(statusRows.count) rows")
+            try require(
+                statusRows.first?["status"]?.stringValue == "done"
+                    && statusRows.first?["url"]?.stringValue == "https://youtu.be/fake-video-1", "publish",
+                "publish_status row \(String(describing: statusRows.first))")
+            try require(
+                !PrettyJSON.string(statusContent).contains("upload/youtube"), "publish",
+                "publish_status leaks the session"
+            )
+            let accountStatus = try await tools.call("account_status")
+            let statusAccounts = accountStatus.structured?["accounts"]?.arrayValue ?? []
+            try require(
+                accountStatus.structured?["configured"]?.boolValue == true, "publish", "account_status: not configured")
+            try require(
+                statusAccounts.first?["channelHandle"]?.stringValue == "@skeleton"
+                    && statusAccounts.first?["channelTitle"]?.stringValue == "Skeleton Channel", "publish",
+                "account_status accounts \(statusAccounts)")
+            try require(await services.approvals.pending().isEmpty, "publish", "gate still has pending requests")
+            ok(
+                "publish",
+                "connected \(connected.id) (\(connected.channelTitle ?? "") \(connected.channelHandle ?? "")); "
+                    + "render \(renderId.prefix(8))… done (h264_1080p, v\(renderRow.projectVersion), "
+                    + "\(exportHash.prefix(15))…); publish_youtube -> approval_required "
+                    + "(\(detailLabels.joined(separator: ", "))); approved on the stack, retried; "
+                    + String(
+                        format: "%.1f MiB in %d KiB chunks, dropped after %.2f MiB, resumed %d; ",
+                        Double(exportBytes) / 1_048_576, Int(chunk >> 10), Double(dropAfter) / 1_048_576,
+                        receipt.resumedCount)
+                    + "done \(receipt.remoteId) \(receipt.remoteURL.absoluteString) private, 1 caption, "
+                    + "thumbnail set; row done, no session; publish_status over MCP lists it; "
+                    + "account_status shows \(connected.channelHandle ?? "")")
+
+            // 13. Close, reopen from disk, same version and state; then shut down.
             let finalVersion = original.version
             let finalState = original.project
             await original.close(using: services)
@@ -374,12 +542,19 @@ enum SkeletonCheck {
                 before == after, "reopen", "state differs after reopen: \(SkeletonCheck.firstDifference(before, after))"
             )
             try require(reopened.history.live.count == original.history.live.count, "reopen", "history differs")
+            let reopenedRow = try await reopened.publishLedger?.publish(publishId) ?? nil
+            try require(
+                reopenedRow?.status == .done && reopenedRow?.session == nil, "reopen",
+                "publish row after reopen: \(String(describing: reopenedRow?.status))")
+            try require(
+                try await reopened.renderLedger?.render(renderId)?.status == .done, "reopen", "render row after reopen")
             await reopened.close(using: services)
             await services.shutdown()
             let receipts = await (services.receipts as? ReceiptLog)?.receipts.count ?? 0
             ok(
                 "reopen",
-                "v\(finalVersion) after close and reopen, state and history equal; \(receipts) tool receipts logged")
+                "v\(finalVersion) after close and reopen, state and history equal, publish row done; "
+                    + "\(receipts) tool receipts logged")
 
             let elapsed = ContinuousClock.now - started
             print("\nSkeleton check passed: \(steps.count) steps in \(elapsed) -- \(steps.joined(separator: ", "))")
@@ -417,6 +592,23 @@ enum SkeletonCheck {
         let lo = max(0, i - 80)
         return
             "at \(i): before …\(String(ca[lo..<min(ca.count, i + 80)]))… after …\(String(cb[lo..<min(cb.count, i + 80)]))…"
+    }
+
+    /// Approves the next request for `tool` that lands on the stack, the way a human would; nil on timeout.
+    private static func approveNext(_ tool: String, on approvals: ApprovalCenter, timeout: Duration = .seconds(20))
+        -> Task<ApprovalRequest?, Never>
+    {
+        Task { @MainActor in
+            let deadline = ContinuousClock.now + timeout
+            while ContinuousClock.now < deadline {
+                if let request = approvals.requests.first(where: { $0.tool == tool }) {
+                    await approvals.approve(request)
+                    return request
+                }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return nil
+        }
     }
 
     private static func unwrap<T>(_ value: T?, _ step: String, _ reason: @autoclosure () -> String) throws -> T {

@@ -76,9 +76,10 @@ struct PublishingServices: Sendable {
     /// verification and the compliance audit of section 7 are done.
     static let accountNotices = [AccountText.unverifiedApp, AccountText.testingExpiry]
 
-    /// The 5 MiB the check uploads, in 1 MiB chunks, with backoff and processing polls in milliseconds.
+    /// 256 KiB chunks (so the check's short export still spans several and a drop lands mid-file), with
+    /// backoff and processing polls in milliseconds.
     static let fakeUploadOptions = UploadOptions(
-        chunkBytes: 1 << 20, backoffUnit: .milliseconds(5), maxBackoff: .milliseconds(20),
+        chunkBytes: 256 << 10, backoffUnit: .milliseconds(5), maxBackoff: .milliseconds(20),
         processingPollInitial: .milliseconds(5), processingPollMaximum: .milliseconds(20))
 
     static let off = PublishingServices(
