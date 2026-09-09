@@ -189,7 +189,7 @@ struct RenderTests {
         #expect(await eventually { view.redrawRequests > requests })
         let afterModel = view.redrawRequests
         await view.mediaCache?.drain()
-        #expect(view.redrawRequests > afterModel)
+        #expect(await eventually { view.redrawRequests > afterModel })
         // The SwiftUI wrapper builds the same view.
         let wrapper = TimelineView(viewModel: f.viewModel)
         #expect(wrapper.viewModel === f.viewModel)
