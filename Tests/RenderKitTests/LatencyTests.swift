@@ -271,7 +271,22 @@ func milliseconds(from start: ContinuousClock.Instant, to end: ContinuousClock.I
         print(
             "[latency] structural with audio, paused: \(withAudio.map(fmt)) median \(fmt(median(withAudio))) ms (readyToPlay \(withAudioReady.map(fmt)))"
         )
-        #expect(median(withAudio) <= 150 * debugSlack)
+        // `readyToPlay` on an audio-bearing item is AVFoundation's cost, not this package's, and the
+        // preview-update spike measured it as bimodal on one unchanged binary: 5-25 ms for some process
+        // launches, 340-590 ms for others, root cause not found (spikes/preview-update/SPIKE.md, "Bimodal
+        // audio startup"; still open in docs/research/README.md, which is why the plan leans the interactive
+        // promise on the video-only item above). Both regimes appear here, and the harness's own
+        // `AVPlayerItemVideoOutput` roughly doubles the slow one, so the end-to-end median swings between
+        // ~40 ms and ~950 ms with nothing in this repository changing. Asserting it asserts the regime, so
+        // the plan's 150 ms is held against the part that is ours: the compile, the instruction table, the
+        // seek, the swap bookkeeping and the first composed frame once the item is up.
+        let aroundStartup = zip(withAudio, withAudioReady).map { $0 - $1 }
+        print(
+            "[latency] structural with audio, outside item startup: \(aroundStartup.map(fmt)) median \(fmt(median(aroundStartup))) ms"
+        )
+        #expect(median(aroundStartup) <= 150 * debugSlack)
+        let audioSwapsReady = h.player.swaps.suffix(5).allSatisfy(\.ready)
+        #expect(audioSwapsReady, "every audio-bearing swap reached readyToPlay")
     }
 
     @Test @MainActor func pictureNeverFreezesAcrossAPlayingSwap() async throws {
