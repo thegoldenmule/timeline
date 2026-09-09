@@ -75,3 +75,9 @@ spikes/**/claude-p-output.json
 
 # Agent worktrees
 .claude/worktrees/
+
+# Google OAuth client and account files (never commit)
+google-oauth-client*.json
+google-tokens.json
+accounts.json
+client_secret_*.json

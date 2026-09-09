@@ -5,7 +5,7 @@ build:
 
 # Test targets run one at a time. Running every target's tests in one parallel process opens dozens of
 # concurrent AVAssetReader/AVAssetWriter sessions and stalls inside CoreMedia (docs/design/integration.md).
-TEST_TARGETS = TimelineCoreTests ContractsTests ProjectStoreTests RenderKitTests MediaKitTests AudioAlignTests AgentKitTests TimelineUITests
+TEST_TARGETS = TimelineCoreTests ContractsTests ProjectStoreTests RenderKitTests MediaKitTests AudioAlignTests AgentKitTests PublishKitTests TimelineUITests
 
 test:
 	swift build --build-tests

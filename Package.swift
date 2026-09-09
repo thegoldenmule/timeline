@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "MediaKit", targets: ["MediaKit"]),
         .library(name: "AudioAlign", targets: ["AudioAlign"]),
         .library(name: "AgentKit", targets: ["AgentKit"]),
+        .library(name: "PublishKit", targets: ["PublishKit"]),
         .library(name: "TimelineUI", targets: ["TimelineUI"]),
         .executable(name: "TimelineApp", targets: ["TimelineApp"]),
         .executable(name: "timeline-mcp", targets: ["TimelineMCPProxy"]),
@@ -118,6 +119,22 @@ let package = Package(
             swiftSettings: strict),
 
         .target(
+            name: "PublishKit",
+            dependencies: [
+                "TimelineCore", "Contracts",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+            ],
+            swiftSettings: strict,
+            linkerSettings: [.linkedFramework("Security"), .linkedFramework("CryptoKit")]),
+        .testTarget(
+            name: "PublishKitTests",
+            dependencies: ["PublishKit", "ContractsTestSupport"],
+            resources: [.copy("Transcripts")],
+            swiftSettings: strict),
+
+        .target(
             name: "AgentKit",
             dependencies: [
                 "TimelineCore", "Contracts",
@@ -161,7 +178,7 @@ let package = Package(
             name: "TimelineApp",
             dependencies: [
                 "TimelineCore", "Contracts", "ContractsTestSupport",
-                "ProjectStore", "RenderKit", "MediaKit", "AudioAlign", "AgentKit", "TimelineUI",
+                "ProjectStore", "RenderKit", "MediaKit", "AudioAlign", "AgentKit", "TimelineUI", "PublishKit",
             ],
             swiftSettings: strict,
             linkerSettings: [.linkedFramework("AVKit")]),

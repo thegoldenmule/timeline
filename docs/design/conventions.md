@@ -9,8 +9,9 @@ One Swift package at the repo root (`Package.swift`, swift-tools-version 6.2, ma
 | Target | Kind | May import |
 |---|---|---|
 | `TimelineCore` | library | Foundation only |
-| `Contracts` | library | `TimelineCore`, AVFoundation, CoreGraphics |
+| `Contracts` | library | `TimelineCore`, AVFoundation, CoreGraphics, CryptoKit |
 | `ContractsTestSupport` | library | `TimelineCore`, `Contracts`, AVFoundation, CoreImage |
+| `PublishKit` | library | `TimelineCore`, `Contracts`, swift-nio, Security, CryptoKit. Never AppKit: the browser opener is injected. |
 | `ProjectStore`, `RenderKit`, `MediaKit`, `AudioAlign`, `AgentKit`, `TimelineUI` | library | `TimelineCore`, `Contracts`, their declared externals. Never a sibling. |
 | `TimelineApp` | executable | everything (composition root) |
 | `TimelineMCPProxy` (`timeline-mcp`) | executable | `AgentKit` |
