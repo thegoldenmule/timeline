@@ -26,7 +26,8 @@
           "kind" : "video",
           "locked" : false,
           "muted" : false,
-          "name" : "V1"
+          "name" : "V1",
+          "solo" : false
         },
         {
           "clips" : {
@@ -36,7 +37,8 @@
           "kind" : "audio",
           "locked" : false,
           "muted" : false,
-          "name" : "A1"
+          "name" : "A1",
+          "solo" : false
         }
       ],
       "transitions" : {

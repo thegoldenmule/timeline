@@ -64,7 +64,8 @@
       "kind" : "video",
       "locked" : false,
       "muted" : false,
-      "name" : "V1"
+      "name" : "V1",
+      "solo" : false
     },
     "trackId" : "track-v1"
   },

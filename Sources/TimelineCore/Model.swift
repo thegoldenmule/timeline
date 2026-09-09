@@ -306,13 +306,15 @@ public struct Track: Hashable, Sendable, Codable {
     public var name: String
     public var muted: Bool
     public var locked: Bool
+    /// Soloing silences every *other* track of the same kind; see `Sequence.silence(of:)`.
+    public var solo: Bool
     public var clips: [ClipID: Clip]
     /// Caption tracks only: BCP-47 language tag and the default style for items without one.
     public var language: String?
     public var captionStyle: CaptionStyle?
 
     public init(
-        id: TrackID, kind: TrackKind, name: String, muted: Bool = false, locked: Bool = false,
+        id: TrackID, kind: TrackKind, name: String, muted: Bool = false, locked: Bool = false, solo: Bool = false,
         clips: [ClipID: Clip] = [:], language: String? = nil, captionStyle: CaptionStyle? = nil
     ) {
         self.id = id
@@ -320,10 +322,52 @@ public struct Track: Hashable, Sendable, Codable {
         self.name = name
         self.muted = muted
         self.locked = locked
+        self.solo = solo
         self.clips = clips
         self.language = language
         self.captionStyle = captionStyle
     }
+
+    /// `solo` was added after `Track` shipped, so documents and event snapshots written without it decode
+    /// unsoloed rather than needing an upcaster step (docs/plans/track-controls.md section 2.1).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(TrackID.self, forKey: .id)
+        kind = try c.decode(TrackKind.self, forKey: .kind)
+        name = try c.decode(String.self, forKey: .name)
+        muted = try c.decode(Bool.self, forKey: .muted)
+        locked = try c.decode(Bool.self, forKey: .locked)
+        solo = try c.decodeIfPresent(Bool.self, forKey: .solo) ?? false
+        clips = try c.decode([ClipID: Clip].self, forKey: .clips)
+        language = try c.decodeIfPresent(String.self, forKey: .language)
+        captionStyle = try c.decodeIfPresent(CaptionStyle.self, forKey: .captionStyle)
+    }
+}
+
+/// Why a track contributes nothing to the compiled output. `.muted` is the user's own statement about the
+/// track; `.solo` is a consequence of another track of the same kind being soloed and vanishes when that
+/// one does. The two are drawn differently, so they must not be recomputed differently either.
+public enum TrackSilence: String, Hashable, Sendable, Codable {
+    case muted
+    case solo
+}
+
+// MARK: Mute and solo
+
+extension Sequence {
+    /// True when some track of `kind` is soloed, so its peers are silenced.
+    public func hasSolo(_ kind: TrackKind) -> Bool { tracks.contains { $0.kind == kind && $0.solo } }
+
+    /// Nil when the track plays, otherwise why it does not. An explicit mute outranks the track's own solo:
+    /// mute is a statement about the track, solo is a filter over whatever is left.
+    public func silence(of track: Track) -> TrackSilence? {
+        if track.muted { return .muted }
+        if !track.solo && hasSolo(track.kind) { return .solo }
+        return nil
+    }
+
+    /// Shorthand for `silence(of:) == nil`: the track reaches the compiled output.
+    public func isActive(_ track: Track) -> Bool { silence(of: track) == nil }
 }
 
 // MARK: - Clips
