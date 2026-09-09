@@ -221,8 +221,8 @@ Band Rehearsal project. Ordering: score descending, then `addedAt` descending, t
 
 ### 2.6 Duplicating a foreign asset, end to end
 
-Dragging (or double-clicking, or "Add to project") a `CatalogItem` whose `projectId` is not the open
-project runs `MediaImporter.insert(_ items:at:)`:
+Dragging (or Return, or "Add to project") a `CatalogItem` whose `projectId` is not the open project runs
+`MediaImporter.insert(_ items:at:)`:
 
 1. **Already in this project?** `document.project.assets.values.first { $0.contentHash == item.contentHash }`
    — the exact check `MediaImporter.record` already does. Hit → no job, no command, straight to
@@ -275,7 +275,7 @@ Resulting surface behaviour:
 | Timeline drop | **unchanged**: import + ripple insert at the drop target, back to back |
 | Window-wide drop (preview, sidebar, status bar) | library only |
 | Library panel drag onto the timeline | duplicate-if-needed + insert at the drop target |
-| Library panel double-click / Return / "Insert at playhead" | duplicate-if-needed + insert at the playhead |
+| Library panel Return / "Insert at playhead" | duplicate-if-needed + insert at the playhead (no double-click: a row tap gesture breaks selection and dragging) |
 | `media_import` tool | unchanged (already library-only) |
 
 ### 2.8 The panel

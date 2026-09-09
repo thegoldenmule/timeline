@@ -228,7 +228,8 @@ public final class MediaLibraryModel {
 }
 
 /// The media library pane: search, kind and scope filters, and one row per browsable file. Rows drag
-/// onto the timeline; the context menu inserts at the playhead without one.
+/// onto the timeline (and onto the agent pane, which stages the path instead of importing); Return and
+/// the context menu insert the selection at the playhead without a drag.
 public struct MediaLibraryView: View {
     public let model: MediaLibraryModel
     /// Insert these items at the playhead (double-click, Return, or the context menu).
@@ -293,7 +294,10 @@ public struct MediaLibraryView: View {
                 List(rows, selection: model.selection) { row in
                     MediaLibraryRow(model: self.model, row: row)
                         .contentShape(.rect)
-                        .onTapGesture(count: 2) { insert([row]) }
+                        // No tap gesture on a row, ever. A `TapGesture` — `onTapGesture(count: 2)`,
+                        // simultaneous or not — consumes the row's mouse-down, and the row then neither
+                        // selects nor starts its drag: the panel looks dead and nothing can be dragged out
+                        // of it. Return and the context menu insert instead.
                         .draggable(self.model.payload(dragged(row))) {
                             Label(row.asset.displayName, systemImage: "film")
                         }
@@ -310,6 +314,12 @@ public struct MediaLibraryView: View {
                         }
                 }
                 .listStyle(.inset)
+                .onKeyPress(.return) {
+                    let items = self.model.dragItems(self.model.selection)
+                    guard !items.isEmpty else { return .ignored }
+                    onInsert(items)
+                    return .handled
+                }
             }
         }
         // Both branches must fill the pane. `List` does on its own but `ContentUnavailableView` sizes to

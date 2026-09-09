@@ -182,8 +182,10 @@ Finder, and only the library branch knows which project the media came from. The
 Files dropped on the timeline go through `MediaImporter.importFiles(_:at:)` — the library import above,
 then `ProjectDocument.insertClip(for:at:)` with `link: .auto`, so a file with video and audio lands as a
 linked pair. Library rows go through `MediaImporter.insert(_:at:)`, which duplicates a foreign asset
-first (see above) and then inserts the same way; double-click, Return, and "Insert at playhead" take the
-same path with the playhead as the target. Placement rules are unchanged: the clip goes on the target
+first (see above) and then inserts the same way; Return and "Insert at playhead" take the same path with
+the playhead as the target. There is deliberately no double-click: a `TapGesture` on a `List` row
+consumes its mouse-down, and the row then neither selects nor starts its drag — the panel looks dead and
+nothing can be dragged out of it. Placement rules are unchanged: the clip goes on the target
 track when that track exists, is unlocked, and matches the asset (video for video and images, audio for
 audio), else on the first matching track (created when there is none); the mode is `ripple` (default
 `addClip`), so a drop between clips pushes what follows along, a drop inside a clip splits it around the
