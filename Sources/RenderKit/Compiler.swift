@@ -332,12 +332,13 @@ struct SequenceCompiler: Sendable {
             var transitionToNext: Transition?
         }
         var perTrack: [[Placed]] = []
-        var trackMuted: [Bool] = []
+        // Muted, or silenced because another track of its kind is soloed: either way it draws nothing.
+        var trackSilent: [Bool] = []
         var captions: [CaptionSpec] = []
         var boundaries: [CMTime] = [.zero, duration]
         for track in sequence.tracks {
             var placed: [Placed] = []
-            trackMuted.append(track.muted)
+            trackSilent.append(!sequence.isActive(track))
             let clips = track.clips.values.sorted { ($0.start, $0.id) < ($1.start, $1.id) }
             switch track.kind {
             case .video:
@@ -357,7 +358,7 @@ struct SequenceCompiler: Sendable {
                     }
                 }
             case .caption:
-                guard !track.muted else { break }
+                guard sequence.isActive(track) else { break }
                 for clip in clips {
                     guard let item = clip.caption else { continue }
                     let start = clip.start
@@ -395,7 +396,7 @@ struct SequenceCompiler: Sendable {
             var transitions: [Int: TransitionSpec] = [:]
             for trackIndex in perTrack.indices {
                 let placed = perTrack[trackIndex]
-                guard !placed.isEmpty, !trackMuted[trackIndex] else { continue }
+                guard !placed.isEmpty, !trackSilent[trackIndex] else { continue }
                 while cursors[trackIndex] < placed.count, placed[cursors[trackIndex]].placement.range.end <= t0 {
                     cursors[trackIndex] += 1
                 }
@@ -461,9 +462,10 @@ struct SequenceCompiler: Sendable {
         let mutableTracks = structure.composition.tracks(withMediaType: .audio)
         var byTrack: [CMPersistentTrackID: [(Clip, AudioPlacement, Bool)]] = [:]
         for track in sequence.tracks where track.kind == .audio {
+            let silent = !sequence.isActive(track)
             for clip in track.clips.values {
                 guard let p = structure.audioPlacements[clip.id] else { continue }
-                byTrack[p.compositionTrackID, default: []].append((clip, p, track.muted))
+                byTrack[p.compositionTrackID, default: []].append((clip, p, silent))
             }
         }
         var parameters: [AVMutableAudioMixInputParameters] = []
@@ -471,9 +473,9 @@ struct SequenceCompiler: Sendable {
             guard let entries = byTrack[compTrack.trackID] else { continue }
             let params = AVMutableAudioMixInputParameters(track: compTrack)
             var algorithm: AVAudioTimePitchAlgorithm = .spectral
-            for (clip, placement, trackMuted) in entries.sorted(by: { $0.1.range.start < $1.1.range.start }) {
+            for (clip, placement, trackSilent) in entries.sorted(by: { $0.1.range.start < $1.1.range.start }) {
                 let gain = Float(
-                    clip.audio.muted || trackMuted ? 0 : SequenceCompiler.value(of: clip.audio.gain, at: 0))
+                    clip.audio.muted || trackSilent ? 0 : SequenceCompiler.value(of: clip.audio.gain, at: 0))
                 if clip.speed != .one { algorithm = clip.audio.pitchCorrected ? .spectral : .varispeed }
                 if let fadeIn = placement.fadeIn {
                     params.setVolumeRamp(fromStartVolume: 0, toEndVolume: gain, timeRange: fadeIn)

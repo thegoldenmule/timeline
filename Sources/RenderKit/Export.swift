@@ -102,6 +102,14 @@ extension AVFoundationRenderer {
             for asset in payload.offlineAssets {
                 warnings.append("Offline asset rendered as a slate: \(asset.displayName)")
             }
+            // Mute and solo are project state, so an export can be silent on purpose; say which it was.
+            for track in payload.sequence.tracks {
+                switch payload.sequence.silence(of: track) {
+                case .muted: warnings.append("Track \(track.name) is muted and was not rendered")
+                case .solo: warnings.append("Track \(track.name) is silent: another track of its kind is soloed")
+                case nil: break
+                }
+            }
             context.report(JobProgress(fraction: 0, stage: "prepare"))
             try context.checkCancellation()
 
