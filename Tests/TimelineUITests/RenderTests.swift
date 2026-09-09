@@ -1,0 +1,208 @@
+import Contracts
+import ContractsTestSupport
+import CoreGraphics
+import Foundation
+import Testing
+import TimelineCore
+
+@testable import TimelineUI
+
+@MainActor
+@Suite("Offscreen rendering")
+struct RenderTests {
+    @Test func rendersThreeClipsWithRulerAndClipBodies() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let renderer = try TimelineRenderer()
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        let frame = try renderer.render(scene: scene)
+
+        #expect(!frame.isBlank)
+        #expect(frame.width == 1200 && frame.height == 400)
+        #expect(scene.stats.clipsDrawn == 4)
+        #expect(scene.stats.clipsCulled == 0)
+
+        // Ruler across the top of the track area.
+        #expect(frame.pixel(x: 600, y: 4).matches(TimelineTheme.ruler))
+        #expect(frame.pixel(x: 60, y: 4).matches(TimelineTheme.ruler))
+        // Track header on the left.
+        let videoRow = f.viewModel.layout.rows[0]
+        #expect(frame.pixel(x: 60, y: Int(videoRow.midY)).matches(TimelineTheme.header.scaled(1.05), tolerance: 0.03))
+        // Empty track area right of the clips.
+        #expect(frame.pixel(x: 1100, y: Int(videoRow.midY)).matches(TimelineTheme.rowVideo))
+
+        // Each video clip's body colour at its screen rect; the audio clip in the audio colour.
+        for clip in f.clips(.video) {
+            let r = try #require(scene.clipRects[clip.id])
+            let px = frame.pixel(x: Int(r.midX), y: Int(r.maxY - 6))
+            #expect(px.matches(TimelineTheme.clipVideo), "clip \(clip.id) at \(r)")
+        }
+        let audio = try #require(f.clips(.audio).first)
+        let ar = try #require(scene.clipRects[audio.id])
+        #expect(frame.pixel(x: Int(ar.midX), y: Int(ar.maxY - 6)).matches(TimelineTheme.clipAudio))
+
+        // Playhead at zero: red line at the track area's left edge.
+        let playheadX = Int(f.viewModel.layout.x(for: .zero))
+        #expect(frame.pixel(x: playheadX, y: 100).matches(TimelineTheme.playhead))
+        // Ruler labels exist and start at zero.
+        #expect(scene.labels.contains { $0.text == "0:00" })
+    }
+
+    @Test func rendersLinkedClipsTransitionCaptionsAndMarker() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let renderer = try TimelineRenderer()
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        let frame = try renderer.render(scene: scene)
+        #expect(!frame.isBlank)
+
+        // Linked video and audio clips both draw and carry the same link-group stripe colour.
+        let video = f.clips(.video)
+        let audio = f.clips(.audio)
+        #expect(video.count == 2 && audio.count == 2)
+        let group = try #require(video[0].linkGroupId)
+        #expect(audio.contains { $0.linkGroupId == group })
+        let vr = try #require(scene.clipRects[video[0].id])
+        let partner = try #require(audio.first { $0.linkGroupId == group })
+        let ar = try #require(scene.clipRects[partner.id])
+        let stripe = TimelineTheme.linkGroupColor(group)
+        #expect(frame.pixel(x: Int(vr.midX), y: Int(vr.maxY - 3)).matches(stripe, tolerance: 0.05))
+        #expect(frame.pixel(x: Int(ar.midX), y: Int(ar.maxY - 3)).matches(stripe, tolerance: 0.05))
+
+        // The transition wedge sits on the cut and differs from the plain clip colour on both sides.
+        let transition = try #require(f.sequence.transitions.values.first)
+        let tr = try #require(scene.transitionRects[transition.id])
+        #expect(scene.stats.transitionsDrawn == 1)
+        let cutX = f.viewModel.layout.x(for: f.sequence.end(of: video[0]))
+        #expect(abs(tr.midX - cutX) < 1)
+        let wedgeTop = frame.pixel(x: Int(tr.midX) - 2, y: Int(tr.minY) + 4)
+        let wedgeBottom = frame.pixel(x: Int(tr.midX) + 2, y: Int(tr.maxY) - 8)
+        #expect(!wedgeTop.matches(TimelineTheme.clipVideo))
+        #expect(!wedgeBottom.matches(TimelineTheme.clipVideo))
+        #expect(wedgeTop.matches(TimelineTheme.transition, tolerance: 0.05))
+        #expect(wedgeBottom.matches(TimelineTheme.clipVideo.scaled(0.55), tolerance: 0.05))
+        // Plain clip colour just outside the wedge.
+        #expect(frame.pixel(x: Int(tr.minX) - 6, y: Int(tr.maxY) - 6).matches(TimelineTheme.clipVideo))
+
+        // Caption items draw in the caption colour with their text as label.
+        let captions = f.clips(.caption)
+        #expect(captions.count == 2)
+        let cr = try #require(scene.clipRects[captions[0].id])
+        #expect(frame.pixel(x: Int(cr.maxX) - 4, y: Int(cr.midY)).matches(TimelineTheme.clipCaption))
+        #expect(scene.labels.contains { $0.text == "Hello there" })
+
+        // The marker sits in the ruler at its time.
+        let marker = try #require(f.sequence.markers.values.first)
+        let mx = Int(f.viewModel.layout.x(for: marker.at))
+        #expect(
+            frame.pixel(x: mx, y: Int(f.viewModel.layout.rulerHeight) - 4).matches(
+                TimelineTheme.marker, tolerance: 0.05))
+    }
+
+    @Test func selectionOutlineAndPlayheadMove() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let renderer = try TimelineRenderer()
+        let clip = f.clips(.video)[1]
+        f.viewModel.select(clip.id)
+        f.viewModel.setPlayhead(RationalTime(seconds: 5))
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        let frame = try renderer.render(scene: scene)
+        let r = try #require(scene.clipRects[clip.id])
+        #expect(frame.pixel(x: Int(r.midX), y: Int(r.minY)).matches(TimelineTheme.selection))
+        let x = Int(f.viewModel.layout.x(for: f.viewModel.playhead))
+        #expect(frame.pixel(x: x, y: 200).matches(TimelineTheme.playhead))
+        #expect(!frame.pixel(x: Int(f.viewModel.layout.x(for: .zero)), y: 200).matches(TimelineTheme.playhead))
+    }
+
+    @Test func filmstripsAndWaveformsAreFetchedPerZoomAndDrawn() async throws {
+        let f = try await UIFixture.make("three-clips", media: true, zoomIndex: 4)
+        let renderer = try TimelineRenderer()
+        let cache = TimelineMediaCache(device: renderer.device, thumbnails: f.thumbnails, waveforms: f.waveforms)
+        renderer.mediaCache = cache
+        let thumbs = try #require(f.thumbnails)
+        let waves = try #require(f.waveforms)
+
+        // First frame: misses start fetches; bodies draw in the plain colour.
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        #expect(scene.stats.filmstrips == 3 && scene.stats.waveforms == 1)
+        let before = try renderer.render(scene: scene)
+        #expect(cache.pendingCount == 4)
+        #expect(cache.fetchCount == 4)
+        await cache.drain()
+        #expect(thumbs.calls.count == 3)
+        #expect(waves.calls.count == 1)
+        #expect(cache.filmstripCount == 3 && cache.waveformCount == 1)
+        let strip = scene.filmstrips[0]
+        #expect(thumbs.calls.contains { $0.count == strip.key.count && $0.height == strip.key.height })
+
+        // Second frame: textures are drawn over the clip bodies.
+        let after = try renderer.render(scene: scene)
+        let r = strip.rect
+        let px = CGPoint(x: r.minX + 10, y: r.midY)
+        #expect(before.pixel(x: Int(px.x), y: Int(px.y)).matches(TimelineTheme.clipVideo))
+        #expect(!after.pixel(x: Int(px.x), y: Int(px.y)).matches(TimelineTheme.clipVideo))
+        let waveformPixelsBefore = before.count(of: TimelineTheme.waveform, tolerance: 0.1)
+        let waveformPixelsAfter = after.count(of: TimelineTheme.waveform, tolerance: 0.1)
+        #expect(waveformPixelsAfter > waveformPixelsBefore + 50)
+
+        // A different zoom asks for a different frame count and samples per pixel.
+        f.viewModel.setZoom(index: 3)
+        let zoomed = TimelineSceneBuilder.build(from: f.viewModel)
+        _ = try renderer.render(scene: zoomed)
+        await cache.drain()
+        #expect(thumbs.calls.count > 3)
+        #expect(Set(waves.calls.map(\.samplesPerPixel)).count == 2)
+        #expect(zoomed.waveforms[0].key.samplesPerPixel == Int(0.05 * 48000))
+    }
+
+    @Test func cullsClipsOutsideTheVisibleRange() async throws {
+        var gen = ProjectGenerator(seed: 7)
+        gen.videoTracks = 2...2
+        gen.audioTracks = 1...1
+        gen.clipsPerTrack = 60...60
+        let store = FakeProjectStore(builder: try gen.builder())
+        let vm = TimelineViewModel(store: store)
+        await vm.load()
+        vm.viewSize = CGSize(width: 800, height: 300)
+        vm.setZoom(index: ZoomLevel.count - 1)
+        let scene = TimelineSceneBuilder.build(from: vm)
+        let total = vm.sequence!.tracks.reduce(0) { $0 + $1.clips.count }
+        #expect(scene.stats.clipsDrawn + scene.stats.clipsCulled == total)
+        #expect(scene.stats.clipsCulled > 0)
+        #expect(scene.stats.clipsDrawn < total)
+        for (_, r) in scene.clipRects {
+            #expect(r.maxX >= vm.layout.trackAreaMinX - 4 && r.minX <= vm.viewSize.width + 4)
+        }
+    }
+
+    @Test func metalViewRendersOffscreenAndObservesTheModel() async throws {
+        let f = try await UIFixture.make("three-clips", media: true)
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        #expect(view.renderError == nil)
+        #expect(view.isFlipped)
+        let frame = try view.renderOffscreen()
+        #expect(!frame.isBlank)
+        #expect(view.lastScene?.stats.clipsDrawn == 4)
+        #expect(view.mediaCache != nil)
+        #expect(view.gestures.hitTest(CGPoint(x: 600, y: 4)) == .ruler)
+        // A model change requests a redraw through observation; so does a landed media fetch.
+        let requests = view.redrawRequests
+        f.viewModel.setPlayhead(RationalTime(seconds: 2))
+        #expect(await eventually { view.redrawRequests > requests })
+        let afterModel = view.redrawRequests
+        await view.mediaCache?.drain()
+        #expect(view.redrawRequests > afterModel)
+        // The SwiftUI wrapper builds the same view.
+        let wrapper = TimelineView(viewModel: f.viewModel)
+        #expect(wrapper.viewModel === f.viewModel)
+    }
+
+    @Test func emptyProjectRendersChrome() async throws {
+        let store = FakeProjectStore()
+        let vm = TimelineViewModel(store: store)
+        await vm.load()
+        let renderer = try TimelineRenderer()
+        let scene = TimelineSceneBuilder.build(from: vm)
+        let frame = try renderer.render(scene: scene)
+        #expect(frame.pixel(x: 600, y: 4).matches(TimelineTheme.ruler))
+        #expect(scene.labels.contains { $0.text == "No sequence" })
+    }
+}

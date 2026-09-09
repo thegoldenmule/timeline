@@ -1,0 +1,180 @@
+import Contracts
+import CoreGraphics
+import Foundation
+import TimelineCore
+
+/// Keys the timeline responds to, decoupled from `NSEvent` key codes.
+public enum TimelineKey: Hashable, Sendable {
+    /// `B`: split the selection (or the clips under the playhead) at the playhead.
+    case split
+    /// Delete or Backspace.
+    case delete
+    /// Arrow keys nudge the playhead one frame (Shift: ten).
+    case left
+    case right
+    /// `N` toggles snapping.
+    case toggleSnapping
+    case undo
+    case redo
+    case zoomIn
+    case zoomOut
+    case escape
+}
+
+/// What the pointer is over.
+public enum HitTarget: Hashable, Sendable {
+    case ruler
+    case header(TrackID)
+    case clip(ClipID, GestureKind)
+    case empty(TrackID?)
+}
+
+/// Turns pointer and key input into view-model calls: hit testing, scrubbing, selection, one drag
+/// gesture at a time. Works on points in the view's flipped coordinate space, so tests drive it
+/// without constructing `NSEvent`s.
+@MainActor
+public final class TimelineGestureController {
+    private enum State {
+        case idle
+        case scrubbing
+        case dragging
+    }
+
+    public let viewModel: TimelineViewModel
+    private var state = State.idle
+    /// Set on mouse down over a clip; the drag starts once the pointer moves past `dragThreshold`.
+    private var armed: (kind: GestureKind, clip: ClipID, point: CGPoint, modifiers: EditModifiers)?
+    public var dragThreshold: CGFloat = 3
+
+    public init(viewModel: TimelineViewModel) {
+        self.viewModel = viewModel
+    }
+
+    public var isDragging: Bool { state == .dragging }
+
+    // MARK: Hit testing
+
+    public func hitTest(_ point: CGPoint) -> HitTarget {
+        let layout = viewModel.layout
+        if layout.isInRuler(point) { return .ruler }
+        guard let row = layout.row(atY: point.y) else { return .empty(nil) }
+        if layout.isInHeader(point) { return .header(row.trackId) }
+        guard let seq = viewModel.displaySequence, let track = seq.track(row.trackId) else { return .empty(nil) }
+        let seconds = layout.seconds(atX: point.x)
+        let tolerance = Double(TimelineLayout.trimHandleWidth) * layout.secondsPerPoint
+        var best: (Clip, Double)?
+        for clip in track.clips.values {
+            let start = clip.start.seconds
+            let end = seq.end(of: clip).seconds
+            guard seconds >= start - tolerance && seconds <= end + tolerance else { continue }
+            let inside = seconds >= start && seconds <= end
+            let distance = inside ? 0 : min(abs(seconds - start), abs(seconds - end))
+            if best == nil || distance < best!.1 { best = (clip, distance) }
+        }
+        guard let (clip, _) = best else { return .empty(row.trackId) }
+        let rect = layout.rect(for: clip, in: seq) ?? .zero
+        let handle = min(TimelineLayout.trimHandleWidth, rect.width / 3)
+        if point.x <= rect.minX + handle { return .clip(clip.id, .trimHead) }
+        if point.x >= rect.maxX - handle { return .clip(clip.id, .trimTail) }
+        return .clip(clip.id, .move)
+    }
+
+    // MARK: Mouse
+
+    public func mouseDown(at point: CGPoint, modifiers: EditModifiers = []) {
+        viewModel.modifiers = modifiers
+        switch hitTest(point) {
+        case .ruler:
+            state = .scrubbing
+            viewModel.setPlayhead(viewModel.layout.time(atX: point.x))
+        case .header:
+            state = .idle
+        case .clip(let id, let kind):
+            if kind == .move {
+                if modifiers.contains(.shift) {
+                    viewModel.select(id, extend: true)
+                } else if !viewModel.selection.contains(id) {
+                    viewModel.select(id)
+                }
+            } else if !viewModel.selection.contains(id) {
+                viewModel.select(id)
+            }
+            armed = (kind, id, point, modifiers)
+            state = .idle
+        case .empty:
+            if !modifiers.contains(.shift) { viewModel.select(nil) }
+            viewModel.setPlayhead(viewModel.layout.time(atX: point.x))
+            state = .scrubbing
+        }
+    }
+
+    public func mouseDragged(to point: CGPoint, modifiers: EditModifiers = []) {
+        let layout = viewModel.layout
+        switch state {
+        case .scrubbing:
+            viewModel.setPlayhead(layout.time(atX: point.x))
+        case .dragging:
+            viewModel.updateGesture(
+                to: layout.time(atX: point.x), track: layout.row(atY: point.y)?.trackId, modifiers: modifiers)
+        case .idle:
+            guard let armed else { return }
+            let dx = point.x - armed.point.x
+            let dy = point.y - armed.point.y
+            guard abs(dx) >= dragThreshold || abs(dy) >= dragThreshold else { return }
+            state = .dragging
+            viewModel.beginGesture(
+                armed.kind, clip: armed.clip, at: layout.time(atX: armed.point.x), modifiers: modifiers)
+            self.armed = nil
+            viewModel.updateGesture(
+                to: layout.time(atX: point.x), track: layout.row(atY: point.y)?.trackId, modifiers: modifiers)
+        }
+    }
+
+    /// Ends the gesture; a drag commits exactly one command.
+    @discardableResult
+    public func mouseUp(at point: CGPoint, modifiers: EditModifiers = []) async -> CommandResult? {
+        defer {
+            state = .idle
+            armed = nil
+        }
+        switch state {
+        case .dragging:
+            viewModel.updateGesture(
+                to: viewModel.layout.time(atX: point.x), track: viewModel.layout.row(atY: point.y)?.trackId,
+                modifiers: modifiers)
+            return await viewModel.commit()
+        case .scrubbing, .idle:
+            return nil
+        }
+    }
+
+    public func flagsChanged(_ modifiers: EditModifiers) {
+        viewModel.updateModifiers(modifiers)
+    }
+
+    // MARK: Keys
+
+    @discardableResult
+    public func key(_ key: TimelineKey, modifiers: EditModifiers = []) async -> CommandResult? {
+        switch key {
+        case .split: return await viewModel.splitAtPlayhead(modifiers: modifiers)
+        case .delete: return await viewModel.deleteSelection(modifiers: modifiers)
+        case .left: viewModel.nudgePlayhead(frames: modifiers.contains(.shift) ? -10 : -1)
+        case .right: viewModel.nudgePlayhead(frames: modifiers.contains(.shift) ? 10 : 1)
+        case .toggleSnapping: viewModel.snappingEnabled.toggle()
+        case .undo: return await viewModel.undo()
+        case .redo: return await viewModel.redo()
+        case .zoomIn: viewModel.zoomIn()
+        case .zoomOut: viewModel.zoomOut()
+        case .escape:
+            if viewModel.pending != nil {
+                viewModel.cancelGesture()
+                state = .idle
+                armed = nil
+            } else {
+                viewModel.select(nil)
+            }
+        }
+        return nil
+    }
+}

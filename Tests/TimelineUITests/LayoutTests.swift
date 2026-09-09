@@ -1,0 +1,120 @@
+import Contracts
+import ContractsTestSupport
+import CoreGraphics
+import Foundation
+import Testing
+import TimelineCore
+
+@testable import TimelineUI
+
+@MainActor
+@Suite("Layout, zoom, and scroll")
+struct LayoutTests {
+    @Test func timeAndPointsRoundTripAtEveryZoom() async throws {
+        let f = try await UIFixture.make("three-clips")
+        #expect(ZoomLevel.count >= 5)
+        for i in 0..<ZoomLevel.count {
+            f.viewModel.setZoom(index: i)
+            let l = f.viewModel.layout
+            #expect(l.secondsPerPoint == ZoomLevel.secondsPerPoint[i])
+            let x = l.x(for: RationalTime(seconds: 7.5))
+            #expect(abs(l.seconds(atX: x) - 7.5) < 1e-9)
+            #expect(l.x(forSeconds: l.scrollSeconds) == l.headerWidth)
+            #expect(CGFloat(l.majorTickSeconds() / l.secondsPerPoint) >= 90)
+        }
+        #expect(TimelineLayout.tickIntervals == TimelineLayout.tickIntervals.sorted())
+    }
+
+    @Test func zoomKeepsTheAnchoredTimeUnderThePointer() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.scrollSeconds = 20
+        let anchorX: CGFloat = 700
+        let before = f.viewModel.layout.seconds(atX: anchorX)
+        f.viewModel.zoomIn(anchorX: anchorX)
+        #expect(abs(f.viewModel.layout.seconds(atX: anchorX) - before) < 1e-6)
+        f.viewModel.zoomOut(anchorX: anchorX)
+        #expect(abs(f.viewModel.layout.seconds(atX: anchorX) - before) < 1e-6)
+        // Zoom clamps at both ends and scroll never goes negative.
+        f.viewModel.setZoom(index: 99)
+        #expect(f.viewModel.zoomIndex == ZoomLevel.count - 1)
+        f.viewModel.setZoom(index: -5, anchorX: 1100)
+        #expect(f.viewModel.zoomIndex == 0)
+        #expect(f.viewModel.scrollSeconds >= 0)
+    }
+
+    @Test func rowsFollowTrackOrderAndKinds() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let l = f.viewModel.layout
+        #expect(l.rows.map(\.kind) == [.video, .audio, .caption])
+        #expect(l.rows.map(\.trackId) == f.sequence.tracks.map(\.id))
+        #expect(l.rows[0].y == l.rulerHeight + l.trackGap)
+        #expect(l.rows[1].y == l.rows[0].maxY + l.trackGap)
+        #expect(l.row(atY: l.rows[1].y + 3)?.trackId == l.rows[1].trackId)
+        #expect(l.row(atY: 5) == nil)
+        #expect(l.isInRuler(CGPoint(x: 500, y: 5)))
+        #expect(!l.isInRuler(CGPoint(x: 50, y: 5)))
+        #expect(l.isInHeader(CGPoint(x: 50, y: 100)))
+        #expect(l.contentBottom == l.rows.last!.maxY)
+    }
+
+    @Test func clipRectsMatchTheirTimes() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let l = f.viewModel.layout
+        let clips = f.clips(.video)
+        let a = l.rect(for: clips[0], in: f.sequence)!
+        let b = l.rect(for: clips[1], in: f.sequence)!
+        #expect(a.minX == l.headerWidth)
+        #expect(abs(a.maxX - b.minX) < 0.001)
+        #expect(abs(a.width - l.width(for: f.sequence.duration(of: clips[0]))) < 0.001)
+        #expect(a.height == TimelineLayout.trackHeights[.video]! - 2)
+        f.viewModel.scrollSeconds = 100
+        #expect(!f.viewModel.layout.isVisible(startSeconds: 0, endSeconds: 11))
+        #expect(f.viewModel.layout.isVisible(startSeconds: 90, endSeconds: 101))
+    }
+
+    @Test func timecodeLabels() {
+        let fd = RationalTime(1001, 24000)
+        #expect(Timecode.label(seconds: 0, interval: 1, frameDuration: fd) == "0:00")
+        #expect(Timecode.label(seconds: 65, interval: 5, frameDuration: fd) == "1:05")
+        #expect(Timecode.label(seconds: 3600 + 61, interval: 60, frameDuration: fd) == "1:01:01")
+        #expect(Timecode.label(seconds: 1.5, interval: 0.5, frameDuration: fd) == "0:01:11")
+        #expect(Timecode.frames(RationalTime.frames(30, of: fd), frameDuration: fd) == "0:01:06")
+    }
+
+    @Test func revealPlayheadScrolls() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.setPlayhead(RationalTime(seconds: 500))
+        f.viewModel.revealPlayhead()
+        let l = f.viewModel.layout
+        #expect(l.visibleStartSeconds <= 500 && 500 <= l.visibleEndSeconds)
+        f.viewModel.setPlayhead(RationalTime(seconds: -3))
+        #expect(f.viewModel.playhead == .zero)
+    }
+
+    @Test func editModesFollowTheModelDefaultsAndCommandFlipsThem() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let vm = f.viewModel
+        #expect(vm.editMode(for: .move, modifiers: []) == .overwrite)
+        #expect(vm.editMode(for: .trim, modifiers: []) == .ripple)
+        #expect(vm.editMode(for: .delete, modifiers: []) == .ripple)
+        #expect(vm.editMode(for: .move, modifiers: [.command]) == .ripple)
+        #expect(vm.editMode(for: .trim, modifiers: [.command]) == .overwrite)
+        #expect(vm.editMode(for: .delete, modifiers: [.command, .option]) == .overwrite)
+        vm.modifiers = [.command]
+        #expect(vm.editMode(for: .move) == .ripple)
+    }
+
+    @Test func sceneStatsCountLabelsAndMediaRequestsOnlyForWideClips() async throws {
+        let f = try await UIFixture.make("three-clips", media: true, zoomIndex: 0)
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        // At four seconds per point every clip is a sliver: no labels, no media.
+        #expect(scene.stats.clipsDrawn == 4)
+        #expect(scene.stats.filmstrips == 0 && scene.stats.waveforms == 0)
+        #expect(!scene.labels.contains { $0.text == "IMG_1575.MOV" })
+        f.viewModel.setZoom(index: 4)
+        let wide = TimelineSceneBuilder.build(from: f.viewModel)
+        #expect(wide.stats.filmstrips == 3 && wide.stats.waveforms == 1)
+        #expect(wide.labels.contains { $0.text == "IMG_1575.MOV" })
+        #expect(wide.labels.contains { $0.text == "V1" } && wide.labels.contains { $0.text == "A1" })
+    }
+}
