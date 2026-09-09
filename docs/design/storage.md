@@ -31,6 +31,7 @@ Status: draft for review, 2026-09-08. Scope: single user, single machine, no aut
       silence.json  shots.json  faces.json  ocr.json  loudness.json  beats.json
       descriptions.json  moments.json
     cache.sqlite                        index of the above + FTS5 over transcripts
+    projects.sqlite                     cross-project media catalog (section 11a), also disposable
   Projects/
     Band Rehearsal.tlproj/              directory package (UTI conforms to com.apple.package)
       manifest.json                     format version, app version, project id, library root hint
@@ -291,6 +292,37 @@ CREATE TABLE alignments (                       -- derived; recomputable from th
 ```
 
 `transcript_search` in the agent's tool set is an FTS5 query filtered to the content hashes present in the current project. Deleting the Cache directory loses nothing that cannot be regenerated; `AssetAnalysisRecorded` events tell the app what to regenerate.
+
+## 11a. Cross-project media catalog
+
+`Cache/projects.sqlite` is the library panel's index of *what other projects hold* (`docs/plans/media-library.md`). It is written by `ProjectStore.SQLiteMediaCatalog` and is deliberately a second SQLite file rather than more tables in `cache.sqlite`: two GRDB migrators over one file collide, and MediaKit's `CacheIndex` owns that one (contracts-notes.md).
+
+```sql
+CREATE TABLE projects (
+  project_id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+  library_root TEXT, db_size INTEGER NOT NULL, db_mtime TEXT NOT NULL,
+  scanned_at TEXT NOT NULL, readable INTEGER NOT NULL DEFAULT 1, unreadable_reason TEXT
+) STRICT;
+CREATE TABLE project_assets (             -- columns mirror the assets projection of section 5
+  project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL, content_hash TEXT NOT NULL, display_name TEXT NOT NULL, kind TEXT NOT NULL,
+  library_path TEXT NOT NULL, duration_v INTEGER NOT NULL, duration_ts INTEGER NOT NULL CHECK (duration_ts > 0),
+  has_video INTEGER NOT NULL, has_audio INTEGER NOT NULL, offline INTEGER NOT NULL, probe TEXT,
+  PRIMARY KEY (project_id, asset_id)
+) STRICT;
+CREATE INDEX project_assets_hash_idx ON project_assets(content_hash);
+CREATE TABLE registered_packages (        -- packages kept outside Projects/, remembered when first opened
+  path TEXT PRIMARY KEY, registered_at TEXT NOT NULL
+) STRICT;
+```
+
+What it scans: every `*.tlproj` directly under `Projects/`, plus every path in `registered_packages` (the app registers a package whenever it opens, creates, or forks one). No recursive walk and no Spotlight query.
+
+How it reads a package: `manifest.json` for the project id and `libraryRootHint`, then a **read-only** connection (`Configuration.readonly = true`, no migrator, no recovery) that runs `SELECT json_extract(state, '$.name') FROM project_state WHERE id = 1` and `SELECT * FROM assets`. Reading someone else's package must never disturb it, so a database that refuses the read-only open (a hot WAL, corruption) is marked `readable = 0` with the reason and its items drop out; nothing is repaired and nothing is written back. The one file SQLite does touch is `project.sqlite-shm`, whose mtime any WAL reader bumps without changing a byte of the database.
+
+`refresh()` compares each package's `project.sqlite` `(size, mtime)` against the stored row and re-reads only what changed, so launch cost is a stat per project. The **open** project is always excluded when the panel reads items: its database churns while it is edited, and its assets come from the live document instead.
+
+Deleting `projects.sqlite` loses nothing a rescan cannot rebuild, except the registrations of packages outside `Projects/` — and those come back the next time the app opens them.
 
 ## 12. Rebuild and recovery
 
