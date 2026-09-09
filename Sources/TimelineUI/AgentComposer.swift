@@ -168,8 +168,13 @@ public final class AgentComposer {
 
     // MARK: Dropping
 
-    /// The types the agent pane accepts: a library row's own payload, and any file.
-    public static let dropTypes = [LibraryDragPayload.typeIdentifier, UTType.fileURL.identifier]
+    /// The types the agent pane accepts: a library row's own payload, and any file. These are `UTType`
+    /// *values*, never their identifiers: `LibraryDragPayload.contentType` is exported by the process but
+    /// declared in no Info.plist (the app is an SPM executable), so the system cannot resolve it —
+    /// `UTType(LibraryDragPayload.typeIdentifier)` is nil and it reports no conformance to `.data`. Hand
+    /// SwiftUI the identifier and it resolves nothing, silently accepts only the file URL, and a library
+    /// row dragged onto the pane does nothing at all.
+    public static let dropTypes: [UTType] = [LibraryDragPayload.contentType, .fileURL]
 
     /// Reads a drop: library rows carry their own payload, everything else arrives as a file URL. Returns
     /// false when the drop held neither, so the pane refuses it rather than swallowing it.

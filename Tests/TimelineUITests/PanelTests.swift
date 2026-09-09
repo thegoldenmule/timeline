@@ -4,6 +4,7 @@ import Foundation
 import SwiftUI
 import Testing
 import TimelineCore
+import UniformTypeIdentifiers
 
 @testable import TimelineUI
 
@@ -384,10 +385,17 @@ struct AgentComposerTests {
         let payload = LibraryDragPayload(items: [item("cam.mov")])
         let library = NSItemProvider()
         library.register(payload)
-        #expect(library.hasItemConformingToTypeIdentifier(LibraryDragPayload.typeIdentifier))
-        #expect(AgentComposer.dropTypes.contains { library.hasItemConformingToTypeIdentifier($0) })
+        #expect(library.registeredTypeIdentifiers == [LibraryDragPayload.typeIdentifier])
+        // The pane must accept the `UTType` value, not its identifier. The payload's type is exported by
+        // the process but declared in no Info.plist, so the system resolves neither the identifier nor any
+        // conformance — hand SwiftUI the string and the library type vanishes from the accepted list, and
+        // the drag does nothing. This pair is the regression.
+        #expect(UTType(LibraryDragPayload.typeIdentifier) == nil)
+        #expect(!LibraryDragPayload.contentType.conforms(to: .data))
+        #expect(AgentComposer.dropTypes.contains(LibraryDragPayload.contentType))
+        #expect(AgentComposer.dropTypes.contains { library.hasItemConformingToTypeIdentifier($0.identifier) })
         let file = NSItemProvider(object: URL(fileURLWithPath: "/tmp/notes.txt") as NSURL)
-        #expect(AgentComposer.dropTypes.contains { file.hasItemConformingToTypeIdentifier($0) })
+        #expect(AgentComposer.dropTypes.contains { file.hasItemConformingToTypeIdentifier($0.identifier) })
         #expect(c.stage([library, file]))
         #expect(await eventually { c.attachments.count == 2 })
         #expect(Set(c.attachments.map(\.displayName)) == ["cam.mov", "notes.txt"])
