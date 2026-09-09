@@ -216,11 +216,12 @@ func maxAbsDifference(_ a: [Float], _ b: [Float]) -> Float {
         for size in rng.chunks(total: x.count, maxChunk: maxChunk) {
             chunked.append(Array(x[start..<(start + size)]))
             start += size
-            #expect(chunked.residentSampleCount <= maxChunk + AlignerDefaults.decimationFilterTaps + p.envelopeWindow)
+            #expect(
+                chunked.residentSampleCount <= maxChunk + AlignmentParameters().decimationFilterTaps + p.envelopeWindow)
         }
         let actual = chunked.finish()
         #expect(actual.frameCount == expected.frameCount)
-        let decimated = (x.count - AlignerDefaults.decimationFilterTaps) / 6 + 1
+        let decimated = (x.count - AlignmentParameters().decimationFilterTaps) / 6 + 1
         #expect(expected.frameCount == (decimated - p.envelopeWindow) / p.envelopeHop + 1)
         #expect(maxAbsDifference(actual.values, expected.values) < 1e-4)
         #expect(abs(actual.values.reduce(0, +)) < 1e-2)

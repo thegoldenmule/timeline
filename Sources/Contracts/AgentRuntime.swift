@@ -89,6 +89,9 @@ public struct AgentFailure: Error, Hashable, Sendable, Codable {
     }
 
     public static let cancelled = AgentFailure(code: "cancelled", message: "The session was cancelled")
+    /// The runtime is not installed, not logged in, or not implemented; the app degrades to "MCP only".
+    public static let unavailable = AgentFailure(
+        code: "unavailable", message: "The agent runtime is not available")
 }
 
 /// The session's event stream. The stream-json schema of the sidecar is not documented as stable, so the
@@ -98,6 +101,11 @@ public enum AgentEvent: Hashable, Sendable, Codable {
     case assistantText(String)
     case toolCall(id: String, name: String, input: JSONValue)
     case toolResult(id: String, output: JSONValue, isError: Bool)
+    /// The gate raised a request for a tool this session called: the same value (`id`, `token`) that
+    /// `ApprovalGate.requests` published and that the tool's `approval_required` output carries as
+    /// `requestId` / `approvalToken`. The runtime forwards the gate's request, never one of its own, so
+    /// the app grants or denies that token on the gate and then calls `approve(_:verdict:)` with this
+    /// request so the session continues.
     case approvalRequested(ApprovalRequest)
     case cost(CostReport)
     case finished(result: String?, cost: CostReport?)
@@ -119,6 +127,9 @@ public enum AgentEvent: Hashable, Sendable, Codable {
 public protocol AgentSession: AnyObject, Sendable {
     var id: String { get }
     var events: AsyncStream<AgentEvent> { get }
+    /// Answers a `.approvalRequested` event. `request` is the one the event carried; the verdict resumes
+    /// the session (or tells the sidecar hook to allow or block the call). Granting the tool is the
+    /// gate's `grant`, which the app performs first; implementations may do it on the caller's behalf.
     func approve(_ request: ApprovalRequest, verdict: ApprovalVerdict) async
     /// Continues the conversation with another user message (`--resume` for the sidecar).
     func send(_ userMessage: String) async throws

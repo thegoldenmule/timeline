@@ -105,7 +105,7 @@ final class FinePass {
         self.mask = mask
         rho = Float(p.phatRho)
         epsilon = Float(p.phatEpsilon)
-        exclusion = max(1, Int(AlignerDefaults.phatSecondPeakExclusionMs / 1000 * sampleRate))
+        exclusion = max(1, Int(p.phatSecondPeakExclusionMs / 1000 * sampleRate))
         cRe = [Float](repeating: 0, count: half)
         cIm = cRe
         dRe = cRe

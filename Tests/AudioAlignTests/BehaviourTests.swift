@@ -295,7 +295,7 @@ func rms(_ x: ArraySlice<Float>) -> Float {
         let envelope = builder.finish()
         let envelopeSeconds = seconds(since: t1)
         #expect(chunks >= Int(cameraDuration * fs) / AlignerDefaults.streamingChunkFrames)
-        #expect(builderPeak <= AlignerDefaults.streamingChunkFrames + AlignerDefaults.decimationFilterTaps + 512)
+        #expect(builderPeak <= AlignerDefaults.streamingChunkFrames + AlignmentParameters().decimationFilterTaps + 512)
         #expect(abs(envelope.duration - cameraDuration) < 1)
 
         let t2 = now()

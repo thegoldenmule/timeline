@@ -189,6 +189,9 @@ public struct ProjectSummary: Hashable, Sendable, Codable {
 ///   mutates history rows, it folds markers (`History`).
 /// - `changes` delivers exactly one `ProjectChange` per committed transaction, after the commit,
 ///   in commit order. Measured cost of the whole path on a small project: 0.16 ms per command.
+/// - `version` counts events, not transactions: it advances by the number of events a transaction
+///   appended, which is at least two for undo and redo (the marker plus the compensating events).
+///   Consumers compare versions; they never add a fixed number to one.
 public protocol ProjectStore: AnyObject, Sendable {
     /// The project id; stable for the life of the store.
     var projectId: ProjectID { get async }

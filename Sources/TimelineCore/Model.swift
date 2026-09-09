@@ -109,8 +109,69 @@ public struct AlignmentParameters: Hashable, Sendable, Codable {
     public var maxDriftPpm: Double = 500
     /// Results under this confidence are reported as "no alignment" (policy; good cases scored 0.95-1.0).
     public var minConfidence: Double = 0.5
+    /// FIR length for the full-rate to `envelopeSampleRate` decimation (Blackman-windowed sinc; spike: 127 taps).
+    public var decimationFilterTaps: Int = 127
+    /// FIR cutoff as a fraction of the envelope-rate Nyquist frequency (spike: 3.6 kHz of 4 kHz).
+    public var decimationCutoffFraction: Double = 0.9
+    /// Added to each STFT band power before the log so digital silence does not produce `log(0)`, in
+    /// absolute band-power units of a unit-RMS signal (about -90 dB); only matters for silence.
+    public var envelopeLogPowerFloor: Double = 1e-6
+    /// The fine pass's "second peak" must be at least this far from the PHAT peak, ms (spike: 48 samples at 48 kHz).
+    public var phatSecondPeakExclusionMs: Double = 1
+    /// A fine window counts as an inlier only when its PHAT peak is at least this many times the best value
+    /// more than `phatSecondPeakExclusionMs` away (measured: 1.8-2.8 for true alignments down to -10 dB SNR,
+    /// 1.0-1.25 for false candidates and unrelated material).
+    public var minimumPhatPeakRatio: Double = 1.5
+    /// A candidate needs at least this many fine windows measured inside the reference to be verified (policy).
+    public var minimumVerificationWindows: Int = 2
+    /// Fewer fine windows than this cannot support a drift fit; drift is then reported as zero (policy).
+    public var minimumWindowsForDriftFit: Int = 3
+    /// Number of points the coarse correlation curve is max-pooled to for `AlignmentProof.correlation` (policy).
+    public var proofCorrelationPoints: Int = 2048
 
     public init() {}
+
+    /// Older documents lack the fields added after Phase 1; they decode with the defaults above.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func read<T: Decodable>(_ key: CodingKeys, _ into: inout T) throws {
+            if let value = try c.decodeIfPresent(T.self, forKey: key) { into = value }
+        }
+        try read(.bandpassLowHz, &bandpassLowHz)
+        try read(.bandpassHighHz, &bandpassHighHz)
+        try read(.envelopeSampleRate, &envelopeSampleRate)
+        try read(.envelopeWindow, &envelopeWindow)
+        try read(.envelopeHop, &envelopeHop)
+        try read(.envelopeBands, &envelopeBands)
+        try read(.envelopeMedianSeconds, &envelopeMedianSeconds)
+        try read(.energyFloorFraction, &energyFloorFraction)
+        try read(.minimumOverlapFraction, &minimumOverlapFraction)
+        try read(.minimumOverlapSeconds, &minimumOverlapSeconds)
+        try read(.candidateCutoffRatio, &candidateCutoffRatio)
+        try read(.maxCandidates, &maxCandidates)
+        try read(.secondPeakExclusionSeconds, &secondPeakExclusionSeconds)
+        try read(.fineWindowSeconds, &fineWindowSeconds)
+        try read(.fineWindowCount, &fineWindowCount)
+        try read(.fineSearchRadiusMs, &fineSearchRadiusMs)
+        try read(.phatRho, &phatRho)
+        try read(.phatEpsilon, &phatEpsilon)
+        try read(.phatBandLowHz, &phatBandLowHz)
+        try read(.phatBandHighHz, &phatBandHighHz)
+        try read(.inlierToleranceMs, &inlierToleranceMs)
+        try read(.minimumInlierFraction, &minimumInlierFraction)
+        try read(.maxFitMADMs, &maxFitMADMs)
+        try read(.driftFloorPpm, &driftFloorPpm)
+        try read(.maxDriftPpm, &maxDriftPpm)
+        try read(.minConfidence, &minConfidence)
+        try read(.decimationFilterTaps, &decimationFilterTaps)
+        try read(.decimationCutoffFraction, &decimationCutoffFraction)
+        try read(.envelopeLogPowerFloor, &envelopeLogPowerFloor)
+        try read(.phatSecondPeakExclusionMs, &phatSecondPeakExclusionMs)
+        try read(.minimumPhatPeakRatio, &minimumPhatPeakRatio)
+        try read(.minimumVerificationWindows, &minimumVerificationWindows)
+        try read(.minimumWindowsForDriftFit, &minimumWindowsForDriftFit)
+        try read(.proofCorrelationPoints, &proofCorrelationPoints)
+    }
 }
 
 // MARK: - Assets

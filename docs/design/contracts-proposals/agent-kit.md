@@ -1,6 +1,6 @@
 # Contracts proposals from AgentKit
 
-Status: notes from implementing `AgentKit`, 2026-09-08. Nothing here blocks the module; each item was worked around locally and is proposed for the next `Contracts` change window.
+Status: folded 2026-09-08 (1 and 2 accepted, 3 deferred), see `../contracts-notes.md`. Notes from implementing `AgentKit`; nothing here blocked the module, each item was worked around locally.
 
 ## 1. `AgentFailure.unavailable`
 

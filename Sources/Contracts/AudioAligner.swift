@@ -22,7 +22,11 @@ public enum AudioSource: Sendable, Hashable {
 /// One coarse candidate, refined and verified by the fine pass.
 public struct AlignmentCandidate: Codable, Sendable, Hashable {
     /// Offset of the target's start relative to the reference's start (positive: target starts later).
+    /// Expressed at `referenceSampleRate * 1000` (48,000,000 per second for a 48 kHz reference) so the
+    /// sub-sample residual of the parabolic interpolation survives in a `RationalTime`.
     public var offset: RationalTime
+    /// Positive when the target clock runs fast: target time `t` maps to reference time
+    /// `offset + t / (1 + driftPPM * 1e-6)`. Correct by resampling the target by `1 + driftPPM * 1e-6`.
     public var driftPPM: Double
     /// Fine-pass verification signal in 0...1 (inlier fraction weighted by fit residual), not the coarse peak ratio.
     public var confidence: Double
@@ -49,10 +53,14 @@ public struct AlignmentCandidate: Codable, Sendable, Hashable {
 /// Data behind the proof image the UI and the `align_audio` tool draw: the coarse correlation
 /// curve (downsampled) and the per-window fine offsets with the drift line fitted through them.
 public struct AlignmentProof: Codable, Sendable, Hashable {
+    /// The coarse NCC curve max-pooled to `AlignmentParameters.proofCorrelationPoints` so peaks survive;
+    /// `correlationLagStepSeconds` is the pooled step.
     public var correlation: [Float]
     public var correlationLagStartSeconds: Double
     public var correlationLagStepSeconds: Double
     public var windowTimesSeconds: [Double]
+    /// Absolute reference positions (ms) of target sample 0 implied by each fine window; the fitted line
+    /// is `fitInterceptMs - fitSlopePPM * 1e-3 * windowTimesSeconds`.
     public var windowOffsetsMs: [Double]
     public var windowInliers: [Bool]
     public var fitSlopePPM: Double
@@ -87,8 +95,10 @@ public struct Alignment: Codable, Sendable, Hashable {
     }
 
     public var status: Status
-    /// The best verified candidate's offset, or nil when `status == .failed`.
+    /// The best verified candidate's offset (see `AlignmentCandidate.offset` for its timescale), or nil
+    /// when `status == .failed`.
     public var offset: RationalTime?
+    /// See `AlignmentCandidate.driftPPM`.
     public var driftPPM: Double
     public var confidence: Double
     /// All candidates, best first.

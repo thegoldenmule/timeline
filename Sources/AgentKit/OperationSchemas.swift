@@ -528,6 +528,14 @@ public enum OperationSchemas {
             ("driftFloorPpm", "Drift below this magnitude is reported as zero, ppm.", false),
             ("maxDriftPpm", "Drift beyond this magnitude is rejected, ppm.", false),
             ("minConfidence", "Results under this confidence are reported as no alignment.", false),
+            ("decimationFilterTaps", "FIR length for the decimation to envelopeSampleRate.", true),
+            ("decimationCutoffFraction", "FIR cutoff as a fraction of the envelope-rate Nyquist.", false),
+            ("envelopeLogPowerFloor", "Band-power floor added before the log (silence guard).", false),
+            ("phatSecondPeakExclusionMs", "Minimum distance of the fine pass's second peak, ms.", false),
+            ("minimumPhatPeakRatio", "PHAT peak ratio a fine window needs to count as an inlier.", false),
+            ("minimumVerificationWindows", "Fine windows needed to verify a candidate.", true),
+            ("minimumWindowsForDriftFit", "Fine windows needed to fit drift.", true),
+            ("proofCorrelationPoints", "Points the coarse correlation is max-pooled to for the proof.", true),
         ]
         var props: [String: JSONValue] = [:]
         for (name, description, isInteger) in fields {

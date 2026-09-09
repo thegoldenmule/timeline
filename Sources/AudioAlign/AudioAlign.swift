@@ -9,8 +9,8 @@
 //      Theil-Sen drift line, inlier / MAD verification, then a drift-corrected second pass.
 //   4. `OnsetAligner`: orchestration, cancellation, progress, and the `Alignment` DTO.
 //
-// Every tunable reads from `AlignmentParameters`; the few the contract does not carry yet live in
-// `AlignerDefaults` and are proposed in docs/design/contracts-proposals/audio-align.md.
+// Every tunable reads from `AlignmentParameters`; the two implementation choices that are not tunables
+// (the offset timescale multiplier and the streaming chunk size) live in `AlignerDefaults`.
 import Foundation
 import Synchronization
 
@@ -27,29 +27,8 @@ public enum AudioAlignError: Error, Sendable, Equatable {
     case inputTooShort(URL?)
 }
 
-/// Tunables the spike used that `AlignmentParameters` does not carry yet. Each is documented with the value the
-/// spike validated; the proposed contract additions are in docs/design/contracts-proposals/audio-align.md.
+/// Implementation choices that are not tunables (the tunables all live in `AlignmentParameters`).
 enum AlignerDefaults {
-    /// Blackman-windowed sinc FIR length for the full-rate to envelope-rate decimation (spike: 127 taps at 48 kHz).
-    static let decimationFilterTaps = 127
-    /// FIR cutoff as a fraction of the envelope-rate Nyquist frequency (spike: 3.6 kHz of 4 kHz).
-    static let decimationCutoffFraction = 0.9
-    /// Added to each STFT band power before the log so digital silence does not produce `log(0)`. The spike
-    /// normalised its input to unit RMS first; streaming cannot, so this is in absolute band-power units of a
-    /// unit-RMS signal (about -90 dB relative to it) and only matters for silence.
-    static let logPowerFloor: Float = 1e-6
-    /// The fine pass's "second peak" must be at least this far from the PHAT peak (spike: 48 samples at 48 kHz).
-    static let phatSecondPeakExclusionMs = 1.0
-    /// A fine window only counts as an inlier when its PHAT peak is at least this many times the best value
-    /// outside the exclusion zone. Measured on the synthetic pairs: 1.8-2.8 for true alignments down to -10 dB
-    /// SNR, 1.0-1.25 for false candidates and unrelated material (spike: 2.1-2.5 vs 1.0-1.1).
-    static let minimumPhatPeakRatio: Float = 1.5
-    /// Fewer fine windows than this cannot support a drift fit; drift is then reported as zero.
-    static let minimumWindowsForDriftFit = 3
-    /// A candidate needs at least this many measured fine windows (inside the reference) to be verified.
-    static let minimumVerificationWindows = 2
-    /// Number of points the coarse correlation curve is max-pooled to for `AlignmentProof.correlation`.
-    static let proofCorrelationPoints = 2048
     /// Sub-sample resolution of `Alignment.offset`: the timescale is the reference sample rate times this, so a
     /// 48 kHz reference gets 48,000,000 units per second (1/1000 sample, about 21 ns). Falls back to the plain
     /// sample rate if the product does not fit `Int32`.

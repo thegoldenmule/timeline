@@ -2,11 +2,6 @@ import Contracts
 import Foundation
 import TimelineCore
 
-extension AgentFailure {
-    /// The runtime is not installed, not logged in, or not implemented.
-    public static let unavailable = AgentFailure(code: "unavailable", message: "The agent runtime is not available")
-}
-
 /// The second `AgentRuntime` behind the same protocol: a Messages-API implementation (SwiftAnthropic
 /// or `ClaudeForFoundationModels` on macOS 27) that runs its own tool loop against the registry
 /// instead of the CLI. A compiling stub for now: it proves the protocol is implementable twice and

@@ -1,7 +1,8 @@
 # ProjectStore: Contracts proposals and implementation notes
 
-Status: written while implementing `Sources/ProjectStore`, 2026-09-08. Nothing here has been applied to
-`Contracts`; the module works without it. `storage.md` and `timeline-model.md` still win where they disagree.
+Status: reviewed 2026-09-08 (section 1 not adopted: MediaKit's `CacheIndex` owns `cache.sqlite` in the
+app), see `../contracts-notes.md`. Written while implementing `Sources/ProjectStore`; the module works
+without any of it. `storage.md` and `timeline-model.md` still win where they disagree.
 
 ## 1. Proposal: `ArtifactCache` protocol (for MediaKit)
 

@@ -127,7 +127,7 @@ struct SNRCase: CustomStringConvertible {
         #expect(r.alignment.referenceHash == "camera" && r.alignment.targetHash == "render")
         #expect(r.alignment.parametersHash == OnsetAligner.parametersHash(AlignmentParameters()))
         let proof = try #require(r.alignment.proof)
-        #expect(proof.correlation.count <= AlignerDefaults.proofCorrelationPoints)
+        #expect(proof.correlation.count <= AlignmentParameters().proofCorrelationPoints)
         #expect(proof.windowTimesSeconds.count == proof.windowOffsetsMs.count)
         #expect(proof.windowInliers.count == proof.windowOffsetsMs.count)
         #expect(proof.windowInliers.filter { $0 }.count >= proof.windowInliers.count * 6 / 10)

@@ -1,8 +1,9 @@
 # Contracts proposals from the App (walking skeleton)
 
-Status: proposals only, 2026-09-08. Raised while wiring `TimelineApp` to the fakes (see
-`../walking-skeleton.md`). Nothing here blocked the skeleton; each is a small, reviewable change for
-the integration owner to fold in with the matching fake update.
+Status: folded 2026-09-08 (1 accepted as doc comments; 2 accepted in its sentence form), see
+`../contracts-notes.md`. Raised while wiring `TimelineApp` to the fakes (now `../integration.md`).
+Nothing here blocked the skeleton; each is a small, reviewable change for the integration owner to fold
+in with the matching fake update.
 
 ## 1. `AgentEvent.approvalRequested` should carry the gate's request (doc comment only)
 

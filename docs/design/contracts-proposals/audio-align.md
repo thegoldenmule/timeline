@@ -1,8 +1,9 @@
 # Proposed `Contracts` additions from `AudioAlign`
 
-Status: proposal, 2026-09-08. Owner: the AudioAlign module agent; merged by the integration owner per
-`conventions.md` ("how to change Contracts"). Nothing in `AudioAlign` depends on these landing: each value
-below is an internal default in `Sources/AudioAlign/AudioAlign.swift` (`AlignerDefaults`) until it does.
+Status: folded 2026-09-08 (the parameters and the doc comments accepted; the optional
+`OnsetEnvelopeProducer` not needed), see `../contracts-notes.md`. Owner: the AudioAlign module agent; merged
+by the integration owner per `conventions.md`. `AudioAlign` now reads every value below from
+`AlignmentParameters`; `AlignerDefaults` keeps only the two implementation choices.
 
 ## `AlignmentParameters` fields the spike used that the contract does not carry
 

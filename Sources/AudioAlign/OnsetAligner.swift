@@ -295,8 +295,8 @@ public struct OnsetAligner: AudioAligner, Sendable {
             }
             let fit = theilSen(
                 x: windows.map(\.targetTimeSeconds), y: windows.map(\.offsetSamples),
-                valid: windows.map { $0.ratio >= AlignerDefaults.minimumPhatPeakRatio }, inlierTolerance: tolerance,
-                fitSlope: windows.count >= AlignerDefaults.minimumWindowsForDriftFit)
+                valid: windows.map { $0.ratio >= Float(p.minimumPhatPeakRatio) }, inlierTolerance: tolerance,
+                fitSlope: windows.count >= p.minimumWindowsForDriftFit)
             return (windows, fit)
         }
 
@@ -327,7 +327,7 @@ public struct OnsetAligner: AudioAligner, Sendable {
     static func verify(
         fit: LineFit, driftPPM: Double, sampleRate: Double, parameters p: AlignmentParameters
     ) -> (verified: Bool, confidence: Double) {
-        guard fit.count >= AlignerDefaults.minimumVerificationWindows, fit.intercept.isFinite, fit.mad.isFinite
+        guard fit.count >= p.minimumVerificationWindows, fit.intercept.isFinite, fit.mad.isFinite
         else { return (false, 0) }
         let madMs = fit.mad / sampleRate * 1000
         let confidence = fit.inlierFraction * max(0, 1 - madMs / p.maxFitMADMs)
@@ -368,20 +368,23 @@ public struct OnsetAligner: AudioAligner, Sendable {
         return RationalTime(value: Int64(samples.rounded()), timescale: Int32(rate))
     }
 
+    /// Every field is finite: a candidate whose fit had no residuals (fewer than two windows inside the
+    /// reference) reports zero drift, confidence, and MAD, so the `Alignment` always encodes as JSON.
     static func candidate(
         offsetSamples: Double, sampleRate: Double, driftPPM: Double, confidence: Double, verified: Bool,
         coarseScore: Double, inlierFraction: Double, fitMADMs: Double
     ) -> AlignmentCandidate {
-        AlignmentCandidate(
-            offset: offsetTime(samples: offsetSamples.isFinite ? offsetSamples : 0, sampleRate: sampleRate),
-            driftPPM: driftPPM, confidence: confidence, verified: verified, coarseScore: coarseScore,
-            inlierFraction: inlierFraction, fitMADMs: fitMADMs)
+        func finite(_ value: Double) -> Double { value.isFinite ? value : 0 }
+        return AlignmentCandidate(
+            offset: offsetTime(samples: finite(offsetSamples), sampleRate: sampleRate),
+            driftPPM: finite(driftPPM), confidence: finite(confidence), verified: verified,
+            coarseScore: finite(coarseScore), inlierFraction: finite(inlierFraction), fitMADMs: finite(fitMADMs))
     }
 
     static func proof(
         coarse: CoarseResult, frameRate: Double, best: Evaluated?, sampleRate: Double, parameters p: AlignmentParameters
     ) -> AlignmentProof {
-        let (pooled, bucket) = CoarsePass.pooled(coarse.ncc, points: AlignerDefaults.proofCorrelationPoints)
+        let (pooled, bucket) = CoarsePass.pooled(coarse.ncc, points: p.proofCorrelationPoints)
         let windows = best?.windows ?? []
         let fit = best?.fit
         return AlignmentProof(
@@ -390,6 +393,6 @@ public struct OnsetAligner: AudioAligner, Sendable {
             windowTimesSeconds: windows.map(\.targetTimeSeconds),
             windowOffsetsMs: windows.map { $0.offsetSamples / sampleRate * 1000 },
             windowInliers: fit?.inliers ?? [], fitSlopePPM: best?.candidate.driftPPM ?? 0,
-            fitInterceptMs: (fit?.intercept ?? 0) / sampleRate * 1000)
+            fitInterceptMs: (fit?.intercept ?? 0).isFinite ? (fit?.intercept ?? 0) / sampleRate * 1000 : 0)
     }
 }

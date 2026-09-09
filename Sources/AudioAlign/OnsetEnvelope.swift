@@ -95,10 +95,10 @@ public struct OnsetEnvelopeBuilder {
         let envelopeRate = Double(parameters.envelopeSampleRate)
         let factor = max(1, Int(inputSampleRate / envelopeRate))
         if factor > 1 {
-            let cutoffHz = AlignerDefaults.decimationCutoffFraction * envelopeRate / 2
+            let cutoffHz = parameters.decimationCutoffFraction * envelopeRate / 2
             decimator = StreamingDecimator(
                 factor: factor,
-                filter: lowpassFIR(taps: AlignerDefaults.decimationFilterTaps, cutoff: cutoffHz / inputSampleRate))
+                filter: lowpassFIR(taps: parameters.decimationFilterTaps, cutoff: cutoffHz / inputSampleRate))
         }
         let intermediateRate = inputSampleRate / Double(factor)
         let ratio = intermediateRate / envelopeRate
@@ -188,6 +188,7 @@ public struct OnsetEnvelopeBuilder {
         let nfft = parameters.envelopeWindow
         let hop = parameters.envelopeHop
         let bands = parameters.envelopeBands
+        let logPowerFloor = Float(parameters.envelopeLogPowerFloor)
         var start = 0
         while start + nfft <= pending.count {
             pending.withUnsafeBufferPointer { p in
@@ -200,7 +201,7 @@ public struct OnsetEnvelopeBuilder {
                     var s: Float = 0
                     let lo = bandEdges[b], hi = bandEdges[b + 1]
                     if hi > lo { vDSP_sve(pw.baseAddress! + lo, 1, &s, vDSP_Length(hi - lo)) }
-                    currentLog[b] = log(s + AlignerDefaults.logPowerFloor)
+                    currentLog[b] = log(s + logPowerFloor)
                 }
             }
             if hasPreviousFrame {

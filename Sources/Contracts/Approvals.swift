@@ -126,6 +126,18 @@ public enum ApprovalVerdict: Hashable, Sendable, Codable {
     case deny(reason: String?)
 }
 
+/// What a gate knows about a token, read without spending it (the sidecar's `PreToolUse` hook waits on
+/// `pending` and answers from `granted` / `denied` while the server-side gate still consumes the token).
+public enum ApprovalTokenStatus: Hashable, Sendable, Codable {
+    case pending
+    /// Granted and not yet consumed.
+    case granted
+    case denied(reason: String?)
+    case consumed
+    /// Never issued by this gate.
+    case unknown
+}
+
 /// The server-side approval gate every expensive tool consults. One per app, shared by every session.
 /// Flow: `check` returns `.granted` when the policy does not require approval or when `input` carries a
 /// granted, unconsumed token (which `check` consumes); otherwise it mints a request and returns
@@ -139,9 +151,15 @@ public protocol ApprovalGate: Sendable {
     func deny(_ token: ApprovalToken, reason: String?) async
     /// True once for a granted token; false for unknown, denied, pending, or already consumed tokens.
     func consume(_ token: ApprovalToken) async -> Bool
+    /// The current state of a token, without consuming it. Default: `.unknown`.
+    func status(of token: ApprovalToken) async -> ApprovalTokenStatus
     func pending() async -> [ApprovalRequest]
     /// A fresh stream per access of requests raised after the access.
     var requests: AsyncStream<ApprovalRequest> { get }
+}
+
+extension ApprovalGate {
+    public func status(of token: ApprovalToken) async -> ApprovalTokenStatus { .unknown }
 }
 
 /// One line per tool invocation, recorded whatever the outcome, so "what did the agent do and why" is

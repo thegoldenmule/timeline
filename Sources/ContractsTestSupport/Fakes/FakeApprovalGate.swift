@@ -73,6 +73,14 @@ public actor FakeApprovalGate: ApprovalGate {
         return true
     }
 
+    public func status(of token: ApprovalToken) -> ApprovalTokenStatus {
+        if pendingRequests[token] != nil { return .pending }
+        if granted.contains(token) { return .granted }
+        if let reason = denied[token] { return .denied(reason: reason) }
+        if consumed.contains(token) { return .consumed }
+        return .unknown
+    }
+
     public func pending() -> [ApprovalRequest] { pendingRequests.values.sorted { $0.id < $1.id } }
 
     public nonisolated var requests: AsyncStream<ApprovalRequest> { broadcaster.subscribe() }

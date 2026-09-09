@@ -26,3 +26,29 @@ Status: decisions made while implementing the `Contracts` and `ContractsTestSupp
 - `FakeJobRunner.Mode.awaitCompletion` makes `submit` return a finished handle for deterministic tests; `.concurrent` is the real shape. Budgets are recorded, not enforced.
 - `FakeAgentSession` pauses on `.approvalRequested` until `approve`, takes one follow-up script per `send`, and ends its stream when the script and every follow-up have replayed (or on `cancel`, which emits `.failed(.cancelled)`).
 - `TestServices.make(fixture:)` wires every fake around a fixture store and builds a `ToolContext`; it is the walking skeleton's starting point.
+
+## Phase 2 folding of the module proposals (2026-09-08)
+
+The proposals in `contracts-proposals/` were reviewed by the integration owner. Everything accepted is additive; every existing test stays green (the JSON fixtures were regenerated with `TIMELINE_WRITE_FIXTURES` because `AlignmentParameters` gained fields).
+
+Accepted:
+
+- **`AgentFailure.unavailable`** (agent-kit.md 1) moved into `Contracts/AgentRuntime.swift`; AgentKit's private extension was removed so the code string has one owner.
+- **`ApprovalGate.status(of:)` and `ApprovalTokenStatus`** (agent-kit.md 2), with a protocol extension defaulting to `.unknown` so existing gates still conform. `FakeApprovalGate` and the app's `StandardApprovalGate` implement it; the app's `ApprovalWait` polls it so a card answered from any surface resumes the caller. AgentKit's `RecordingApprovalGate` still uses its own bookkeeping; adopting `status(of:)` in the `/approval` hook is the follow-up that closes the gap the proposal describes.
+- **`AgentEvent.approvalRequested` carries the gate's request** (app.md 1): doc comments on the case and on `AgentSession.approve`, no type change. `ClaudeCodeSession` already forwards the gate's `requests` stream; the app's fallback loop forwards the request it decodes from the tool's `approval_required` output (same `id` and `token`).
+- **`ProjectStore.version` counts events** (app.md 2, the sentence form): added to the protocol's rule list. `ProjectChange.eventCount` was not added.
+- **`AlignmentParameters` additions** (audio-align.md): `decimationFilterTaps`, `decimationCutoffFraction`, `envelopeLogPowerFloor`, `phatSecondPeakExclusionMs`, `minimumPhatPeakRatio`, `minimumVerificationWindows`, `minimumWindowsForDriftFit`, `proofCorrelationPoints`, with the proposal's defaults, in `TimelineCore.Model`. A custom `init(from:)` decodes older documents that lack them. `AudioAlign` reads them instead of `AlignerDefaults`, which keeps only the two implementation choices (`offsetTimescaleMultiplier`, `streamingChunkFrames`); `OnsetAligner.parametersHash` therefore changes for the same defaults, invalidating cached alignments once. AgentKit's `alignmentParameters` schema lists the new fields (it is `additionalProperties: false` and every field is required).
+- **Doc comments on `AlignmentCandidate.offset` / `driftPPM` and `AlignmentProof`** (audio-align.md), as proposed.
+
+Rejected or deferred:
+
+- **`ArtifactCache` protocol** (project-store.md 1): not needed. MediaKit's `CacheIndex` implements `Cache/cache.sqlite` itself (the same schema plus `media.asset` and `file_hints`), and the app hands that one index to the library, the analyzer, and both providers. `ProjectStore.CacheDatabase` is unused by the app; two migrators over one file would collide, so the app must never open both. Revisit if a second module needs the artifact index without importing MediaKit.
+- **`OnsetEnvelopeProducer`** (audio-align.md, optional): not needed. MediaKit streams its own `onset-8k` envelope (`MediaKit/OnsetEnvelope.swift`) and the aligner's `AudioSource.file` path decodes on its own; the app never bridges the two.
+- **`ToolReceipt.projectId` on rejected calls** (agent-kit.md 3): deferred, low value; the receipt keeps the tool, session, and args hash.
+- **`ProjectChange.eventCount`** (app.md 2): deferred in favour of the doc sentence.
+
+Module fixes made while integrating (each minimal, tests green):
+
+- `AudioAlign.OnsetAligner.candidate` and the proof's `fitInterceptMs` replace non-finite values with 0: a candidate whose fit had no residuals carried `NaN` in `fitMADMs`, and `JSONEncoder` refuses `NaN`, so `align_audio` threw instead of answering. The tests that referenced `AlignerDefaults` now read `AlignmentParameters()`.
+- `MediaKit.MediaProbe` truncates `Probe.capturedAt` to whole seconds. File creation dates carry nanoseconds, the project codec stores milliseconds, and the in-memory `Project` after `importAsset` differed from the one decoded from the event log on reopen.
+- `AgentKit.OperationSchemas.alignmentParameters` lists the eight new fields (see above).
