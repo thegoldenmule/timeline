@@ -57,7 +57,8 @@ public final class ApprovalCenter {
     }
 }
 
-/// One approval request: tool, input summary, estimate, Approve and Deny.
+/// One approval request: tool, the tool's summary (else the gate's input summary), the presentation's
+/// label/value details and warnings, the estimate, Deny, and Approve.
 public struct ApprovalCardView: View {
     public let request: ApprovalRequest
     public let onApprove: () -> Void
@@ -68,6 +69,21 @@ public struct ApprovalCardView: View {
         self.onApprove = onApprove
         self.onDeny = onDeny
     }
+
+    public static let publishTool = "publish_youtube"
+
+    /// The card's headline: the presentation's summary when the tool supplied one.
+    public static func summary(for request: ApprovalRequest) -> String {
+        request.presentation?.summary ?? request.inputSummary
+    }
+
+    /// "Upload" for `publish_youtube` (the click that certifies, D12), "Approve" otherwise.
+    public static func approveTitle(for tool: String) -> String { tool == publishTool ? "Upload" : "Approve" }
+
+    public var summary: String { ApprovalCardView.summary(for: request) }
+    public var details: [ApprovalDetail] { request.presentation?.details ?? [] }
+    public var warnings: [String] { request.presentation?.warnings ?? [] }
+    public var approveTitle: String { ApprovalCardView.approveTitle(for: request.tool) }
 
     public static func estimateText(_ e: Estimate) -> String {
         var parts: [String] = []
@@ -85,13 +101,26 @@ public struct ApprovalCardView: View {
                 Spacer()
                 Text(request.actor.description).font(.caption).foregroundStyle(.secondary)
             }
-            Text(request.inputSummary).font(.body).textSelection(.enabled)
+            Text(summary).font(.body).textSelection(.enabled)
+            if !details.isEmpty {
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
+                    ForEach(Array(details.enumerated()), id: \.offset) { _, detail in
+                        GridRow(alignment: .top) {
+                            Text(detail.label).font(.caption).foregroundStyle(.secondary)
+                            Text(detail.value).font(.caption).textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+            ForEach(warnings, id: \.self) { warning in
+                Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+            }
             Text("Estimate: \(ApprovalCardView.estimateText(request.estimate))")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Deny", role: .cancel, action: onDeny).keyboardShortcut(.cancelAction)
-                Button("Approve", action: onApprove).keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                Button(approveTitle, action: onApprove).keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
             }
         }
         .padding(12)

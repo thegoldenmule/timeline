@@ -108,17 +108,35 @@ public struct JobProgressView: View {
         self.onCancel = onCancel
     }
 
-    private var stateText: String {
+    /// The stage line: a publish stage's raw value reads as "Uploading", other stages as given.
+    public static func stateText(_ entry: JobCenter.Entry) -> String {
         switch entry.state {
         case .running:
-            var s = entry.progress.stage ?? entry.progress.message ?? "Running"
+            var s =
+                entry.progress.stage.map { JobProgressView.stageLabel($0, kind: entry.kind) } ?? entry.progress.message
+                ?? "Running"
             if let eta = entry.progress.etaSeconds { s += String(format: " · %.0f s left", eta) }
             return s
-        case .finished: return "Done"
+        case .finished: return entry.kind == .publish ? "Published" : "Done"
         case .failed(let message): return "Failed: \(message)"
         case .cancelled: return "Cancelled"
         }
     }
+
+    public static func stageLabel(_ stage: String, kind: JobKind) -> String {
+        guard kind == .publish, let publishStage = PublishStage(rawValue: stage) else { return stage }
+        switch publishStage {
+        case .verify: return "Verifying the file"
+        case .session: return "Starting the upload"
+        case .upload: return "Uploading"
+        case .processing: return "Processing on YouTube"
+        case .thumbnail: return "Setting the thumbnail"
+        case .captions: return "Uploading captions"
+        case .playlist: return "Adding to the playlist"
+        }
+    }
+
+    private var stateText: String { JobProgressView.stateText(entry) }
 
     public var body: some View {
         HStack(spacing: 10) {
@@ -133,6 +151,9 @@ public struct JobProgressView: View {
                     ProgressView()
                 }
                 Text(stateText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if entry.kind == .publish, entry.state == .finished, let outcome = entry.outcome {
+                    PublishOutcomeView(outcome: outcome)
+                }
             }
             Spacer()
             if entry.isRunning {
