@@ -33,6 +33,16 @@ public enum MediaFileTypes {
 
     /// The media files among `urls`, in order.
     public static func mediaURLs(_ urls: [URL]) -> [URL] { urls.filter(isMedia) }
+
+    /// What kind of media a file looks like from its name alone, or nil when it is not media. A guess for
+    /// drawing only — the importer's probe is what decides an asset's kind.
+    public static func kind(of url: URL) -> AssetKind? {
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return nil }
+        if type.conforms(to: .movie) { return .video }
+        if type.conforms(to: .audio) { return .audio }
+        if type.conforms(to: .image) { return .image }
+        return nil
+    }
 }
 
 /// One row dragged out of the library panel. It carries what a drop needs to decide without another

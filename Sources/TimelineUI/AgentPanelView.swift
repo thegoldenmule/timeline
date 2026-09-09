@@ -10,6 +10,8 @@ import TimelineCore
 public final class AgentTranscript {
     public enum Item: Identifiable, Sendable, Hashable {
         case turn(index: Int)
+        /// What the human sent, echoed so the panel reads as the conversation it is.
+        case user(id: Int, String)
         case text(id: Int, String)
         case toolCall(id: String, name: String, input: JSONValue, output: JSONValue?, isError: Bool)
         case approval(ApprovalRequest, verdict: ApprovalVerdict?)
@@ -21,6 +23,7 @@ public final class AgentTranscript {
         public var id: String {
             switch self {
             case .turn(let i): "turn-\(i)"
+            case .user(let i, _): "user-\(i)"
             case .text(let i, _): "text-\(i)"
             case .toolCall(let id, _, _, _, _): "tool-\(id)"
             case .approval(let r, _): "approval-\(r.id)"
@@ -120,7 +123,17 @@ public final class AgentTranscript {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         sentMessages.append(trimmed)
+        appendUserMessage(trimmed)
         try await session.send(trimmed)
+    }
+
+    /// Echoes a message into the transcript without sending it — the goal a session started with, which
+    /// the runtime received before there was a transcript to put it in.
+    public func appendUserMessage(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        counter += 1
+        items.append(.user(id: counter, trimmed))
     }
 
     /// Answers an inline approval card: the session hears the verdict and the gate is told too when a
@@ -143,11 +156,11 @@ public final class AgentTranscript {
     }
 }
 
-/// Transcript, cost, approval cards inline, and the input field.
+/// The transcript of one session: the folded items, approval cards inline, and a status line naming the
+/// cost and whether the agent is working. The input is `AgentComposerView`, which the app owns so that a
+/// message can be composed — and files staged — before any session exists.
 public struct AgentPanelView: View {
     public let transcript: AgentTranscript
-    @State private var draft = ""
-    @State private var sendError: String?
 
     public init(transcript: AgentTranscript) {
         self.transcript = transcript
@@ -157,53 +170,77 @@ public struct AgentPanelView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(transcript.items) { item in
-                            AgentItemView(item: item, transcript: transcript).id(item.id)
+                            AgentItemView(item: item, transcript: transcript)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(item.id)
                         }
                     }
-                    .padding(10)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                 }
                 .onChange(of: transcript.items.count) { _, _ in
-                    if let last = transcript.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    guard let last = transcript.items.last else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
-            Divider()
-            HStack {
-                Text(String(format: "$%.3f", transcript.totalCostUSD)).font(.caption).foregroundStyle(.secondary)
-                if transcript.isFinished {
-                    Text(transcript.failure.map { "Failed: \($0.message)" } ?? "Finished")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if !transcript.isFinished {
-                    Button("Cancel") { Task { await transcript.cancel() } }.font(.caption)
-                }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 4)
-            HStack {
-                TextField("Message the agent", text: $draft).textFieldStyle(.roundedBorder).onSubmit(send)
-                Button("Send", action: send).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            .padding(10)
-            if let sendError {
-                Text(sendError).font(.caption).foregroundStyle(.red).padding(.horizontal, 10)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task { transcript.start() }
     }
+}
 
-    private func send() {
-        let text = draft
-        draft = ""
-        Task {
-            do {
-                try await transcript.send(text)
-                sendError = nil
-            } catch {
-                sendError = error.localizedDescription
+/// The one-line state of a session: working or done, what it cost, and Stop while it runs.
+public struct AgentStatusBar: View {
+    public let transcript: AgentTranscript?
+    public var isStarting: Bool
+    public var onStop: () -> Void
+    public var onClear: (() -> Void)?
+
+    public init(
+        transcript: AgentTranscript?, isStarting: Bool = false, onStop: @escaping () -> Void,
+        onClear: (() -> Void)? = nil
+    ) {
+        self.transcript = transcript
+        self.isStarting = isStarting
+        self.onStop = onStop
+        self.onClear = onClear
+    }
+
+    private var isWorking: Bool { isStarting || (transcript.map { !$0.isFinished } ?? false) }
+
+    public var body: some View {
+        HStack(spacing: 6) {
+            Label("Agent", systemImage: "sparkles").font(.caption.weight(.semibold)).labelStyle(.titleAndIcon)
+            if isWorking {
+                ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12, height: 12)
+                Text(isStarting ? "Starting" : "Working").font(.caption2).foregroundStyle(.secondary)
+            } else if let transcript {
+                if let failure = transcript.failure {
+                    Label(failure.message, systemImage: "exclamationmark.triangle").font(.caption2)
+                        .foregroundStyle(.orange).lineLimit(1)
+                } else {
+                    Label("Done", systemImage: "checkmark.circle").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 4)
+            if let transcript, transcript.totalCostUSD > 0 {
+                Text(String(format: "$%.3f", transcript.totalCostUSD)).font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary).help("What this session has cost so far")
+            }
+            if isWorking, transcript != nil {
+                Button("Stop", systemImage: "stop.circle") { onStop() }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).help("Cancel the session")
+            }
+            if let onClear, let transcript, transcript.isFinished {
+                Button("New session", systemImage: "square.and.pencil") { onClear() }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).help("Clear the transcript and start fresh")
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.bar)
     }
 }
 
@@ -215,56 +252,89 @@ struct AgentItemView: View {
     var body: some View {
         switch item {
         case .turn(let index):
-            Text("Turn \(index)").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("Turn \(index)").font(.caption2).foregroundStyle(.tertiary)
+                VStack { Divider() }
+            }
+            .padding(.top, 2)
+        case .user(_, let text):
+            Text(text)
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.14)))
         case .text(_, let text):
-            Text(text).textSelection(.enabled)
+            Text(text)
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(.quinary))
         case .toolCall(_, let name, let input, let output, let isError):
             DisclosureGroup(isExpanded: $expanded) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Input").font(.caption).foregroundStyle(.secondary)
-                    Text(AgentItemView.pretty(input)).font(.system(.caption, design: .monospaced)).textSelection(
+                    Text("Input").font(.caption2).foregroundStyle(.secondary)
+                    Text(AgentItemView.pretty(input)).font(.system(.caption2, design: .monospaced)).textSelection(
                         .enabled)
                     if let output {
-                        Text(isError ? "Error" : "Result").font(.caption).foregroundStyle(isError ? .red : .secondary)
-                        Text(AgentItemView.pretty(output)).font(.system(.caption, design: .monospaced)).textSelection(
+                        Text(isError ? "Error" : "Result").font(.caption2).foregroundStyle(isError ? .red : .secondary)
+                        Text(AgentItemView.pretty(output)).font(.system(.caption2, design: .monospaced)).textSelection(
                             .enabled)
                     }
                 }
+                .padding(.top, 2)
             } label: {
-                HStack {
-                    Image(
-                        systemName: output == nil ? "hourglass" : (isError ? "xmark.octagon" : "wrench.and.screwdriver")
-                    )
-                    Text(name).font(.system(.body, design: .monospaced))
+                HStack(spacing: 6) {
+                    Image(systemName: AgentItemView.toolSymbol(output: output, isError: isError))
+                        .foregroundStyle(isError ? Color.red : Color.secondary)
+                    Text(name).font(.system(.caption, design: .monospaced))
+                    if output == nil { Text("running").font(.caption2).foregroundStyle(.tertiary) }
                 }
             }
+            .font(.caption)
         case .approval(let request, let verdict):
             if let verdict {
-                HStack {
-                    Image(systemName: "hand.raised")
-                    Text("\(request.tool): \(AgentItemView.verdictText(verdict))").font(.caption)
-                }
+                Label(
+                    "\(request.tool): \(AgentItemView.verdictText(verdict))",
+                    systemImage: AgentItemView.isApproved(verdict) ? "hand.thumbsup" : "hand.raised"
+                )
+                .font(.caption2).foregroundStyle(.secondary)
             } else {
                 ApprovalCardView(
                     request: request,
                     onApprove: { Task { await transcript.approve(request, verdict: .approve) } },
                     onDeny: { Task { await transcript.approve(request, verdict: .deny(reason: nil)) } })
             }
-        case .cost(_, let report):
-            Text(String(format: "Cost so far $%.3f", report.usd)).font(.caption).foregroundStyle(.secondary)
+        case .cost:
+            // The running total lives in the status bar; a line per report would only repeat it.
+            EmptyView()
         case .finished(_, let result, let cost):
-            VStack(alignment: .leading) {
-                if let result { Text(result) }
+            VStack(alignment: .leading, spacing: 4) {
+                if let result, !result.isEmpty {
+                    Text(result).textSelection(.enabled).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quinary))
+                }
                 if let cost {
                     Text(String(format: "Finished · $%.3f · %d turns", cost.usd, cost.turns ?? 0))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
         case .failed(_, let failure):
-            Text("Failed: \(failure.message)").foregroundStyle(.red)
+            Label(failure.message, systemImage: "exclamationmark.octagon")
+                .font(.caption).foregroundStyle(.red).textSelection(.enabled)
         case .raw(_, let value):
-            Text(AgentItemView.pretty(value)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+            Text(AgentItemView.pretty(value)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
+                .lineLimit(3)
         }
+    }
+
+    static func toolSymbol(output: JSONValue?, isError: Bool) -> String {
+        if output == nil { return "hourglass" }
+        return isError ? "xmark.octagon" : "wrench.and.screwdriver"
+    }
+
+    static func isApproved(_ v: ApprovalVerdict) -> Bool {
+        if case .approve = v { return true }
+        return false
     }
 
     static func verdictText(_ v: ApprovalVerdict) -> String {

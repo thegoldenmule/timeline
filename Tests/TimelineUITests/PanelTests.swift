@@ -300,3 +300,119 @@ struct InspectorTests {
         #expect(history.cgImage != nil)
     }
 }
+
+/// Files staged on the agent composer are handed over as paths and nothing else: no import runs, the
+/// chips can be taken back off before Send, and the composed message says plainly that nothing was
+/// imported.
+@MainActor
+@Suite("Agent composer")
+struct AgentComposerTests {
+    private func item(_ name: String, hash: String = "sha256-cam", project: ProjectID? = nil, assetId: AssetID? = "a1")
+        -> LibraryDragItem
+    {
+        LibraryDragItem(
+            contentHash: hash, displayName: name, kind: .video, duration: RationalTime(120, 60), hasVideo: true,
+            hasAudio: true, assetId: assetId, projectId: project, url: URL(fileURLWithPath: "/tmp/Library/\(name)"))
+    }
+
+    private func composer(missing: Set<String> = []) -> AgentComposer {
+        AgentComposer(fileExists: { !missing.contains($0.lastPathComponent) })
+    }
+
+    @Test func stagedFilesAreListedInTheMessageAndNothingIsImported() throws {
+        let c = composer()
+        #expect(!c.canSend)
+        #expect(c.add(libraryItems: [item("cam.mov"), item("b-roll.mov", hash: "sha256-b", assetId: nil)]) == 2)
+        // A file already staged is not staged twice, however it arrives.
+        #expect(c.add(libraryItems: [item("cam.mov")]) == 0)
+        #expect(c.add(urls: [URL(fileURLWithPath: "/tmp/Library/cam.mov")]) == 0)
+        #expect(c.add(urls: [URL(fileURLWithPath: "/tmp/notes.txt")]) == 1)
+        #expect(c.attachments.map(\.displayName) == ["cam.mov", "b-roll.mov", "notes.txt"])
+        // Attachments alone are worth sending; the paths are the message.
+        #expect(c.canSend)
+
+        // The kind is guessed from the name for a file dragged in from the Finder.
+        #expect(c.attachments[2].kind == nil)
+        #expect(c.attachments[0].kind == .video)
+        // A row from the open project is marked as such; one from another project is not.
+        #expect(c.attachments[0].isInProject && !c.attachments[1].isInProject)
+
+        c.draft = "  Cut these together  "
+        let message = c.message
+        #expect(message.hasPrefix("Cut these together\n\n"))
+        #expect(message.contains("not imported"))
+        for path in ["/tmp/Library/cam.mov", "/tmp/Library/b-roll.mov", "/tmp/notes.txt"] {
+            #expect(message.contains(path))
+        }
+        #expect(message.contains("already in this project"))
+        #expect(message.contains("2.00s"))
+
+        // Taking the message clears the composer, so the next one starts empty.
+        #expect(c.take() == message)
+        #expect(c.attachments.isEmpty && c.draft.isEmpty && !c.canSend)
+        #expect(c.take() == nil)
+    }
+
+    @Test func attachmentsComeOffBeforeSending() throws {
+        let c = composer()
+        c.add(libraryItems: [item("cam.mov"), item("b-roll.mov", hash: "sha256-b")])
+        c.remove(c.attachments[0].id)
+        #expect(c.attachments.map(\.displayName) == ["b-roll.mov"])
+        c.draft = "hello"
+        #expect(!c.message.contains("cam.mov"))
+        c.removeAllAttachments()
+        #expect(c.attachments.isEmpty)
+        #expect(c.message == "hello")
+    }
+
+    @Test func aMissingFileIsStagedBadgedRatherThanDroppedSilently() throws {
+        let c = composer(missing: ["gone.mov"])
+        c.add(libraryItems: [item("gone.mov", hash: "sha256-gone")])
+        let attachment = try #require(c.attachments.first)
+        #expect(attachment.isMissing)
+        #expect(attachment.detail.contains("missing"))
+        #expect(c.message.contains("FILE NOT FOUND"))
+        // No poster is asked for: the file is not there to read.
+        #expect(c.poster(for: attachment) == nil)
+    }
+
+    /// The drop itself, on the same providers AppKit hands SwiftUI: a library payload and a file URL.
+    @Test func aDropStagesLibraryRowsAndFileURLs() async throws {
+        let c = composer()
+        let payload = try LibraryDragPayload(items: [item("cam.mov")]).data()
+        let library = NSItemProvider(item: payload as NSData, typeIdentifier: LibraryDragPayload.typeIdentifier)
+        let file = NSItemProvider(object: URL(fileURLWithPath: "/tmp/notes.txt") as NSURL)
+        #expect(AgentComposerView.stage([library, file], into: c))
+        #expect(await eventually { c.attachments.count == 2 })
+        #expect(Set(c.attachments.map(\.displayName)) == ["cam.mov", "notes.txt"])
+        // Nothing else is offered anything: a drop of an unknown type is refused.
+        #expect(!AgentComposerView.stage([NSItemProvider(object: "hello" as NSString)], into: c))
+    }
+
+    @Test func theComposerAndTheTranscriptRender() async throws {
+        let c = composer()
+        c.add(libraryItems: [item("cam.mov")])
+        c.add(urls: [URL(fileURLWithPath: "/tmp/notes.txt")])
+        c.draft = "Cut these together"
+        var sent: [String] = []
+        let view = AgentComposerView(composer: c, onSend: { sent.append($0) }, onAttach: {})
+        #expect(ImageRenderer(content: view.frame(width: 420, height: 160)).cgImage != nil)
+        #expect(sent.isEmpty)
+
+        let runtime = FakeAgentRuntime(script: [.turnStarted(index: 1), .assistantText("On it.")])
+        let session = try await runtime.startSession(
+            goal: "cut", tools: Fixtures.toolAccess, policy: Fixtures.runtimePolicy)
+        let transcript = AgentTranscript(session: session)
+        transcript.appendUserMessage(c.message)
+        transcript.start()
+        #expect(await eventually { transcript.items.contains { if case .text = $0 { true } else { false } } })
+        // The message the human sent is echoed in the transcript, attachments and all.
+        guard case .user(_, let echoed) = try #require(transcript.items.first) else {
+            Issue.record("expected the sent message first")
+            return
+        }
+        #expect(echoed.contains("/tmp/Library/cam.mov"))
+        let bar = AgentStatusBar(transcript: transcript, onStop: {}, onClear: {})
+        #expect(ImageRenderer(content: bar.frame(width: 420, height: 24)).cgImage != nil)
+    }
+}
