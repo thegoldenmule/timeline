@@ -12,7 +12,8 @@ import TimelineUI
 struct WorkspaceAuthorizationPresenter: AuthorizationPresenter {
     @MainActor func open(_ authorizationURL: URL) async throws {
         guard NSWorkspace.shared.open(authorizationURL) else {
-            throw AccountError.protocolError("the default browser could not open \(authorizationURL.host() ?? "the URL")")
+            throw AccountError.protocolError(
+                "the default browser could not open \(authorizationURL.host() ?? "the URL")")
         }
     }
 }
@@ -86,7 +87,8 @@ struct PublishingServices: Sendable {
 
     /// Builds the stack for `mode` over the library `layout`.
     static func make(
-        mode: PublishingMode, layout: LibraryLayout, environment: [String: String] = ProcessInfo.processInfo.environment,
+        mode: PublishingMode, layout: LibraryLayout,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         log: AppLog
     ) async throws -> PublishingServices {
         switch mode {

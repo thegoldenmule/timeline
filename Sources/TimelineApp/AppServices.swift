@@ -184,7 +184,8 @@ struct AppServices: Sendable {
         if let publisher = publishing.publisher { publishers[.youtube] = publisher }
         return ToolServices(
             renderer: renderer, mediaLibrary: mediaLibrary, analyzer: analyzer, aligner: aligner, jobRunner: jobRunner,
-            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts, accounts: accounts, publishers: publishers)
+            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts, accounts: accounts, publishers: publishers
+        )
     }
 
     /// The Google provider, when publishing is not switched off.
