@@ -137,6 +137,9 @@ public final class AppleMediaAnalyzer: MediaAnalyzer, Sendable {
         return transcript
     }
 
+    /// Locales `transcribe` reserved and has not yet released (empty between transcriptions).
+    func heldLocales() async -> [String] { await reservations.heldLocales() }
+
     /// FTS5 search over every indexed transcript, optionally restricted to the given files.
     public func searchTranscript(_ query: String, contentHashes: [String]? = nil, limit: Int = 200) throws
         -> [TranscriptHit]

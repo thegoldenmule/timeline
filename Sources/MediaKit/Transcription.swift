@@ -61,6 +61,9 @@ actor LocaleReservations {
         }
     }
 
+    /// Locales this actor currently holds a reservation for (tests).
+    func heldLocales() -> [String] { held.keys.sorted() }
+
     static func key(_ locale: Locale) -> String { locale.identifier(.bcp47).lowercased() }
 }
 

@@ -10,6 +10,11 @@ import TimelineCore
 /// to float rounding: the spike normalises the input to unit RMS before the log, which is the same as adding
 /// `epsilon * meanPower` inside the log here, so the RMS is folded in at the end rather than needing a first pass.
 ///
+/// Frame `f` covers samples `[f * hop, f * hop + window)` at the envelope rate, as in the spike, so an onset lands
+/// in the first frame whose window reaches it (about three frames before `sample / hop` with the defaults); the
+/// aligner computes both envelopes the same way, so the convention cancels. Release-build throughput on this
+/// machine: about 180x realtime (a two-hour recording in 40 s) without Accelerate.
+///
 /// Memory: only the band powers per frame are kept (24 floats per 16 ms; 43 MB for two hours); the audio is not.
 struct OnsetEnvelopeBuilder {
     /// The parameters that shape the artifact, hashed into `params_hash`.

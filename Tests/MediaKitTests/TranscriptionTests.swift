@@ -1,3 +1,4 @@
+import AVFoundation
 import Contracts
 import ContractsTestSupport
 import Foundation
@@ -97,6 +98,68 @@ import TimelineCore
 
         let op = MediaKit.analysisOperation(for: imported.asset, kind: .transcript, cacheKey: transcript.cacheKey)
         if case .recordAssetAnalysis(let r) = op { #expect(r.cacheKey == transcript.cacheKey) }
+
+        // A locale this process has not reserved yet exercises the reserve-then-release path for real: pick the
+        // first installed English locale outside the reserved set (all of them share the en_US fixture well enough
+        // to keep the WER under the bar).
+        let installed = await SpeechTranscriber.installedLocales.map(\.identifier)
+        let candidates = installed.filter { $0.hasPrefix("en") && !reservedBefore.contains($0) }
+        if let fresh = candidates.first {
+            let before = await AssetInventory.reservedLocales.map(\.identifier).sorted()
+            let t2 = ContinuousClock.now
+            let other = try await analyzer.transcribe(
+                media, locale: Locale(identifier: fresh), options: TranscriptionOptions())
+            let after = await AssetInventory.reservedLocales.map(\.identifier).sorted()
+            let wer = WordErrorRate.rate(
+                reference: normalizedReference, hypothesis: WordErrorRate.normalize(other.text))
+            print(
+                "\(fresh): reserved, transcribed in \(String(format: "%.2f", elapsed(t2))) s, WER "
+                    + "\(String(format: "%.1f", wer * 100))%, released; reserved before \(before), after \(after)")
+            #expect(after == before, "the fresh locale's reservation was released")
+            #expect(await analyzer.heldLocales().isEmpty)
+            #expect(other.cacheKey != transcript.cacheKey)
+            #expect(wer < 0.15)
+        } else {
+            print("no unreserved installed English locale; release path not exercised (reserved: \(reservedBefore))")
+        }
+        #expect(await analyzer.heldLocales().isEmpty)
+    }
+
+    @Test(.enabled(if: TranscriptionTests.speechAvailable), .timeLimit(.minutes(10)))
+    func transcribesAudioInsideAMovie() async throws {
+        let lib = try TestLibrary()
+        let audio = try #require(try SpeechFixture.render(into: lib.media.url))
+        let speechAsset = AVURLAsset(url: audio)
+        let speechDuration = try await speechAsset.load(.duration)
+        let video = try await TestMedia.barcodeCounter(
+            duration: speechDuration.seconds, in: lib.media.url, name: "talk")
+        let composition = AVMutableComposition()
+        try await composition.insertTimeRange(
+            CMTimeRange(start: .zero, duration: speechDuration), of: AVURLAsset(url: video.url), at: .zero)
+        let audioTrack = try #require(
+            composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
+        let sourceAudio = try #require(try await speechAsset.loadTracks(withMediaType: .audio).first)
+        try audioTrack.insertTimeRange(CMTimeRange(start: .zero, duration: speechDuration), of: sourceAudio, at: .zero)
+        let movie = lib.media.url.appendingPathComponent("talk-with-audio.mov")
+        let session = try #require(
+            AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality))
+        try await session.export(to: movie, as: .mov)
+
+        let imported = try await lib.library.importAsset(url: movie, mode: .copy)
+        #expect(imported.asset.hasVideo && imported.asset.hasAudio)
+        let media = MediaReference(asset: imported.asset, layout: lib.layout)
+        let started = ContinuousClock.now
+        let transcript = try await lib.analyzer().transcribe(
+            media, locale: Locale(identifier: "en_US"), options: TranscriptionOptions())
+        let reference = WordErrorRate.normalize(WordErrorRate.numberNormalized(SpeechFixture.script))
+        let wer = WordErrorRate.rate(reference: reference, hypothesis: WordErrorRate.normalize(transcript.text))
+        print(
+            "movie transcript in \(String(format: "%.2f", elapsed(started))) s, WER \(String(format: "%.1f", wer * 100))%"
+        )
+        #expect(wer < 0.10)
+        #expect(transcript.words.first?.t0.seconds ?? 1 < 1)
+        let hits = try lib.analyzer().searchTranscript("Sundance", contentHashes: [media.contentHash])
+        #expect(hits.count == 1)
     }
 
     @Test(.enabled(if: SpeechTranscriber.isAvailable))
