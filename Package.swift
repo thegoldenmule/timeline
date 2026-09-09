@@ -15,7 +15,6 @@ let package = Package(
     products: [
         .library(name: "TimelineCore", targets: ["TimelineCore"]),
         .library(name: "Contracts", targets: ["Contracts"]),
-        .library(name: "ContractsTestSupport", targets: ["ContractsTestSupport"]),
         .library(name: "ProjectStore", targets: ["ProjectStore"]),
         .library(name: "RenderKit", targets: ["RenderKit"]),
         .library(name: "MediaKit", targets: ["MediaKit"]),
