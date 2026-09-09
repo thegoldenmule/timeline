@@ -90,3 +90,13 @@ Notes from wiring publish-plan.md 4.5 (`Sources/TimelineApp`), including the one
 - The Publish sheet's `PublishDraft` carries `madeForKids` and `playlistId`, but `publish_youtube` takes neither (D9 for `madeForKids`; the playlist field is on `PublishRequest` only), so the app's `PublishConsole.input(for:)` drops both and the tool's card and output tell the user to set the audience in YouTube Studio. If the sheet is meant to declare the audience itself, the tool needs an optional `madeForKids` the agent may not set; open for the AgentKit owner.
 - `FakeYouTubeServer.dropConnection(afterBytes:)` counts from arming; the check arms it after the approval round trip and drops at half the file, which for the check's short H.264 export (about 0.2 MiB) lands inside the first 256 KiB chunk. The client then sees a status query with no `Range` header and restarts from zero with `resumedCount == 1`, which is the documented "no header means none" case; a bigger export drops mid-file.
 - `GoogleClientConfiguration.load` throwing (a file that exists but does not parse) is treated by the app as not configured, with the parse error prefixed to the setup hint, rather than failing boot.
+
+## Media catalog (2026-09-09)
+
+`docs/plans/media-library.md` section 2.3, implemented additively; nothing existing changed.
+
+- `Contracts/MediaCatalog.swift`: `CatalogProject` (with `unreadableReason` beside `isReadable`, so the panel's project filter can say *why* a package is greyed out), `CatalogItem` (+ `contentHash` and `url(defaultRoot:)`, which resolves `libraryPath` against the owning project's `libraryRoot` and leaves a referenced original's absolute path alone), and `MediaCatalog` with a default `items()` for "nothing excluded".
+- The protocol is read-only by contract: it never opens a foreign project for writing and never applies a command. Duplicating one of its items into the open project is an ordinary import plus one `importAsset` on that project's own write path, so `timeline-model.md` is untouched.
+- `CatalogItem.id` is `"<projectId or library>/<assetId>"`: the same file in two projects is two browsable rows, which is what lets the panel attribute a row to its owner.
+- Fakes: `FakeMediaCatalog` (actor) seeded with projects and items; `items(excluding:)` also drops the items of projects marked unreadable, and `failure` makes both readers throw for the panel's error state. `Fixtures.catalogItem(_:projectId:projectName:libraryRoot:addedAt:)` and `Fixtures.catalogProject(_:name:url:modifiedAt:)`.
+- Tests: `MediaCatalogTests` (4).

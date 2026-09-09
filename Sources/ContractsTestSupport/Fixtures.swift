@@ -88,6 +88,23 @@ public enum Fixtures {
             actor: .agent(sessionId: "session-1"), sessionId: "session-1", presentation: presentation)
     }
 
+    // MARK: Media catalog
+
+    /// A catalog item for `asset`, attributed to a project (nil for library-only media).
+    public static func catalogItem(
+        _ asset: Asset, projectId: ProjectID? = nil, projectName: String? = nil, libraryRoot: URL? = nil,
+        addedAt: Date? = nil
+    ) -> CatalogItem {
+        CatalogItem(
+            asset: asset, projectId: projectId, projectName: projectName, libraryRoot: libraryRoot, addedAt: addedAt)
+    }
+
+    public static func catalogProject(
+        _ id: ProjectID = "project-1", name: String = "Band Rehearsal", url: URL? = nil, modifiedAt: Date? = fixtureDate
+    ) -> CatalogProject {
+        CatalogProject(id: id, name: name, url: url, modifiedAt: modifiedAt)
+    }
+
     // MARK: Publishing
 
     /// The scope set of publish-plan.md D2.
