@@ -335,6 +335,132 @@ struct GestureTests {
         #expect(op.to.start == audioEnd)
     }
 
+    // MARK: Track header controls
+
+    /// A fixture with two audio tracks and its gesture controller.
+    private func headerFixture() async throws -> (UIFixture, TimelineGestureController, [Track]) {
+        let f = try await UIFixture.make("three-clips")
+        await f.viewModel.apply(.addTrack(.init(sequenceId: .id(f.sequence.id), kind: .audio)))
+        return (f, TimelineGestureController(viewModel: f.viewModel), f.sequence.tracks.filter { $0.kind == .audio })
+    }
+
+    /// The centre of one header button.
+    private func button(_ f: UIFixture, _ track: TrackID, _ control: TrackControl) throws -> CGPoint {
+        let layout = f.viewModel.layout
+        let row = try #require(layout.row(for: track))
+        let rect = try #require(layout.controls(in: row).first { $0.control == control }?.rect)
+        return CGPoint(x: rect.midX, y: rect.midY)
+    }
+
+    @Test func aHeaderButtonHitTestsAsItsOwnTargetAndTheRestOfTheHeaderDoesNot() async throws {
+        let (f, g, audio) = try await headerFixture()
+        for control in TrackControl.allCases {
+            #expect(g.hitTest(try button(f, audio[0].id, control)) == .control(audio[0].id, control))
+        }
+        let row = try #require(f.viewModel.layout.row(for: audio[0].id))
+        #expect(g.hitTest(CGPoint(x: 12, y: f.viewModel.layout.nameRect(in: row).midY)) == .header(audio[0].id))
+    }
+
+    @Test func clickingMuteSoloAndLockEachEmitExactlyOneCommand() async throws {
+        let (f, g, audio) = try await headerFixture()
+        let a1 = audio[0].id
+        let before = await f.receivedCommands.count
+
+        g.mouseDown(at: try button(f, a1, .mute))
+        #expect(await f.receivedCommands.count == before, "the command goes on release, not on press")
+        let muted = await g.mouseUp(at: try button(f, a1, .mute))
+        #expect(muted?.status == .applied)
+        #expect(f.sequence.track(a1)?.muted == true)
+
+        _ = await tap(g, at: try button(f, a1, .solo))
+        #expect(f.sequence.track(a1)?.solo == true)
+        _ = await tap(g, at: try button(f, a1, .lock))
+        #expect(f.sequence.track(a1)?.locked == true)
+        // Three clicks, three commands, and each one is the operation the button names.
+        let commands = await f.receivedCommands
+        #expect(commands.count == before + 3)
+        #expect(commands.suffix(3).map(\.operation.typeName) == ["setTrackMuted", "setTrackSolo", "setTrackLocked"])
+        // And each one toggles back.
+        _ = await tap(g, at: try button(f, a1, .solo))
+        #expect(f.sequence.track(a1)?.solo == false)
+    }
+
+    @Test func clickingRemoveTakesTheTrackAndDoesNothingOnALockedOne() async throws {
+        let (f, g, audio) = try await headerFixture()
+        let a2 = audio[1].id
+        await f.viewModel.setTrackLocked(a2, true)
+        let locked = await tap(g, at: try button(f, a2, .remove))
+        #expect(locked == nil, "decide would reject it, so the click sends nothing")
+        #expect(f.sequence.track(a2) != nil)
+
+        await f.viewModel.setTrackLocked(a2, false)
+        let count = await f.receivedCommands.count
+        let removed = await tap(g, at: try button(f, a2, .remove))
+        #expect(removed?.status == .applied)
+        #expect(f.sequence.track(a2) == nil)
+        let commands = await f.receivedCommands
+        #expect(commands.count == count + 1)
+        #expect(commands.last?.operation.typeName == "removeTrack")
+    }
+
+    @Test func releasingOffTheButtonCancelsTheClickAndPressingOneNeverScrubs() async throws {
+        let (f, g, audio) = try await headerFixture()
+        let a1 = audio[0].id
+        f.viewModel.select(f.clips(.video)[0].id)
+        let playhead = f.viewModel.playhead
+        let selection = f.viewModel.selection
+        let count = await f.receivedCommands.count
+
+        let mute = try button(f, a1, .mute)
+        g.mouseDown(at: mute)
+        // A press on a header button leaves the playhead and the clip selection alone.
+        #expect(f.viewModel.playhead == playhead && f.viewModel.selection == selection)
+        g.mouseDragged(to: CGPoint(x: mute.x + 60, y: mute.y))
+        #expect(!g.isDragging)
+        let result = await g.mouseUp(at: CGPoint(x: mute.x + 60, y: mute.y))
+        #expect(result == nil)
+        #expect(await f.receivedCommands.count == count)
+        #expect(f.sequence.track(a1)?.muted == false)
+
+        // Releasing over a *different* button of the same track does not fire either.
+        g.mouseDown(at: mute)
+        #expect(await g.mouseUp(at: try button(f, a1, .solo)) == nil)
+        #expect(await f.receivedCommands.count == count)
+    }
+
+    @Test func mAndSToggleTheTracksOfTheSelectedClipsInOneCommand() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        #expect(await g.key(.toggleMute) == nil, "nothing selected, nothing to mute")
+        #expect(await f.receivedCommands.isEmpty)
+
+        let video = f.clips(.video)[0]
+        let audio = try #require(f.clips(.audio).first)
+        f.viewModel.select(video.id)
+        f.viewModel.select(audio.id, extend: true)
+        _ = await g.key(.toggleSolo)
+        let soloed = f.sequence.tracks.filter(\.solo).map(\.id)
+        #expect(Set(soloed) == Set([video.trackId, audio.trackId]))
+        var commands = await f.receivedCommands
+        #expect(commands.count == 1 && commands.last?.operation.typeName == "batch")
+
+        // Both are on, so the next press turns both off.
+        _ = await g.key(.toggleSolo)
+        #expect(f.sequence.tracks.allSatisfy { !$0.solo })
+        // One track selected is one plain command, not a batch.
+        f.viewModel.select(audio.id)
+        _ = await g.key(.toggleMute)
+        commands = await f.receivedCommands
+        #expect(commands.count == 3 && commands.last?.operation.typeName == "setTrackMuted")
+        #expect(f.sequence.track(audio.trackId)?.muted == true)
+    }
+
+    /// Press and release on the same point: one click.
+    private func tap(_ g: TimelineGestureController, at point: CGPoint) async -> CommandResult? {
+        g.mouseDown(at: point)
+        return await g.mouseUp(at: point)
+    }
+
     @Test func invalidDropShowsAnInvalidPreviewAndTheStoreRejectsNothingSilently() async throws {
         let f = try await UIFixture.make("three-clips")
         f.viewModel.snappingEnabled = false

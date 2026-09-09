@@ -571,6 +571,51 @@ public final class TimelineViewModel {
         await apply(.setTrackLocked(.init(trackId: .id(id), locked: locked)))
     }
 
+    @discardableResult
+    public func setTrackSolo(_ id: TrackID, _ solo: Bool) async -> CommandResult? {
+        await apply(.setTrackSolo(.init(trackId: .id(id), solo: solo)))
+    }
+
+    // MARK: Track header controls (one command per click)
+
+    /// Flips the control's state on `id`. Returns nil for a control that is inert on this track, so a click
+    /// that cannot do anything sends nothing rather than collecting a rejection.
+    @discardableResult
+    public func toggle(_ control: TrackControl, on id: TrackID) async -> CommandResult? {
+        guard let track = sequence?.track(id) else { return nil }
+        switch control {
+        case .mute: return await setTrackMuted(id, !track.muted)
+        case .solo: return await setTrackSolo(id, !track.solo)
+        case .lock: return await setTrackLocked(id, !track.locked)
+        case .remove:
+            // `decide` rejects this, and the header draws the button inert to match.
+            guard !track.locked else { return nil }
+            selection.subtract(track.clips.keys)
+            return await apply(.removeTrack(.init(trackId: .id(id))), label: "Remove track \(track.name)")
+        }
+    }
+
+    /// The `M` and `S` keys: toggle mute or solo on every track holding a selected clip. The timeline has no
+    /// track selection of its own, so the clip selection stands in for one; with nothing selected, nothing
+    /// happens. Several tracks go in one batch, keeping one command per gesture.
+    @discardableResult
+    public func toggleTracksOfSelection(_ control: TrackControl) async -> CommandResult? {
+        guard control == .mute || control == .solo, let seq = sequence, !selection.isEmpty else { return nil }
+        let tracks = seq.tracks.filter { track in track.clips.keys.contains { selection.contains($0) } }
+        guard !tracks.isEmpty else { return nil }
+        let isOn: (Track) -> Bool = control == .mute ? { $0.muted } : { $0.solo }
+        // If any of them is off, turn them all on; otherwise turn them all off.
+        let after = tracks.contains { !isOn($0) }
+        let ops: [Command.Operation] = tracks.filter { isOn($0) != after }
+            .map { track in
+                control == .mute
+                    ? .setTrackMuted(.init(trackId: .id(track.id), muted: after))
+                    : .setTrackSolo(.init(trackId: .id(track.id), solo: after))
+            }
+        guard !ops.isEmpty else { return nil }
+        return await apply(ops.count == 1 ? ops[0] : .batch(ops))
+    }
+
     // MARK: Observation helper
 
     /// Reads every property the scene depends on, so `withObservationTracking` registers them all.

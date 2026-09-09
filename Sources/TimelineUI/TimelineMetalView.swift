@@ -204,6 +204,9 @@ public final class TimelineMetalView: MTKView {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "b": key = .split
             case "n": key = .toggleSnapping
+            // Bare M and S only: the command versions belong to the app's menus.
+            case "m": key = m.contains(.command) ? nil : .toggleMute
+            case "s": key = m.contains(.command) ? nil : .toggleSolo
             case "z": key = m.contains(.command) ? (m.contains(.shift) ? .redo : .undo) : nil
             case "=", "+": key = .zoomIn
             case "-": key = .zoomOut

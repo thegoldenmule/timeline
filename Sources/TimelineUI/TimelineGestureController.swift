@@ -14,6 +14,9 @@ public enum TimelineKey: Hashable, Sendable {
     case right
     /// `N` toggles snapping.
     case toggleSnapping
+    /// `M` and `S` mute and solo the tracks of the selected clips.
+    case toggleMute
+    case toggleSolo
     case undo
     case redo
     case zoomIn
@@ -24,6 +27,8 @@ public enum TimelineKey: Hashable, Sendable {
 /// What the pointer is over.
 public enum HitTarget: Hashable, Sendable {
     case ruler
+    /// A button in a track header. `.header` stays the header's background around them.
+    case control(TrackID, TrackControl)
     case header(TrackID)
     case clip(ClipID, GestureKind)
     case empty(TrackID?)
@@ -44,6 +49,9 @@ public final class TimelineGestureController {
     private var state = State.idle
     /// Set on mouse down over a clip; the drag starts once the pointer moves past `dragThreshold`.
     private var armed: (kind: GestureKind, clip: ClipID, point: CGPoint, modifiers: EditModifiers)?
+    /// Set on mouse down over a header button; the command goes on release, and only if the pointer is still
+    /// over the same button, so dragging off cancels the click the way a button should.
+    private var armedControl: (track: TrackID, control: TrackControl)?
     public var dragThreshold: CGFloat = 3
 
     public init(viewModel: TimelineViewModel) {
@@ -58,7 +66,10 @@ public final class TimelineGestureController {
         let layout = viewModel.layout
         if layout.isInRuler(point) { return .ruler }
         guard let row = layout.row(atY: point.y) else { return .empty(nil) }
-        if layout.isInHeader(point) { return .header(row.trackId) }
+        if layout.isInHeader(point) {
+            if let control = layout.control(atPoint: point, in: row) { return .control(row.trackId, control) }
+            return .header(row.trackId)
+        }
         guard let seq = viewModel.displaySequence, let track = seq.track(row.trackId) else { return .empty(nil) }
         let seconds = layout.seconds(atX: point.x)
         let tolerance = Double(TimelineLayout.trimHandleWidth) * layout.secondsPerPoint
@@ -83,10 +94,15 @@ public final class TimelineGestureController {
 
     public func mouseDown(at point: CGPoint, modifiers: EditModifiers = []) {
         viewModel.modifiers = modifiers
+        armedControl = nil
         switch hitTest(point) {
         case .ruler:
             state = .scrubbing
             viewModel.setPlayhead(viewModel.layout.time(atX: point.x))
+        case .control(let trackId, let control):
+            // A press on a button neither scrubs nor changes the clip selection.
+            armedControl = (trackId, control)
+            state = .idle
         case .header:
             state = .idle
         case .clip(let id, let kind):
@@ -133,9 +149,11 @@ public final class TimelineGestureController {
     /// Ends the gesture; a drag commits exactly one command.
     @discardableResult
     public func mouseUp(at point: CGPoint, modifiers: EditModifiers = []) async -> CommandResult? {
+        let pressed = armedControl
         defer {
             state = .idle
             armed = nil
+            armedControl = nil
         }
         switch state {
         case .dragging:
@@ -144,7 +162,10 @@ public final class TimelineGestureController {
                 modifiers: modifiers)
             return await viewModel.commit()
         case .scrubbing, .idle:
-            return nil
+            guard let pressed, case .control(let trackId, let control) = hitTest(point), trackId == pressed.track,
+                control == pressed.control
+            else { return nil }
+            return await viewModel.toggle(control, on: trackId)
         }
     }
 
@@ -162,6 +183,8 @@ public final class TimelineGestureController {
         case .left: viewModel.nudgePlayhead(frames: modifiers.contains(.shift) ? -10 : -1)
         case .right: viewModel.nudgePlayhead(frames: modifiers.contains(.shift) ? 10 : 1)
         case .toggleSnapping: viewModel.snappingEnabled.toggle()
+        case .toggleMute: return await viewModel.toggleTracksOfSelection(.mute)
+        case .toggleSolo: return await viewModel.toggleTracksOfSelection(.solo)
         case .undo: return await viewModel.undo()
         case .redo: return await viewModel.redo()
         case .zoomIn: viewModel.zoomIn()
@@ -171,6 +194,7 @@ public final class TimelineGestureController {
                 viewModel.cancelGesture()
                 state = .idle
                 armed = nil
+                armedControl = nil
             } else {
                 viewModel.select(nil)
             }
