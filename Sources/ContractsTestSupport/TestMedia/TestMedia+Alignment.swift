@@ -86,8 +86,8 @@ extension TestMedia {
 actor AlignmentSynthesisCache {
     static let shared = AlignmentSynthesisCache()
 
-    /// One gigabyte holds every fixture `AudioAlignTests` builds; past that the oldest key is dropped and
-    /// recomputed on its next use.
+    /// A ceiling on what the memo keeps, not a promise that everything fits: over it, the least recently used
+    /// key is dropped and recomputed the next time it is asked for. Only speed is at stake either way.
     private let budgetBytes = 1 << 30
     private var tasks: [String: Task<[Float], Never>] = [:]
     private var sizes: [String: Int] = [:]
