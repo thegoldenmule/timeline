@@ -28,7 +28,7 @@ enum Schema {
     }
 
     /// `PRAGMA user_version` after the latest migration, for tooling that reads it.
-    static let currentUserVersion = 2
+    static let currentUserVersion = 3
 
     /// Migrations are named `v<n>`; each one also sets `PRAGMA user_version = n` (GRDB tracks what ran in
     /// its own `grdb_migrations` table, which is the source of truth).
@@ -41,6 +41,10 @@ enum Schema {
         m.registerMigration("v2") { db in
             try db.execute(sql: v2)
             try db.execute(sql: "PRAGMA user_version = 2")
+        }
+        m.registerMigration("v3") { db in
+            try db.execute(sql: v3)
+            try db.execute(sql: "PRAGMA user_version = 3")
         }
         return m
     }()
@@ -198,6 +202,10 @@ enum Schema {
         ) STRICT;
         CREATE INDEX publishes_render_idx ON publishes(render_id, requested_at);
         CREATE INDEX publishes_active_idx ON publishes(status) WHERE status IN ('queued','uploading','processing');
+        """
+
+    static let v3 = """
+        ALTER TABLE tracks ADD COLUMN solo INTEGER NOT NULL DEFAULT 0;
         """
 
     /// The projection tables `rebuildProjections` truncates, in an order foreign keys accept. `renders` and

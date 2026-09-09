@@ -81,6 +81,7 @@ extension ProjectFixtures {
             .renameTrack(.init(trackId: "track-v2", name: "Titles")),
             .setTrackMuted(.init(trackId: "track-a1", muted: true)),
             .setTrackLocked(.init(trackId: "track-a1", locked: true)),
+            .setTrackSolo(.init(trackId: "track-a1", solo: true)),
             .addClip(
                 .init(
                     id: "clip-1", sequenceId: "sequence-1", trackId: "track-v1", assetId: "asset-1", at: f(24),
@@ -206,6 +207,7 @@ extension ProjectFixtures {
             .trackRenamed(.init(sequenceId: "sequence-1", trackId: "track-v2", before: "Overlay", after: "Titles")),
             .trackMuteSet(.init(sequenceId: "sequence-1", trackId: "track-a1", before: false, after: true)),
             .trackLockSet(.init(sequenceId: "sequence-1", trackId: "track-a1", before: false, after: true)),
+            .trackSoloSet(.init(sequenceId: "sequence-1", trackId: "track-a1", before: false, after: true)),
             .clipAdded(.init(sequenceId: "sequence-1", clipId: "clip-1", snapshot: clip)),
             .clipRemoved(.init(sequenceId: "sequence-1", clipId: "clip-1", snapshot: clip)),
             .clipMoved(

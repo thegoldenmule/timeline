@@ -283,6 +283,11 @@ public enum OperationSchemas {
             ["trackId": Schema.ref("idOrRef", "Track."), "locked": Schema.bool("Locked.")],
             required: ["trackId", "locked"])
         op(
+            "setTrackSolo",
+            "Solos or unsolos a track. While any track of a kind is soloed, the other tracks of that same kind are silent; other kinds are unaffected, and an explicit mute still wins.",
+            ["trackId": Schema.ref("idOrRef", "Track."), "solo": Schema.bool("Soloed.")],
+            required: ["trackId", "solo"])
+        op(
             "addClip",
             "Places a clip from an asset on a track. With link auto (default) a video+audio asset also creates the linked partner clip on the matching track.",
             [

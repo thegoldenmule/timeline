@@ -148,6 +148,7 @@ extension Command {
         case renameTrack(RenameTrack)
         case setTrackMuted(SetTrackMuted)
         case setTrackLocked(SetTrackLocked)
+        case setTrackSolo(SetTrackSolo)
         case addClip(AddClip)
         case moveClip(MoveClip)
         case trimClip(TrimClip)
@@ -371,6 +372,16 @@ extension Command {
             public init(trackId: Ref<TrackID>, locked: Bool) {
                 self.trackId = trackId
                 self.locked = locked
+            }
+        }
+
+        /// Soloing silences the other tracks of the same kind; see `Sequence.silence(of:)`.
+        public struct SetTrackSolo: Hashable, Sendable, Codable {
+            public var trackId: Ref<TrackID>
+            public var solo: Bool
+            public init(trackId: Ref<TrackID>, solo: Bool) {
+                self.trackId = trackId
+                self.solo = solo
             }
         }
 
@@ -911,6 +922,7 @@ extension Command.Operation {
         case .renameTrack: "renameTrack"
         case .setTrackMuted: "setTrackMuted"
         case .setTrackLocked: "setTrackLocked"
+        case .setTrackSolo: "setTrackSolo"
         case .addClip: "addClip"
         case .moveClip: "moveClip"
         case .trimClip: "trimClip"
@@ -946,7 +958,8 @@ extension Command.Operation {
     public static let allTypeNames: [String] = [
         "createProject", "setProjectSettings", "renameProject", "addSequence", "setSequenceSettings",
         "setActiveSequence", "importAsset", "relinkAsset", "removeAsset", "restoreAsset", "recordAssetAnalysis",
-        "addTrack", "removeTrack", "reorderTrack", "renameTrack", "setTrackMuted", "setTrackLocked", "addClip",
+        "addTrack", "removeTrack", "reorderTrack", "renameTrack", "setTrackMuted", "setTrackLocked", "setTrackSolo",
+        "addClip",
         "moveClip", "trimClip", "splitClip", "joinClips", "removeClip", "setClipSpeed", "setClipTransform",
         "setClipOpacity", "setClipAudio", "addEffect", "updateEffect", "removeEffect", "addTransition",
         "updateTransition", "removeTransition", "linkClips", "unlinkClips", "addCaptionTrack", "replaceCaptions",
@@ -974,6 +987,7 @@ public func label(for operation: Command.Operation) -> String {
     case .renameTrack: "Rename track"
     case .setTrackMuted(let op): op.muted ? "Mute track" : "Unmute track"
     case .setTrackLocked(let op): op.locked ? "Lock track" : "Unlock track"
+    case .setTrackSolo(let op): op.solo ? "Solo track" : "Unsolo track"
     case .addClip: "Add clip"
     case .moveClip: "Move clip"
     case .trimClip: "Trim clip"
@@ -1042,6 +1056,7 @@ extension Command.Operation: Codable {
         case "renameTrack": self = .renameTrack(try RenameTrack(from: decoder))
         case "setTrackMuted": self = .setTrackMuted(try SetTrackMuted(from: decoder))
         case "setTrackLocked": self = .setTrackLocked(try SetTrackLocked(from: decoder))
+        case "setTrackSolo": self = .setTrackSolo(try SetTrackSolo(from: decoder))
         case "addClip": self = .addClip(try AddClip(from: decoder))
         case "moveClip": self = .moveClip(try MoveClip(from: decoder))
         case "trimClip": self = .trimClip(try TrimClip(from: decoder))
@@ -1096,6 +1111,7 @@ extension Command.Operation: Codable {
         case .renameTrack(let op): try op.encode(to: encoder)
         case .setTrackMuted(let op): try op.encode(to: encoder)
         case .setTrackLocked(let op): try op.encode(to: encoder)
+        case .setTrackSolo(let op): try op.encode(to: encoder)
         case .addClip(let op): try op.encode(to: encoder)
         case .moveClip(let op): try op.encode(to: encoder)
         case .trimClip(let op): try op.encode(to: encoder)

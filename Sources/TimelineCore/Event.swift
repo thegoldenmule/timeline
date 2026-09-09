@@ -66,6 +66,7 @@ public enum EventPayload: Hashable, Sendable {
     case trackRenamed(TrackRenamed)
     case trackMuteSet(TrackMuteSet)
     case trackLockSet(TrackLockSet)
+    case trackSoloSet(TrackSoloSet)
     case clipAdded(ClipAdded)
     case clipRemoved(ClipRemoved)
     case clipMoved(ClipMoved)
@@ -339,6 +340,21 @@ public enum EventPayload: Hashable, Sendable {
     }
 
     public struct TrackLockSet: Hashable, Sendable, Codable {
+        public var sequenceId: SequenceID
+        public var trackId: TrackID
+        public var before: Bool
+        public var after: Bool
+        public init(sequenceId: SequenceID, trackId: TrackID, before: Bool, after: Bool) {
+            self.sequenceId = sequenceId
+            self.trackId = trackId
+            self.before = before
+            self.after = after
+        }
+    }
+
+    /// Only this track's own flag; which of its peers fall silent follows from `Sequence.silence(of:)`
+    /// and is never recorded, so the rule can change without rewriting history.
+    public struct TrackSoloSet: Hashable, Sendable, Codable {
         public var sequenceId: SequenceID
         public var trackId: TrackID
         public var before: Bool
@@ -761,6 +777,7 @@ extension EventPayload {
         case .trackRenamed: "TrackRenamed"
         case .trackMuteSet: "TrackMuteSet"
         case .trackLockSet: "TrackLockSet"
+        case .trackSoloSet: "TrackSoloSet"
         case .clipAdded: "ClipAdded"
         case .clipRemoved: "ClipRemoved"
         case .clipMoved: "ClipMoved"
@@ -795,7 +812,8 @@ extension EventPayload {
         "ProjectCreated", "ProjectSettingsChanged", "ProjectRenamed", "SequenceAdded", "SequenceSettingsChanged",
         "ActiveSequenceChanged", "AssetImported", "AssetRelinked", "AssetRemoved", "AssetRestored",
         "AssetAnalysisRecorded", "TrackAdded", "TrackRemoved", "TrackRestored", "TrackReordered", "TrackRenamed",
-        "TrackMuteSet", "TrackLockSet", "ClipAdded", "ClipRemoved", "ClipMoved", "ClipTrimmed", "ClipSplit",
+        "TrackMuteSet", "TrackLockSet", "TrackSoloSet", "ClipAdded", "ClipRemoved", "ClipMoved", "ClipTrimmed",
+        "ClipSplit",
         "ClipsJoined", "ClipSpeedSet", "ClipTransformSet", "ClipOpacitySet", "ClipAudioSet", "ClipEffectAdded",
         "ClipEffectChanged", "ClipEffectRemoved", "ClipsLinked", "ClipsUnlinked", "TransitionAdded",
         "TransitionChanged", "TransitionRemoved", "CaptionTrackAdded", "CaptionsReplaced", "CaptionEdited",
@@ -826,6 +844,7 @@ extension EventPayload {
         case .trackRenamed(let p): p.sequenceId
         case .trackMuteSet(let p): p.sequenceId
         case .trackLockSet(let p): p.sequenceId
+        case .trackSoloSet(let p): p.sequenceId
         case .clipAdded(let p): p.sequenceId
         case .clipRemoved(let p): p.sequenceId
         case .clipMoved(let p): p.sequenceId
@@ -896,6 +915,7 @@ extension EventPayload {
         case .trackRenamed(let p): [p.trackId.rawValue]
         case .trackMuteSet(let p): [p.trackId.rawValue]
         case .trackLockSet(let p): [p.trackId.rawValue]
+        case .trackSoloSet(let p): [p.trackId.rawValue]
         case .clipAdded(let p): [p.clipId.rawValue]
         case .clipRemoved(let p): [p.clipId.rawValue]
         case .clipMoved(let p): [p.clipId.rawValue]
@@ -948,6 +968,7 @@ extension EventPayload {
         case .trackRenamed(let p): "Renamed track to \(p.after)"
         case .trackMuteSet(let p): p.after ? "Muted track \(p.trackId)" : "Unmuted track \(p.trackId)"
         case .trackLockSet(let p): p.after ? "Locked track \(p.trackId)" : "Unlocked track \(p.trackId)"
+        case .trackSoloSet(let p): p.after ? "Soloed track \(p.trackId)" : "Unsoloed track \(p.trackId)"
         case .clipAdded(let p): "Added clip \(p.clipId) at \(p.snapshot.start)"
         case .clipRemoved(let p): "Removed clip \(p.clipId)"
         case .clipMoved(let p): "Moved clip \(p.clipId) to \(p.after.start)"
@@ -1013,6 +1034,7 @@ extension EventPayload: Codable {
         case "TrackRenamed": self = .trackRenamed(try TrackRenamed(from: decoder))
         case "TrackMuteSet": self = .trackMuteSet(try TrackMuteSet(from: decoder))
         case "TrackLockSet": self = .trackLockSet(try TrackLockSet(from: decoder))
+        case "TrackSoloSet": self = .trackSoloSet(try TrackSoloSet(from: decoder))
         case "ClipAdded": self = .clipAdded(try ClipAdded(from: decoder))
         case "ClipRemoved": self = .clipRemoved(try ClipRemoved(from: decoder))
         case "ClipMoved": self = .clipMoved(try ClipMoved(from: decoder))
@@ -1073,6 +1095,7 @@ extension EventPayload: Codable {
         case .trackRenamed(let p): try p.encode(to: encoder)
         case .trackMuteSet(let p): try p.encode(to: encoder)
         case .trackLockSet(let p): try p.encode(to: encoder)
+        case .trackSoloSet(let p): try p.encode(to: encoder)
         case .clipAdded(let p): try p.encode(to: encoder)
         case .clipRemoved(let p): try p.encode(to: encoder)
         case .clipMoved(let p): try p.encode(to: encoder)

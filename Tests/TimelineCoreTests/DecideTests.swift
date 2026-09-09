@@ -489,6 +489,50 @@ import TimelineCore
         #expect(s.b.rejection(.reorderTrack(.init(trackId: .id(s.v), position: 5))) != nil)
     }
 
+    @Test func soloingATrackEmitsOneEventAndSettingItAgainEmitsNothing() throws {
+        let s = try Scene(audioTracks: 2)
+        let a2 = s.b.audioTracks[1].id
+        let events = try s.b.apply(.setTrackSolo(.init(trackId: .id(a2), solo: true)))
+        #expect(events.map(\.type) == ["TrackSoloSet"])
+        #expect(s.b.sequence.track(a2)?.solo == true)
+        #expect(try s.b.apply(.setTrackSolo(.init(trackId: .id(a2), solo: true))).isEmpty)
+    }
+
+    @Test func aSoloedTrackSilencesItsPeersAndUndoBringsThemBack() throws {
+        let s = try Scene(audioTracks: 2)
+        let a2 = s.b.audioTracks[1].id
+        try s.b.apply(.setTrackSolo(.init(trackId: .id(a2), solo: true)))
+        let seq = s.b.sequence
+        #expect(seq.silence(of: seq.track(s.a)!) == .solo)
+        #expect(seq.isActive(seq.track(a2)!))
+        // Video is a different kind, so the picture is untouched.
+        #expect(seq.isActive(seq.track(s.v)!))
+        try s.b.apply(.undo(.init()))
+        #expect(s.b.sequence.tracks.allSatisfy { s.b.sequence.isActive($0) })
+    }
+
+    @Test func aLockedTrackCannotBeRemoved() throws {
+        let s = try Scene()
+        try s.b.apply(.setTrackLocked(.init(trackId: .id(s.a), locked: true)))
+        #expect(s.b.rejection(.removeTrack(.init(trackId: .id(s.a)))) == .trackLocked(s.a))
+        try s.b.apply(.setTrackLocked(.init(trackId: .id(s.a), locked: false)))
+        #expect(s.b.rejection(.removeTrack(.init(trackId: .id(s.a)))) == nil)
+    }
+
+    @Test func removingATrackTakesItsClipsAndUndoRestoresThemAtTheSamePosition() throws {
+        let s = try Scene()
+        let t = try s.b.addTracks(.audio, count: 1)[0]
+        try s.b.apply(.setTrackMuted(.init(trackId: .id(t), muted: true)))
+        let asset = try s.b.importAsset(name: "vo.wav", duration: frames(600), hasVideo: false)
+        let c = try s.b.addClip(track: t, asset: asset, at: .zero, sourceIn: .zero, sourceOut: frames(24))
+        let before = s.b.sequence
+        try s.b.apply(.removeTrack(.init(trackId: .id(t))))
+        #expect(s.b.sequence.track(t) == nil && s.b.clip(c) == nil)
+        try s.b.apply(.undo(.init()))
+        #expect(s.b.sequence == before)
+        #expect(s.b.sequence.track(t)?.muted == true && s.b.clip(c) != nil)
+    }
+
     @Test func captionsAndMarkers() throws {
         let s = try Scene()
         try s.b.apply(
@@ -617,6 +661,8 @@ import TimelineCore
     @Test func labelsForOperations() {
         #expect(label(for: .trimClip(.init(clipId: "c", edge: .head, to: .zero))) == "Trim clip")
         #expect(label(for: .setTrackLocked(.init(trackId: "t", locked: true))) == "Lock track")
+        #expect(label(for: .setTrackSolo(.init(trackId: "t", solo: true))) == "Solo track")
+        #expect(label(for: .setTrackSolo(.init(trackId: "t", solo: false))) == "Unsolo track")
         #expect(label(for: .batch([.redo, .undo(.init())])) == "2 edits")
         #expect(Command(commandId: "k", actor: .human, label: "Custom", operation: .redo).effectiveLabel == "Custom")
     }

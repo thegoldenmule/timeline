@@ -380,7 +380,11 @@ import TimelineCore
             receipt: nil)
         let transactions = Transaction.group(builder.events, labels: Stores.labels(of: builder.history))
         let hadPublishes = try await queue.write { db in
+            // Today's projection writer fills `tracks.solo`, which v1 has no column for, so the column is
+            // borrowed for the write and dropped again: the file this test opens is genuinely at v1.
+            try db.execute(sql: Schema.v3)
             _ = try WritePath.importTransactions(db, transactions, state: .blank, history: History())
+            try db.execute(sql: "ALTER TABLE tracks DROP COLUMN solo")
             try oldRender.insert(db)
             return try db.tableExists("publishes")
         }
@@ -401,7 +405,7 @@ import TimelineCore
         let migrations: [String] = try await store.writer.read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
-        #expect(migrations == ["v1", "v2"])
+        #expect(migrations == ["v1", "v2", "v3"])
         #expect(await store.state() == builder.project)
         #expect(try await store.renderRow("r-old") == oldRender)
         let record = try #require(try await store.render("r-old"))

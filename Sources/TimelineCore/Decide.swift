@@ -201,6 +201,11 @@ struct Decider {
             if t.locked != o.locked {
                 emit(.trackLockSet(.init(sequenceId: seq.id, trackId: t.id, before: t.locked, after: o.locked)))
             }
+        case .setTrackSolo(let o):
+            let (seq, _, t) = try locateTrack(try resolve(o.trackId))
+            if t.solo != o.solo {
+                emit(.trackSoloSet(.init(sequenceId: seq.id, trackId: t.id, before: t.solo, after: o.solo)))
+            }
         case .addClip(let o): try addClip(o)
         case .moveClip(let o): try moveClip(o)
         case .trimClip(let o): try trimClip(o)
@@ -472,6 +477,9 @@ struct Decider {
         case .trackLockSet(let p):
             guard let l = state.locate(track: p.trackId), l.sequence.tracks[l.trackIndex].locked == p.before
             else { throw drift("track lock") }
+        case .trackSoloSet(let p):
+            guard let l = state.locate(track: p.trackId), l.sequence.tracks[l.trackIndex].solo == p.before
+            else { throw drift("track solo") }
         case .clipAdded(let p):
             guard state.locate(clip: p.clipId) == nil else { throw drift("clip \(p.clipId) exists") }
             guard state.locate(track: p.snapshot.trackId) != nil else { throw drift("track \(p.snapshot.trackId)") }

@@ -187,6 +187,8 @@ func apply(_ payload: EventPayload, to state: inout Project) {
         state.withSequence(p.sequenceId) { $0.withTrack(p.trackId) { $0.muted = p.after } }
     case .trackLockSet(let p):
         state.withSequence(p.sequenceId) { $0.withTrack(p.trackId) { $0.locked = p.after } }
+    case .trackSoloSet(let p):
+        state.withSequence(p.sequenceId) { $0.withTrack(p.trackId) { $0.solo = p.after } }
     case .clipAdded(let p):
         state.withSequence(p.sequenceId) { $0.insertClip(p.snapshot) }
     case .clipRemoved(let p):

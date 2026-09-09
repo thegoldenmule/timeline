@@ -58,6 +58,8 @@ public func invert(_ payload: EventPayload) -> [EventPayload] {
         return [.trackMuteSet(.init(sequenceId: p.sequenceId, trackId: p.trackId, before: p.after, after: p.before))]
     case .trackLockSet(let p):
         return [.trackLockSet(.init(sequenceId: p.sequenceId, trackId: p.trackId, before: p.after, after: p.before))]
+    case .trackSoloSet(let p):
+        return [.trackSoloSet(.init(sequenceId: p.sequenceId, trackId: p.trackId, before: p.after, after: p.before))]
     case .clipAdded(let p):
         return [.clipRemoved(.init(sequenceId: p.sequenceId, clipId: p.clipId, snapshot: p.snapshot))]
     case .clipRemoved(let p):

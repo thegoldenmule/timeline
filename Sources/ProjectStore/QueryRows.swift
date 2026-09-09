@@ -108,6 +108,7 @@ public struct TrackRow: Codable, Hashable, Sendable, FetchableRecord, Persistabl
     public var name: String
     public var muted: Bool
     public var locked: Bool
+    public var solo: Bool
 
     enum CodingKeys: String, CodingKey {
         case trackId = "track_id"
@@ -117,6 +118,7 @@ public struct TrackRow: Codable, Hashable, Sendable, FetchableRecord, Persistabl
         case name
         case muted
         case locked
+        case solo
     }
 
     init(_ track: Track, sequenceId: SequenceID, position: Int) {
@@ -127,6 +129,7 @@ public struct TrackRow: Codable, Hashable, Sendable, FetchableRecord, Persistabl
         name = track.name
         muted = track.muted
         locked = track.locked
+        solo = track.solo
     }
 }
 

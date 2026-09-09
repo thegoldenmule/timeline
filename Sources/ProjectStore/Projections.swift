@@ -97,6 +97,7 @@ enum Projections {
             case .trackRenamed(let x): tracks.insert(x.trackId)
             case .trackMuteSet(let x): tracks.insert(x.trackId)
             case .trackLockSet(let x): tracks.insert(x.trackId)
+            case .trackSoloSet(let x): tracks.insert(x.trackId)
             case .clipAdded(let x): clips.insert(x.clipId)
             case .clipRemoved(let x): clips.insert(x.clipId)
             case .clipMoved(let x): clips.insert(x.clipId)

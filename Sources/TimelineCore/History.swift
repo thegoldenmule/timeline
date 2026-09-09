@@ -100,6 +100,7 @@ public func label(forEventType type: String) -> String {
     case "TrackRenamed": "Rename track"
     case "TrackMuteSet": "Mute track"
     case "TrackLockSet": "Lock track"
+    case "TrackSoloSet": "Solo track"
     case "ClipAdded": "Add clip"
     case "ClipRemoved": "Remove clip"
     case "ClipMoved": "Move clip"
