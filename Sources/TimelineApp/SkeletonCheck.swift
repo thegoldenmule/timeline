@@ -271,10 +271,28 @@ enum SkeletonCheck {
             let scene = TimelineSceneBuilder.build(from: viewModel)
             try require(scene.stats.clipsDrawn == 7, "scene", "TimelineUI drew \(scene.stats.clipsDrawn) clips")
             try require(scene.stats.transitionsDrawn == 1, "scene", "TimelineUI drew no transition")
+
+            // Track controls through the header-button path: one command each, into the store and back out
+            // into the scene, and an audio solo leaves the video alone.
+            let soloed = try unwrap(await viewModel.toggle(.solo, on: a1.id), "tracks", "solo emitted no command")
+            try await document.waitForVersion(soloed.version)
+            let withSolo = try unwrap(document.sequence, "tracks", "no sequence")
+            try require(withSolo.track(a1.id)?.solo == true, "tracks", "A1 is not soloed")
+            let videoTrack = try unwrap(withSolo.track(v1.id), "tracks", "no V1")
+            try require(withSolo.silence(of: videoTrack) == nil, "tracks", "an audio solo silenced the video")
+            let soloScene = TimelineSceneBuilder.build(from: viewModel)
+            try require(
+                soloScene.overlayQuads.contains { $0.color == TimelineTheme.soloBadge }, "tracks",
+                "the scene drew no solo state")
+            let unsoloed = try unwrap(await viewModel.toggle(.solo, on: a1.id), "tracks", "unsolo emitted no command")
+            try await document.waitForVersion(unsoloed.version)
+            try require(document.sequence?.track(a1.id)?.solo == false, "tracks", "A1 stayed soloed")
             ok(
                 "edit",
                 "linked clips v\(added.version), split via TimelineViewModel v\(split.version), "
-                    + "dissolve v\(transition.version); scene draws \(scene.stats.clipsDrawn) clips, 1 transition")
+                    + "dissolve v\(transition.version); scene draws \(scene.stats.clipsDrawn) clips, 1 transition; "
+                    + "solo on A1 v\(soloed.version) drew its accent and left V1 audible, off again v\(unsoloed.version)"
+            )
 
             // 4b. RenderKit over the imported clips: the preview item plays, a grabbed frame has content,
             //     and an H.264 export through the job runner writes a file with a duration.

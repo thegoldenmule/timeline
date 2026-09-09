@@ -21,7 +21,7 @@ Sequence { id, name, frameDuration: Time (e.g. 1001/24000), width, height,
            transitions: { TransitionID -> Transition },
            markers: { MarkerID -> Marker } }
 
-Track { id, kind: video|audio|caption, name, muted, locked, clips: { ClipID -> Clip } }
+Track { id, kind: video|audio|caption, name, muted, locked, solo, clips: { ClipID -> Clip } }
 
 Clip { id, trackId, assetId?,                    -- nil for generated clips (title, colour, shape)
        linkGroupId?,                             -- clips from one asset share a group
@@ -77,7 +77,9 @@ Version 1 implements `Animatable.constant` only and one sequence per project. Th
 
 **Gestures.** The UI previews a drag, trim, or scrub locally and commits **one** command when the gesture ends. Agents batch operations into one `timeline_apply`. The event log records intent-sized steps, not frames; a store-side coalescer is a fallback, not the plan.
 
-**Locked tracks.** Commands addressing a locked track's clips are rejected with `trackLocked`; unlocking is itself a command and event, so the agent can never bypass a lock silently.
+**Locked tracks.** Commands addressing a locked track's clips are rejected with `trackLocked`; unlocking is itself a command and event, so the agent can never bypass a lock silently. A locked track cannot be removed either.
+
+**Mute and solo.** Both are project state, both are one command, both are undone like any other edit. A track is silent when it is muted, or when some *other* track **of its own kind** is soloed — so soloing an audio track silences the other audio tracks and leaves the picture and the captions alone. Solo is additive: any number of tracks may be soloed, and every non-soloed track of a kind that has one falls silent. An explicit mute outranks the track's own solo. `Sequence.silence(of:)` is the single definition, returning `.muted` or `.solo` so the compiler and the UI can never disagree about which it is; `SequenceCompiler` drops a silent track's layers, captions, and audio gain, and export reports every silent track as a warning on the receipt.
 
 **Offline assets.** An asset whose `libraryPath` is missing is marked `offline`; the compiler renders a slate for its clips rather than failing, and export proceeds with a warning listing offline assets.
 
@@ -92,7 +94,7 @@ Commands are requests; `decide(state, command) throws -> [Event]` turns them int
 | `addSequence`, `setSequenceSettings`, `setActiveSequence` | | one sequence in v1 |
 | `importAsset` | `id?, contentHash, libraryPath, displayName, kind, duration, probe` | issued by MediaKit after the copy and hash |
 | `relinkAsset`, `removeAsset`, `restoreAsset`, `recordAssetAnalysis` | | |
-| `addTrack`, `removeTrack`, `reorderTrack`, `renameTrack`, `setTrackMuted`, `setTrackLocked` | `sequenceId, ...` | |
+| `addTrack`, `removeTrack`, `reorderTrack`, `renameTrack`, `setTrackMuted`, `setTrackLocked`, `setTrackSolo` | `sequenceId, ...` | `removeTrack` snapshots the track and its clips, so it undoes |
 | `addClip` | `id?, sequenceId, trackId, assetId?, at, sourceIn, sourceOut, mode, link: auto\|none` | `auto` creates linked clips per asset track |
 | `moveClip` | `clipId, to: { trackId?, start }, mode, unlinked?` | |
 | `trimClip` | `clipId, edge: head\|tail, to: Time, mode, unlinked?` | `to` is the new timeline edge |
@@ -126,7 +128,7 @@ Facts in past tense, `<Aggregate><Verb>`. Every timeline event carries `sequence
 | `AssetAnalysisRecorded` | `{ assetId, kind, cacheKey, summary }` (data lives in the cache; the event records existence and hash) |
 | `TrackAdded` | `{ sequenceId, trackId, kind, position, name }` |
 | `TrackRemoved`, `TrackRestored` | `{ sequenceId, trackId, snapshot? }` |
-| `TrackReordered`, `TrackRenamed`, `TrackMuteSet`, `TrackLockSet` | `{ sequenceId, trackId, before, after }` |
+| `TrackReordered`, `TrackRenamed`, `TrackMuteSet`, `TrackLockSet`, `TrackSoloSet` | `{ sequenceId, trackId, before, after }` |
 | `ClipAdded` | `{ sequenceId, clipId, snapshot }` |
 | `ClipRemoved` | `{ sequenceId, clipId, snapshot }` |
 | `ClipMoved` | `{ sequenceId, clipId, before: { trackId, start }, after }` |

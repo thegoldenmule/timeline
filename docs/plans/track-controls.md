@@ -401,3 +401,23 @@ Existing suites that must stay green and will need touching for the width change
 - **Only a human can confirm the appearance.** The scene builder is pure and asserted; the pixels are
   asserted for a few probe points through `renderOffscreen`. Whether the header reads well at a glance,
   on a real display, at the real row heights, is not something this test suite can answer.
+
+## 6. What the implementation did differently
+
+Three departures from the steps above, all smaller than what was planned:
+
+1. **No `silencedTracks` field on `RenderPayload`.** The payload already carries the `sequence`, so
+   `Export` computes the warnings from `payload.sequence.silence(of:)` directly. Section 2.6's warning
+   ships; the field it proposed does not exist.
+2. **The RenderKit tests live in their own `Tests/RenderKitTests/SoloTests.swift`** rather than being
+   appended to `UnitTests.swift`, because they need a `Stage` fixture (V1/V2 + A1/A2 over synthetic
+   media) that nothing else uses. Likewise `Tests/TimelineCoreTests/TrackTests.swift` holds the pure
+   silence-rule tests; only the command and undo tests went into `DecideTests`.
+3. **The headless check gained a track-control assertion** inside its existing `edit` step (no new
+   step): `TimelineViewModel.toggle(.solo, on:)` — the same call a click makes — emits one command,
+   reaches SQLite, comes back in the scene as the accent bar, leaves V1 audible, and toggles off again.
+
+Two test-side fixes the header width forced, both mechanical: `GestureTests`'s ruler scrub derives its
+x from `layout.x(forSeconds:)` instead of hardcoding 320, and `PublishesTests`'s fake v1 database
+borrows and then drops the `solo` column so today's projection writer can populate a file that is
+genuinely still at schema v1.

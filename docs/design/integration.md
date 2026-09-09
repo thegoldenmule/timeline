@@ -109,7 +109,8 @@ runs in `make test`.
 The window: the media library pane on the left (⌥⌘L, remembered in `showsLibrary`), the preview on top
 (Play in the status bar or the space bar), TimelineUI's Metal timeline
 below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd-Z / Shift-Cmd-Z,
-Cmd-scroll zooms, N toggles snapping), a status bar; the
+Cmd-scroll zooms, N toggles snapping, M and S mute and solo the selected clips' tracks; every track
+header carries mute / solo / lock / remove buttons, one command per click), a status bar; the
 sidebar holds the inspector, the approval stack, the job list, the publishes, the history, the last tool
 result, the MCP section, and the agent panel. Toolbar: New, Open, Fork, Import (library import as a job;
 the files land in the library and nowhere else, see below), Library (the pane), Split, Delete, Undo, Redo,
