@@ -277,7 +277,8 @@ public actor MCPServerHost {
         let transport = StatefulHTTPServerTransport(
             sessionIDGenerator: FixedSessionID(id: sid),
             validationPipeline: StandardValidationPipeline(validators: [
-                OriginValidator.localhost(port: port), AcceptHeaderValidator(mode: .sseRequired), ContentTypeValidator(),
+                OriginValidator.localhost(port: port), AcceptHeaderValidator(mode: .sseRequired),
+                ContentTypeValidator(),
                 ProtocolVersionValidator(), SessionValidator(),
             ]))
         let server = makeServer(sessionId: sid)
@@ -334,8 +335,11 @@ public actor MCPServerHost {
                 } catch let error as ToolError {
                     output = .error(code: "tool_error", message: error.message)
                 }
-                await self?.record(CallRecord(sessionId: sessionId, tool: params.name, isError: output.isError, at: Date()))
-                await self?.log("  -> \(output.isError ? "error" : output.isApprovalRequired ? "approval_required" : "ok") \(output.text?.prefix(120) ?? "")")
+                await self?.record(
+                    CallRecord(sessionId: sessionId, tool: params.name, isError: output.isError, at: Date()))
+                await self?.log(
+                    "  -> \(output.isError ? "error" : output.isApprovalRequired ? "approval_required" : "ok") \(output.text?.prefix(120) ?? "")"
+                )
                 return MCPBridge.result(output)
             }
         }
@@ -346,17 +350,18 @@ public actor MCPServerHost {
 
     static func summary(_ input: ToolInput) -> String {
         let keys = input.arguments.keys.sorted().filter { $0 != "approvalToken" }
-        return "{" + keys.map { key in
-            let v = input.arguments[key]!
-            switch v {
-            case .string(let s): return "\(key)=\(s.prefix(40))"
-            case .number(let n): return "\(key)=\(n == n.rounded() ? String(Int64(n)) : String(n))"
-            case .bool(let b): return "\(key)=\(b)"
-            case .null: return "\(key)=null"
-            case .array(let a): return "\(key)=[\(a.count)]"
-            case .object(let o): return "\(key)={\(o.count)}"
-            }
-        }.joined(separator: ", ") + "}"
+        return "{"
+            + keys.map { key in
+                let v = input.arguments[key]!
+                switch v {
+                case .string(let s): return "\(key)=\(s.prefix(40))"
+                case .number(let n): return "\(key)=\(n == n.rounded() ? String(Int64(n)) : String(n))"
+                case .bool(let b): return "\(key)=\(b)"
+                case .null: return "\(key)=null"
+                case .array(let a): return "\(key)=[\(a.count)]"
+                case .object(let o): return "\(key)={\(o.count)}"
+                }
+            }.joined(separator: ", ") + "}"
     }
 
     // MARK: Approval endpoint
@@ -494,7 +499,8 @@ private final class HTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             var headers: [String: String] = [:]
             for (name, value) in h.headers { headers[name] = headers[name].map { $0 + ", " + value } ?? value }
             let path = String(h.uri.split(separator: "?", maxSplits: 1).first ?? Substring(h.uri))
-            let request = HTTPRequest(method: h.method.rawValue, headers: headers, body: body.isEmpty ? nil : body, path: path)
+            let request = HTTPRequest(
+                method: h.method.rawValue, headers: headers, body: body.isEmpty ? nil : body, path: path)
             let keepAlive = h.isKeepAlive
             let version = h.version
             let loop = context.eventLoop

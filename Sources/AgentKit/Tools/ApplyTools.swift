@@ -114,7 +114,9 @@ enum ApplyTools {
         } else {
             throw ToolError.invalidInput("Give durationFrames or duration")
         }
-        let id = ToolSupport.string(input, "transitionId").map { TransitionID($0) } ?? TransitionID(minting: UUIDv7Generator())
+        let id =
+            ToolSupport.string(input, "transitionId").map { TransitionID($0) }
+            ?? TransitionID(minting: UUIDv7Generator())
         let op = Command.Operation.addTransition(
             .init(
                 id: id, leftClipId: .id(ClipID(left)), rightClipId: .id(ClipID(right)),
@@ -135,20 +137,24 @@ enum ApplyTools {
                 properties: ToolSupport.inputProperties(
                     mutating: true,
                     [
-                        "trackId": Schema.string("Existing caption track to replace the items of; omit to add a new track."),
+                        "trackId": Schema.string(
+                            "Existing caption track to replace the items of; omit to add a new track."),
                         "source": Schema.enum("Where captions come from.", ["transcript", "text"]),
-                        "assetId": Schema.string("source transcript: the asset to transcribe (default: assets of the video clips)."),
+                        "assetId": Schema.string(
+                            "source transcript: the asset to transcribe (default: assets of the video clips)."),
                         "locale": Schema.string("source transcript: BCP-47 locale, default en-US."),
                         "text": Schema.string("source text: caption text, split into sentences."),
                         "items": Schema.array("source text: explicit caption items.", items: Schema.ref("captionItem")),
                         "style": Schema.ref("captionStyle", "Track default style (fontSize, color, position, ...)."),
                         "language": Schema.string("Language tag for a new track (default from the locale, else en)."),
                         "trackName": Schema.string("Name for a new track (default Captions)."),
-                        "maxWordsPerCaption": Schema.integer("source transcript: split long segments (default 6).", minimum: 1),
+                        "maxWordsPerCaption": Schema.integer(
+                            "source transcript: split long segments (default 6).", minimum: 1),
                     ]), required: ["source", "expectedVersion"]),
             [
                 "time": OperationSchemas.defs["time"]!, "captionItem": OperationSchemas.defs["captionItem"]!,
-                "captionWord": OperationSchemas.defs["captionWord"]!, "captionStyle": OperationSchemas.defs["captionStyle"]!,
+                "captionWord": OperationSchemas.defs["captionWord"]!,
+                "captionStyle": OperationSchemas.defs["captionStyle"]!,
             ]),
         outputSchema: Schema.object(
             "Result with the caption track.",
@@ -160,12 +166,15 @@ enum ApplyTools {
         annotations: ToolAnnotations(title: "Add captions", idempotent: true),
         examples: [
             .object([
-                "expectedVersion": 12, "source": "transcript", "style": ["fontSize": 64, "position": "center", "extra": [:]],
+                "expectedVersion": 12, "source": "transcript",
+                "style": ["fontSize": 64, "position": "center", "extra": [:]],
                 "maxWordsPerCaption": 4,
             ]),
             .object([
                 "expectedVersion": 12, "source": "text",
-                "items": [["start": ["v": 0, "ts": 24000], "duration": ["v": 48048, "ts": 24000], "text": "Hello there"]],
+                "items": [
+                    ["start": ["v": 0, "ts": 24000], "duration": ["v": 48048, "ts": 24000], "text": "Hello there"]
+                ],
             ]),
             .object(["expectedVersion": 12, "source": "text", "text": "Welcome back. Today we build a timeline."]),
         ]
@@ -207,7 +216,9 @@ enum ApplyTools {
                 var seen: [AssetID] = []
                 for track in sequence.tracks where track.kind == .video {
                     for clip in track.clips.values.sorted(by: { $0.start < $1.start }) {
-                        if let a = clip.assetId, project.assets[a]?.hasAudio == true, !seen.contains(a) { seen.append(a) }
+                        if let a = clip.assetId, project.assets[a]?.hasAudio == true, !seen.contains(a) {
+                            seen.append(a)
+                        }
                     }
                 }
                 assetIds = seen
@@ -218,10 +229,13 @@ enum ApplyTools {
             for assetId in assetIds {
                 let asset = try ToolSupport.asset(assetId.rawValue, in: project)
                 let transcript = try await analyzer.transcribe(
-                    ToolSupport.mediaReference(for: asset, context: context), locale: locale, options: TranscriptionOptions())
+                    ToolSupport.mediaReference(for: asset, context: context), locale: locale,
+                    options: TranscriptionOptions())
                 keys.append(transcript.cacheKey)
                 if language == nil { language = transcript.language }
-                let clips = sequence.tracks.filter { $0.kind == .video }.flatMap { $0.clips.values }.filter { $0.assetId == assetId }
+                let clips = sequence.tracks.filter { $0.kind == .video }.flatMap { $0.clips.values }.filter {
+                    $0.assetId == assetId
+                }
                 items += captions(from: transcript, clips: clips, in: sequence, maxWords: maxWords)
             }
             extra["transcriptCacheKey"] = .string(keys.joined(separator: ","))
@@ -241,7 +255,8 @@ enum ApplyTools {
             operation = .batch([
                 .addCaptionTrack(
                     .init(
-                        id: trackId, sequenceId: .id(sequence.id), name: ToolSupport.string(input, "trackName") ?? "Captions",
+                        id: trackId, sequenceId: .id(sequence.id),
+                        name: ToolSupport.string(input, "trackName") ?? "Captions",
                         language: language ?? "en", style: style)),
                 .replaceCaptions(.init(trackId: .ref(0), items: items)),
             ])
@@ -270,9 +285,12 @@ enum ApplyTools {
             let leftovers = words.filter { !grouped.contains($0) }
             if !leftovers.isEmpty { groups.append(leftovers) }
             for group in groups.sorted(by: { ($0.first?.t0 ?? .zero) < ($1.first?.t0 ?? .zero) }) {
-                for chunk in stride(from: 0, to: group.count, by: max(1, maxWords)).map({ Array(group[$0..<min($0 + maxWords, group.count)]) }) {
+                for chunk in stride(from: 0, to: group.count, by: max(1, maxWords)).map({
+                    Array(group[$0..<min($0 + maxWords, group.count)])
+                }) {
                     guard let first = chunk.first, let last = chunk.last else { continue }
-                    let start = (clip.start + ((first.t0 - clip.sourceIn) / clip.speed)).snapped(to: sequence.frameDuration)
+                    let start = (clip.start + ((first.t0 - clip.sourceIn) / clip.speed)).snapped(
+                        to: sequence.frameDuration)
                     let end = RationalTime.min(
                         (clip.start + ((last.t1 - clip.sourceIn) / clip.speed)).ceiled(to: sequence.frameDuration),
                         sequence.end(of: clip))
@@ -280,7 +298,8 @@ enum ApplyTools {
                     items.append(
                         .init(
                             start: start, duration: duration, text: chunk.map(\.text).joined(separator: " "),
-                            words: chunk.map { CaptionWord(text: $0.text, t0: $0.t0 - first.t0, t1: $0.t1 - first.t0) }))
+                            words: chunk.map { CaptionWord(text: $0.text, t0: $0.t0 - first.t0, t1: $0.t1 - first.t0) })
+                    )
                 }
             }
         }
@@ -293,7 +312,8 @@ enum ApplyTools {
             "Undoes the latest live transaction (or txnId). Undo is linear across the human and the agent: check history with project_describe before undoing something you did not do.",
         inputSchema: Schema.object(
             "Undo request.",
-            properties: ToolSupport.inputProperties(mutating: true, ["txnId": Schema.string("Transaction to undo (default: latest live).")])),
+            properties: ToolSupport.inputProperties(
+                mutating: true, ["txnId": Schema.string("Transaction to undo (default: latest live).")])),
         outputSchema: mutationOutput, annotations: ToolAnnotations(title: "Undo", destructive: true, idempotent: true),
         examples: [.object([:]), .object(["expectedVersion": 12, "txnId": "00000000-0000-7000-8000-000000000020"])]
     ) { input, context in

@@ -166,7 +166,8 @@ enum ToolSupport {
                 "The project version you last read. A different current version rejects the call with staleVersion and a changedSince diff.",
                 minimum: 0)
             p["commandId"] = Schema.string(
-                "Idempotency key (any unique string). Retrying with the same commandId returns the stored result and applies nothing twice.")
+                "Idempotency key (any unique string). Retrying with the same commandId returns the stored result and applies nothing twice."
+            )
             p["label"] = Schema.string("Undo-history label (optional).")
         }
         return p

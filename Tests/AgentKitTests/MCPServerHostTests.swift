@@ -41,7 +41,9 @@ struct MCPTestClient: Sendable {
         let http = response as! HTTPURLResponse
         var headers: [String: String] = [:]
         for (k, v) in http.allHeaderFields { headers[String(describing: k).lowercased()] = String(describing: v) }
-        return Reply(status: http.statusCode, headers: headers, body: data, messages: MCPTestClient.messages(in: data, contentType: headers["content-type"] ?? ""))
+        return Reply(
+            status: http.statusCode, headers: headers, body: data,
+            messages: MCPTestClient.messages(in: data, contentType: headers["content-type"] ?? ""))
     }
 
     static func messages(in data: Data, contentType: String) -> [JSONValue] {
@@ -58,11 +60,16 @@ struct MCPTestClient: Sendable {
 
     static let initialize: JSONValue = [
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": ["protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "test", "version": "0"]],
+        "params": [
+            "protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "test", "version": "0"],
+        ],
     ]
 
     static func call(_ id: Int, _ tool: String, _ arguments: JSONValue) -> JSONValue {
-        ["jsonrpc": "2.0", "id": .number(Double(id)), "method": "tools/call", "params": ["name": .string(tool), "arguments": arguments]]
+        [
+            "jsonrpc": "2.0", "id": .number(Double(id)), "method": "tools/call",
+            "params": ["name": .string(tool), "arguments": arguments],
+        ]
     }
 
     /// initialize + notifications/initialized, returning a client bound to the new session.
@@ -81,7 +88,9 @@ struct MCPTestClient: Sendable {
         var info: MCPConnectionInfo
         var log: LogSink
 
-        static func make(configuration: MCPServerHost.Configuration = .init(), policy: ApprovalPolicy = .standard) async throws -> Harness {
+        static func make(configuration: MCPServerHost.Configuration = .init(), policy: ApprovalPolicy = .standard)
+            async throws -> Harness
+        {
             let services = try await TestServices.make(approvalPolicy: policy)
             let context = services.toolContext(actor: .human, sessionId: nil)
             let registry = await EditorTools.standard(context: context)
@@ -121,7 +130,8 @@ struct MCPTestClient: Sendable {
         #expect(h.info.claudeMCPAddCommand.contains("--transport http timeline \(h.info.url.absoluteString)"))
         #expect(await h.host.connectionInfo == h.info)
         #expect(await h.host.isRunning)
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("agentkit-\(UUID().uuidString)/mcp.json")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "agentkit-\(UUID().uuidString)/mcp.json")
         try h.info.writeProxyConfiguration(to: file)
         let written = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: String]
         #expect(written?["url"] == h.info.url.absoluteString && written?["token"] == h.info.token)
@@ -168,7 +178,8 @@ struct MCPTestClient: Sendable {
         defer { Task { await h.host.stop() } }
         var client = h.client()
         let initialized = try await client.handshake()
-        #expect(initialized.status == 200 && initialized.headers["content-type"]?.hasPrefix("text/event-stream") == true)
+        #expect(
+            initialized.status == 200 && initialized.headers["content-type"]?.hasPrefix("text/event-stream") == true)
         #expect(client.sessionId != nil)
         #expect(initialized.result?["serverInfo"]?["name"] == "timeline")
         #expect(initialized.result?["capabilities"]?["tools"] != nil)
@@ -178,11 +189,15 @@ struct MCPTestClient: Sendable {
         let tools = try #require(list.result?["tools"]?.arrayValue)
         #expect(tools.map { $0["name"]?.stringValue ?? "" } == EditorTools.names)
         let apply = try #require(tools.first { $0["name"] == "timeline_apply" })
-        #expect(apply["annotations"]?["idempotentHint"] == .bool(true) && apply["annotations"]?["readOnlyHint"] == .bool(false))
+        #expect(
+            apply["annotations"]?["idempotentHint"] == .bool(true)
+                && apply["annotations"]?["readOnlyHint"] == .bool(false))
         #expect(apply["outputSchema"]?["properties"]?["version"] != nil)
         #expect(apply["inputSchema"]?["$defs"]?["op_moveClip"] != nil)
         let describe = try #require(tools.first { $0["name"] == "project_describe" })
-        #expect(describe["annotations"]?["readOnlyHint"] == .bool(true) && describe["annotations"]?["title"] == "Describe project")
+        #expect(
+            describe["annotations"]?["readOnlyHint"] == .bool(true)
+                && describe["annotations"]?["title"] == "Describe project")
 
         let listed = try await client.post(MCPTestClient.call(3, "project_list", [:]))
         #expect(listed.result?["isError"] == nil)
@@ -194,13 +209,20 @@ struct MCPTestClient: Sendable {
         let clip = try #require(Fixtures.firstVideoClip(in: await h.services.store.state()))
         let move: JSONValue = [
             "projectId": .string(projectId), "expectedVersion": .number(Double(version)), "commandId": "cmd-A",
-            "ops": [["type": "moveClip", "clipId": .string(clip.id.rawValue), "to": ["start": ["v": 48048, "ts": 24000]], "mode": "overwrite"]],
+            "ops": [
+                [
+                    "type": "moveClip", "clipId": .string(clip.id.rawValue),
+                    "to": ["start": ["v": 48048, "ts": 24000]], "mode": "overwrite",
+                ]
+            ],
         ]
         let applied = try await client.post(MCPTestClient.call(4, "timeline_apply", move))
         #expect(applied.result?["isError"] == nil, "\(applied.messages)")
         let applied1 = try #require(applied.result?["structuredContent"]?["version"]?.intValue)
         #expect(applied1 > version)
-        #expect(applied.result?["structuredContent"]?["changedIds"]?.arrayValue?.contains(.string(clip.id.rawValue)) == true)
+        #expect(
+            applied.result?["structuredContent"]?["changedIds"]?.arrayValue?.contains(.string(clip.id.rawValue)) == true
+        )
 
         let retry = try await client.post(MCPTestClient.call(5, "timeline_apply", move))
         #expect(retry.result?["structuredContent"]?["status"] == "replayed")
@@ -215,7 +237,8 @@ struct MCPTestClient: Sendable {
 
         let assetId = try #require(clip.assetId?.rawValue)
         let look = try await client.post(
-            MCPTestClient.call(7, "look_at", ["assetId": .string(assetId), "timestamps": [["v": 0, "ts": 24000]], "height": 40]))
+            MCPTestClient.call(
+                7, "look_at", ["assetId": .string(assetId), "timestamps": [["v": 0, "ts": 24000]], "height": 40]))
         let blocks = try #require(look.result?["content"]?.arrayValue)
         #expect(blocks.count == 2 && blocks[1]["type"] == "image" && blocks[1]["mimeType"] == "image/png")
         let png = Data(base64Encoded: blocks[1]["data"]?.stringValue ?? "")
@@ -227,8 +250,14 @@ struct MCPTestClient: Sendable {
         // The store saw the session's actor, receipts were recorded, and the host logged the calls.
         let sessionId = try #require(client.sessionId)
         #expect(await h.services.store.receivedCommands.last?.actor == .agent(sessionId: sessionId))
-        #expect(await h.services.receipts.receipts.map(\.toolName) == ["project_list", "timeline_apply", "timeline_apply", "timeline_apply", "look_at"])
-        #expect(await h.host.calls.map(\.tool) == ["project_list", "timeline_apply", "timeline_apply", "timeline_apply", "look_at"])
+        #expect(
+            await h.services.receipts.receipts.map(\.toolName) == [
+                "project_list", "timeline_apply", "timeline_apply", "timeline_apply", "look_at",
+            ])
+        #expect(
+            await h.host.calls.map(\.tool) == [
+                "project_list", "timeline_apply", "timeline_apply", "timeline_apply", "look_at",
+            ])
         #expect(await h.host.calls.map(\.isError) == [false, false, false, true, false])
         #expect(h.log.all.contains { $0.contains("tools/call timeline_apply") })
 
@@ -273,7 +302,9 @@ struct MCPTestClient: Sendable {
         #expect(free.messages.first?["hookSpecificOutput"]?["hookEventName"] == "PreToolUse")
 
         // A gated tool without a token is allowed too: the server-side gate raises the card.
-        let first = try await hook.post(["tool_name": "mcp__timeline__render_export", "tool_input": ["preset": "reel9x16"]])
+        let first = try await hook.post([
+            "tool_name": "mcp__timeline__render_export", "tool_input": ["preset": "reel9x16"],
+        ])
         #expect(first.messages.first?["hookSpecificOutput"]?["permissionDecision"] == "allow")
 
         // Mint a pending request (what the tool does), then the hook blocks on the retry until the grant.
@@ -296,7 +327,9 @@ struct MCPTestClient: Sendable {
         let granted = try await waiting.value
         #expect(granted.status == 200)
         #expect(granted.messages.first?["hookSpecificOutput"]?["permissionDecision"] == "allow", "\(granted.messages)")
-        #expect(granted.messages.first?["hookSpecificOutput"]?["permissionDecisionReason"]?.stringValue?.contains("accepted") == true)
+        #expect(
+            granted.messages.first?["hookSpecificOutput"]?["permissionDecisionReason"]?.stringValue?.contains(
+                "accepted") == true)
         // The token is still usable by the server-side gate (the hook did not consume it).
         #expect(await h.services.approvals.consume(request.token))
 
@@ -318,7 +351,9 @@ struct MCPTestClient: Sendable {
         await h.host.approvalGate.deny(second.token, reason: "not now")
         let denied = try await denying.value
         #expect(denied.messages.first?["hookSpecificOutput"]?["permissionDecision"] == "deny")
-        #expect(denied.messages.first?["hookSpecificOutput"]?["permissionDecisionReason"]?.stringValue?.contains("not now") == true)
+        #expect(
+            denied.messages.first?["hookSpecificOutput"]?["permissionDecisionReason"]?.stringValue?.contains("not now")
+                == true)
 
         let malformed = try await hook.post("not an object")
         #expect(malformed.status == 400)
@@ -354,7 +389,9 @@ struct MCPTestClient: Sendable {
         await h.host.approvalGate.grant(ApprovalToken(token))
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("agentkit-\(UUID().uuidString)/x.mov")
         let second = try await client.post(
-            MCPTestClient.call(3, "render_export", ["preset": "proRes", "approvalToken": .string(token), "outputPath": .string(out.path)]))
+            MCPTestClient.call(
+                3, "render_export",
+                ["preset": "proRes", "approvalToken": .string(token), "outputPath": .string(out.path)]))
         #expect(second.result?["structuredContent"]?["status"] == "done", "\(second.messages)")
         try? FileManager.default.removeItem(at: out.deletingLastPathComponent())
     }

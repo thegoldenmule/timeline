@@ -40,7 +40,8 @@ import TimelineCore
     @Test func standardRegistryListsEveryToolWhenServicesArePresent() async throws {
         let h = try await Harness.make()
         #expect(await h.registry.list().map(\.name) == EditorTools.names)
-        let bare = ToolContext(projects: FakeProjectDirectory(), services: ToolServices(), approvals: FakeApprovalGate(), actor: .human)
+        let bare = ToolContext(
+            projects: FakeProjectDirectory(), services: ToolServices(), approvals: FakeApprovalGate(), actor: .human)
         let reduced = await EditorTools.standard(context: bare)
         let names = await reduced.list().map(\.name)
         #expect(names.contains("project_list") && names.contains("timeline_apply") && !names.contains("render_export"))
@@ -78,7 +79,9 @@ import TimelineCore
         let ranged = try await h.call(
             "project_describe",
             ["level": "tracks", "range": ["start": ["v": 0, "ts": 24000], "end": ["v": 1, "ts": 24000]]])
-        let rangedClips = ranged.structured?["sequences"]?[0]?["tracks"]?.arrayValue?.flatMap { $0["clips"]?.arrayValue ?? [] }
+        let rangedClips = ranged.structured?["sequences"]?[0]?["tracks"]?.arrayValue?.flatMap {
+            $0["clips"]?.arrayValue ?? []
+        }
         #expect((rangedClips?.count ?? 0) < (trackList.flatMap { $0["clips"]?.arrayValue ?? [] }.count))
     }
 
@@ -168,7 +171,8 @@ import TimelineCore
                 ["type": "splitClip", "clipId": .string(clip.id.rawValue), "at": try JSONValue(encoding: cut)],
                 [
                     "type": "addTransition", "leftClipId": .string(clip.id.rawValue), "rightClipId": ["$ref": 0],
-                    "kind": "dissolve", "duration": try JSONValue(encoding: RationalTime.frames(8, of: sequence.frameDuration)),
+                    "kind": "dissolve",
+                    "duration": try JSONValue(encoding: RationalTime.frames(8, of: sequence.frameDuration)),
                 ],
             ],
         ]
@@ -182,10 +186,12 @@ import TimelineCore
         #expect(await h.services.store.history().latestLive?.label == "2 edits")
 
         // 5. Decoding errors are readable, and undo/redo travel through the same tool.
-        let malformed = try await h.call("timeline_apply", ["expectedVersion": 1, "ops": [["type": "moveClip", "clipId": "x"]]])
+        let malformed = try await h.call(
+            "timeline_apply", ["expectedVersion": 1, "ops": [["type": "moveClip", "clipId": "x"]]])
         #expect(malformed.isError && malformed.text?.contains("to") == true)
         let v2 = await h.project.version
-        let undo = try await h.call("timeline_apply", ["expectedVersion": .number(Double(v2)), "ops": [["type": "undo"]]])
+        let undo = try await h.call(
+            "timeline_apply", ["expectedVersion": .number(Double(v2)), "ops": [["type": "undo"]]])
         let afterUndo = await h.project.activeSequence?.transitions.count
         #expect(!undo.isError && afterUndo == sequence.transitions.count)
         let redo = try await h.call("redo", [:])
@@ -303,7 +309,8 @@ import TimelineCore
         #expect(again.isApprovalRequired && again.structured?["approvalToken"]?.stringValue != token)
 
         await h.services.approvals.grant(ApprovalToken(token))
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("agentkit-\(UUID().uuidString)/reel.mp4")
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "agentkit-\(UUID().uuidString)/reel.mp4")
         let done = try await h.call(
             "render_export", ["preset": "reel9x16", "approvalToken": .string(token), "outputPath": .string(out.path)])
         #expect(!done.isError && !done.isApprovalRequired, "\(done)")
@@ -354,7 +361,8 @@ import TimelineCore
         let assetId = try #require(clip.assetId)
         let none = try await h.call("transcript_search", ["query": "welcome"])
         #expect(none.structured?["count"]?.intValue == 0)  // no transcript recorded yet
-        let hits = try await h.call("transcript_search", ["query": "Video Editor", "assetId": .string(assetId.rawValue)])
+        let hits = try await h.call(
+            "transcript_search", ["query": "Video Editor", "assetId": .string(assetId.rawValue)])
         #expect(hits.structured?["count"]?.intValue == 1, "\(hits)")
         let hit = try #require(hits.structured?["hits"]?[0])
         #expect(hit["text"] == "Video Editor")
@@ -373,7 +381,10 @@ import TimelineCore
             "look_at",
             [
                 "assetId": .string(assetId), "height": 60,
-                "timestamps": [["v": 0, "ts": 24000], ["v": 24024, "ts": 24000], ["v": 48048, "ts": 24000], ["v": 72072, "ts": 24000]],
+                "timestamps": [
+                    ["v": 0, "ts": 24000], ["v": 24024, "ts": 24000], ["v": 48048, "ts": 24000],
+                    ["v": 72072, "ts": 24000],
+                ],
             ])
         #expect(!out.isError, "\(out)")
         #expect(out.images.count == 1 && out.images[0].mimeType == "image/png")
@@ -390,7 +401,8 @@ import TimelineCore
         #expect(!one.isError && one.images.count == 1, "\(one)")
         #expect(one.structured?["frames"]?.arrayValue?.count == 1)
         let many = try await h.call(
-            "render_preview", ["range": ["start": ["v": 0, "ts": 24000], "end": ["v": 240240, "ts": 24000]], "count": 5, "width": 96])
+            "render_preview",
+            ["range": ["start": ["v": 0, "ts": 24000], "end": ["v": 240240, "ts": 24000]], "count": 5, "width": 96])
         #expect(many.structured?["frames"]?.arrayValue?.count == 5)
         #expect(h.services.renderer.calls.filter { if case .frame = $0 { true } else { false } }.count == 6)
     }
@@ -415,13 +427,15 @@ import TimelineCore
 
         let noVideoAudio = try #require(project.assets.values.first { !$0.hasAudio })
         let refused = try await h.call(
-            "align_audio", ["referenceAssetId": .string(noVideoAudio.id.rawValue), "targetAssetId": .string(mix.id.rawValue)])
+            "align_audio",
+            ["referenceAssetId": .string(noVideoAudio.id.rawValue), "targetAssetId": .string(mix.id.rawValue)])
         #expect(refused.isError)
 
         h.services.aligner.setResult(.failedFixture)
         let failed = try await h.call(
             "align_audio", ["referenceAssetId": .string(camera.id.rawValue), "targetAssetId": .string(mix.id.rawValue)])
-        #expect(failed.structured?["status"] == "failed" && failed.structured?["offset"] == nil && failed.images.isEmpty)
+        #expect(
+            failed.structured?["status"] == "failed" && failed.structured?["offset"] == nil && failed.images.isEmpty)
     }
 
     @Test func alignAudioAsksForApprovalOnLongInputsWhenPolicySaysSo() async throws {

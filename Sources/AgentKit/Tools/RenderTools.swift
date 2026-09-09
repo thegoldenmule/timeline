@@ -18,22 +18,32 @@ enum RenderTools {
                         "sequenceId": Schema.string("Sequence (default: the active one)."),
                         "at": Schema.ref("time", "One timeline time to render."),
                         "range": Schema.ref("timeRange", "Timeline range to sample (alternative to at)."),
-                        "count": Schema.integer("Frames across the range (default 4, max 12).", minimum: 1, maximum: 12),
-                        "width": Schema.integer("Frame width in pixels (default 480; height follows the sequence aspect).", minimum: 64, maximum: 1920),
+                        "count": Schema.integer(
+                            "Frames across the range (default 4, max 12).", minimum: 1, maximum: 12),
+                        "width": Schema.integer(
+                            "Frame width in pixels (default 480; height follows the sequence aspect).", minimum: 64,
+                            maximum: 1920),
                     ])),
             ["time": OperationSchemas.defs["time"]!, "timeRange": OperationSchemas.defs["timeRange"]!]),
         outputSchema: Schema.object(
             "Which frames were rendered; the image is an image content block.",
             properties: [
                 "sequenceId": Schema.string("Sequence rendered."),
-                "frames": Schema.array("Cells in order.", items: Schema.object("A cell.", properties: ["index": Schema.integer("Cell index."), "time": Schema.any("Timeline time.")], required: ["index", "time"])),
+                "frames": Schema.array(
+                    "Cells in order.",
+                    items: Schema.object(
+                        "A cell.",
+                        properties: ["index": Schema.integer("Cell index."), "time": Schema.any("Timeline time.")],
+                        required: ["index", "time"])),
                 "columns": Schema.integer("Cells per row."), "rows": Schema.integer("Rows."),
                 "version": Schema.integer("Project version rendered."),
             ], required: ["sequenceId", "frames", "version"]),
         annotations: ToolAnnotations(title: "Render preview", readOnly: true, idempotent: true),
         examples: [
             .object(["at": ["v": 24024, "ts": 24000]]),
-            .object(["range": ["start": ["v": 0, "ts": 24000], "end": ["v": 240240, "ts": 24000]], "count": 6, "width": 320]),
+            .object([
+                "range": ["start": ["v": 0, "ts": 24000], "end": ["v": 240240, "ts": 24000]], "count": 6, "width": 320,
+            ]),
         ]
     ) { input, context in
         guard let renderer = context.services.renderer else { throw ToolError.serviceUnavailable("renderer") }
@@ -47,7 +57,8 @@ enum RenderTools {
             let span = range.end - range.start
             for i in 0..<count {
                 let t = count == 1 ? range.start : range.start + span * Int64(i) / Int64(count - 1)
-                times.append(RationalTime.min(t, range.end - sequence.frameDuration).floored(to: sequence.frameDuration))
+                times.append(
+                    RationalTime.min(t, range.end - sequence.frameDuration).floored(to: sequence.frameDuration))
             }
         } else {
             times = [.zero]
@@ -64,10 +75,14 @@ enum RenderTools {
         return ToolOutput(
             structured: .object([
                 "sequenceId": .string(sequence.id.rawValue),
-                "frames": .array(thumbs.enumerated().map { .object(["index": .number(Double($0.offset)), "time": ToolSupport.timeJSON($0.element.time)]) }),
+                "frames": .array(
+                    thumbs.enumerated().map {
+                        .object(["index": .number(Double($0.offset)), "time": ToolSupport.timeJSON($0.element.time)])
+                    }),
                 "columns": .number(Double(sheet.columns)), "rows": .number(Double(sheet.rows)),
                 "version": .number(Double(resolved.project.version)), "projectId": .string(resolved.projectId.rawValue),
-            ]), text: "Rendered \(thumbs.count) frame(s) of \(sequence.name).", images: [ToolImage(data: try ToolImages.png(sheet.image))])
+            ]), text: "Rendered \(thumbs.count) frame(s) of \(sequence.name).",
+            images: [ToolImage(data: try ToolImages.png(sheet.image))])
     }
 
     static let presetNames = ["hevcHLG4K", "h264_1080p", "reel9x16", "proRes"]
@@ -94,8 +109,12 @@ enum RenderTools {
                     "sequenceId": Schema.string("Sequence (default: the active one)."),
                     "preset": Schema.anyOf(
                         "A built-in preset name or a complete ExportPreset object.",
-                        [Schema.enum("Built-in preset.", presetNames), Schema.object("Full preset.", properties: [:], additionalProperties: true)]),
-                    "outputPath": Schema.string("Destination file path (default: ~/Movies/Timeline/Exports/<sequence>-<preset>.<ext>)."),
+                        [
+                            Schema.enum("Built-in preset.", presetNames),
+                            Schema.object("Full preset.", properties: [:], additionalProperties: true),
+                        ]),
+                    "outputPath": Schema.string(
+                        "Destination file path (default: ~/Movies/Timeline/Exports/<sequence>-<preset>.<ext>)."),
                     "approvalToken": Schema.string("Token from the approval_required result, once granted."),
                 ]), required: ["preset"]),
         outputSchema: Schema.object(
@@ -111,7 +130,8 @@ enum RenderTools {
                 "approvalToken": Schema.string("Present when approval is required."),
                 "estimate": Schema.any("Estimated seconds and bytes when approval is required."),
             ], required: ["status"], additionalProperties: true),
-        annotations: ToolAnnotations(title: "Export", readOnly: false, destructive: false, idempotent: false, openWorld: true),
+        annotations: ToolAnnotations(
+            title: "Export", readOnly: false, destructive: false, idempotent: false, openWorld: true),
         examples: [
             .object(["preset": "reel9x16"]),
             .object(["preset": "h264_1080p", "outputPath": "/Users/me/Movies/reel.mp4", "approvalToken": "tok-1"]),
@@ -124,7 +144,8 @@ enum RenderTools {
         let chosen: ExportPreset
         if let name = ToolSupport.string(input, "preset") {
             guard let p = RenderTools.preset(named: name) else {
-                throw ToolError.invalidInput("Unknown preset \(name); use one of \(presetNames.joined(separator: ", "))")
+                throw ToolError.invalidInput(
+                    "Unknown preset \(name); use one of \(presetNames.joined(separator: ", "))")
             }
             chosen = p
         } else {
@@ -136,7 +157,9 @@ enum RenderTools {
         var bytes: Int64?
         if case .bitrate(let bps) = preset.videoQuality { bytes = Int64(Double(bps) / 8 * duration.seconds) }
         let estimate = Estimate(seconds: duration.seconds.rounded(.up), usd: 0, bytes: bytes)
-        if case .required(let request) = await context.checkApproval(tool: "render_export", input: input, estimate: estimate) {
+        if case .required(let request) = await context.checkApproval(
+            tool: "render_export", input: input, estimate: estimate)
+        {
             return .approvalRequired(request)
         }
         let outputURL: URL
@@ -165,6 +188,7 @@ enum RenderTools {
             "projectId": .string(resolved.projectId.rawValue), "warnings": .array(outcome.warnings.map { .string($0) }),
         ]
         if let receipt { o["receipt"] = ToolSupport.json(receipt) }
-        return ToolOutput(structured: .object(o), text: "Exported \(sequence.name) with \(preset.name) to \(outputURL.path).")
+        return ToolOutput(
+            structured: .object(o), text: "Exported \(sequence.name) with \(preset.name) to \(outputURL.path).")
     }
 }

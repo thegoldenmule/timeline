@@ -379,7 +379,8 @@ public enum OperationSchemas {
                 "effectId": Schema.ref("idOrRef", "Effect."),
                 "kind": Schema.string("New kind (optional)."),
                 "enabled": Schema.bool("Enable or disable (optional)."),
-                "params": Schema.map("Replaces the whole parameter set (optional).", values: Schema.ref("animatableAny")),
+                "params": Schema.map(
+                    "Replaces the whole parameter set (optional).", values: Schema.ref("animatableAny")),
             ], required: ["clipId", "effectId"])
         op(
             "removeEffect", "Removes an effect.",
@@ -394,7 +395,8 @@ public enum OperationSchemas {
                 "rightClipId": Schema.ref("idOrRef", "Incoming clip."),
                 "kind": Schema.string("Transition kind, e.g. dissolve, wipe."),
                 "duration": Schema.ref("time", "Transition duration."),
-                "alignment": Schema.enum("Where the overlap sits relative to the cut.", TransitionAlignment.allCases.map(\.rawValue)),
+                "alignment": Schema.enum(
+                    "Where the overlap sits relative to the cut.", TransitionAlignment.allCases.map(\.rawValue)),
                 "params": Schema.map("Kind-specific parameters.", values: Schema.any("Any JSON value.")),
             ], required: ["leftClipId", "rightClipId", "kind", "duration"])
         op(
@@ -442,7 +444,8 @@ public enum OperationSchemas {
                 "words": Schema.array("New word timings (optional).", items: Schema.ref("captionWord")),
             ], required: ["clipId"])
         op(
-            "setCaptionStyle", "Sets a track's default style or one item's override. Give exactly one of trackId or clipId.",
+            "setCaptionStyle",
+            "Sets a track's default style or one item's override. Give exactly one of trackId or clipId.",
             [
                 "trackId": Schema.ref("idOrRef", "Caption track (optional)."),
                 "clipId": Schema.ref("idOrRef", "Caption item (optional)."),
@@ -465,7 +468,9 @@ public enum OperationSchemas {
         op(
             "undo", "Undoes a transaction (default: the latest live one). Not allowed inside a batch with other ops.",
             ["txnId": Schema.ref("id", "Transaction to undo (optional).")], required: [])
-        op("redo", "Redoes the latest undone transaction. Not allowed inside a batch with other ops.", [:], required: [])
+        op(
+            "redo", "Redoes the latest undone transaction. Not allowed inside a batch with other ops.", [:],
+            required: [])
         op(
             "batch", "A nested batch; timeline_apply already batches ops[], so this is rarely needed.",
             ["operations": Schema.array("Operations, applied in order.", items: Schema.ref("operation"))],

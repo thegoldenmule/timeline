@@ -57,9 +57,11 @@ enum ProjectTools {
                 properties: ToolSupport.inputProperties(
                     mutating: false,
                     [
-                        "level": Schema.enum("How much detail to return (default summary).", ["summary", "tracks", "full"]),
+                        "level": Schema.enum(
+                            "How much detail to return (default summary).", ["summary", "tracks", "full"]),
                         "sequenceId": Schema.string("Limit tracks/full to one sequence (default: the active one)."),
-                        "range": Schema.ref("timeRange", "Only clips overlapping this timeline range (levels tracks and full)."),
+                        "range": Schema.ref(
+                            "timeRange", "Only clips overlapping this timeline range (levels tracks and full)."),
                     ])),
             ["time": OperationSchemas.defs["time"]!, "timeRange": OperationSchemas.defs["timeRange"]!]),
         outputSchema: Schema.object(
@@ -70,7 +72,8 @@ enum ProjectTools {
                 "version": Schema.integer("Current version; pass it as expectedVersion."),
                 "activeSequenceId": Schema.string("Active sequence id."),
                 "settings": Schema.any("Project settings."),
-                "sequences": Schema.array("Sequences.", items: Schema.any("Sequence summary, with tracks at level tracks.")),
+                "sequences": Schema.array(
+                    "Sequences.", items: Schema.any("Sequence summary, with tracks at level tracks.")),
                 "assets": Schema.array("Assets.", items: Schema.any("Asset summary.")),
                 "history": Schema.any("Undo/redo targets."),
                 "project": Schema.any("The full project document (level full)."),
@@ -101,8 +104,12 @@ enum ProjectTools {
         if let active = project.activeSequenceId { o["activeSequenceId"] = .string(active.rawValue) }
         let history = await resolved.store.history()
         var h: [String: JSONValue] = [:]
-        if let undo = history.latestLive { h["undo"] = ["txnId": .string(undo.id.rawValue), "label": .string(undo.label)] }
-        if let redo = history.redoTarget { h["redo"] = ["txnId": .string(redo.id.rawValue), "label": .string(redo.label)] }
+        if let undo = history.latestLive {
+            h["undo"] = ["txnId": .string(undo.id.rawValue), "label": .string(undo.label)]
+        }
+        if let redo = history.redoTarget {
+            h["redo"] = ["txnId": .string(redo.id.rawValue), "label": .string(redo.label)]
+        }
         o["history"] = .object(h)
         if level == "full" {
             var document = project
@@ -142,18 +149,23 @@ enum ProjectTools {
 
     static func sequenceSummary(_ s: Sequence, level: String, range: TimeRange?, isActive: Bool) -> JSONValue {
         var o: [String: JSONValue] = [
-            "sequenceId": .string(s.id.rawValue), "name": .string(s.name), "frameDuration": ToolSupport.timeJSON(s.frameDuration),
+            "sequenceId": .string(s.id.rawValue), "name": .string(s.name),
+            "frameDuration": ToolSupport.timeJSON(s.frameDuration),
             "width": .number(Double(s.width)), "height": .number(Double(s.height)),
-            "duration": ToolSupport.timeJSON(ToolSupport.duration(of: s)), "trackCount": .number(Double(s.tracks.count)),
+            "duration": ToolSupport.timeJSON(ToolSupport.duration(of: s)),
+            "trackCount": .number(Double(s.tracks.count)),
             "isActive": .bool(isActive),
         ]
         if level != "summary" {
             o["tracks"] = .array(s.tracks.map { trackSummary($0, in: s, range: range) })
             o["transitions"] = .array(s.transitions.values.sorted { $0.id < $1.id }.map(transitionSummary))
             o["markers"] = .array(
-                s.markers.values.sorted { $0.at < $1.at }.filter { marker in range.map { r in r.contains(marker.at) } ?? true }.map {
+                s.markers.values.sorted { $0.at < $1.at }.filter { marker in
+                    range.map { r in r.contains(marker.at) } ?? true
+                }.map {
                     var m: [String: JSONValue] = [
-                        "markerId": .string($0.id.rawValue), "at": ToolSupport.timeJSON($0.at), "label": .string($0.label),
+                        "markerId": .string($0.id.rawValue), "at": ToolSupport.timeJSON($0.at),
+                        "label": .string($0.label),
                     ]
                     if let c = $0.colour { m["colour"] = .string(c) }
                     return .object(m)
@@ -179,7 +191,8 @@ enum ProjectTools {
     static func clipSummary(_ c: Clip, in s: Sequence) -> JSONValue {
         let end = s.end(of: c)
         var o: [String: JSONValue] = [
-            "clipId": .string(c.id.rawValue), "trackId": .string(c.trackId.rawValue), "start": ToolSupport.timeJSON(c.start),
+            "clipId": .string(c.id.rawValue), "trackId": .string(c.trackId.rawValue),
+            "start": ToolSupport.timeJSON(c.start),
             "end": ToolSupport.timeJSON(end), "duration": ToolSupport.timeJSON(end - c.start),
             "sourceIn": ToolSupport.timeJSON(c.sourceIn), "sourceOut": ToolSupport.timeJSON(c.sourceOut),
             "speed": ToolSupport.json(c.speed),
@@ -197,7 +210,8 @@ enum ProjectTools {
         .object([
             "transitionId": .string(t.id.rawValue), "trackId": .string(t.trackId.rawValue),
             "leftClipId": .string(t.leftClipId.rawValue), "rightClipId": .string(t.rightClipId.rawValue),
-            "kind": .string(t.kind), "duration": ToolSupport.timeJSON(t.duration), "alignment": .string(t.alignment.rawValue),
+            "kind": .string(t.kind), "duration": ToolSupport.timeJSON(t.duration),
+            "alignment": .string(t.alignment.rawValue),
         ])
     }
 
@@ -215,14 +229,17 @@ enum ProjectTools {
                             "What to return and how to narrow it.",
                             properties: [
                                 "kind": Schema.enum(
-                                    "Entity kind to return.", ["clips", "transitions", "markers", "tracks", "assets", "history"]),
+                                    "Entity kind to return.",
+                                    ["clips", "transitions", "markers", "tracks", "assets", "history"]),
                                 "sequenceId": Schema.string("Sequence (default: the active one)."),
                                 "trackId": Schema.string("Only this track."),
-                                "trackKind": Schema.enum("Only tracks of this kind.", TrackKind.allCases.map(\.rawValue)),
+                                "trackKind": Schema.enum(
+                                    "Only tracks of this kind.", TrackKind.allCases.map(\.rawValue)),
                                 "assetId": Schema.string("Only clips of this asset."),
                                 "clipId": Schema.string("Only this clip."),
                                 "range": Schema.ref("timeRange", "Only entities overlapping this timeline range."),
-                                "textContains": Schema.string("Case-insensitive substring of label, caption text, or name."),
+                                "textContains": Schema.string(
+                                    "Case-insensitive substring of label, caption text, or name."),
                                 "limit": Schema.integer("Maximum results (default 200).", minimum: 1),
                             ], required: ["kind"])
                     ]), required: ["filter"]),
@@ -239,14 +256,20 @@ enum ProjectTools {
         annotations: .readOnly(title: "Query timeline"),
         examples: [
             .object(["filter": ["kind": "clips", "trackKind": "video"]]),
-            .object(["filter": ["kind": "clips", "range": ["start": ["v": 0, "ts": 24000], "end": ["v": 48048, "ts": 24000]]]]),
+            .object([
+                "filter": [
+                    "kind": "clips", "range": ["start": ["v": 0, "ts": 24000], "end": ["v": 48048, "ts": 24000]],
+                ]
+            ]),
             .object(["filter": ["kind": "assets", "textContains": "IMG"]]),
             .object(["filter": ["kind": "history", "limit": 10]]),
         ]
     ) { input, context in
         let resolved = try await ToolSupport.resolve(input, context)
         let project = resolved.project
-        guard case .object(let filter) = input["filter"] ?? .null else { throw ToolError.invalidInput("filter is required") }
+        guard case .object(let filter) = input["filter"] ?? .null else {
+            throw ToolError.invalidInput("filter is required")
+        }
         let kind = filter["kind"]?.stringValue ?? "clips"
         let limit = filter["limit"]?.intValue ?? 200
         let text = filter["textContains"]?.stringValue?.lowercased()
@@ -274,7 +297,8 @@ enum ProjectTools {
                 ])
             }
         default:
-            let sequence = try ToolSupport.sequence(ToolInput(["sequenceId": filter["sequenceId"] ?? .null]), in: project)
+            let sequence = try ToolSupport.sequence(
+                ToolInput(["sequenceId": filter["sequenceId"] ?? .null]), in: project)
             sequenceId = sequence.id
             let tracks = sequence.tracks.filter { t in
                 (filter["trackId"]?.stringValue.map { $0 == t.id.rawValue } ?? true)
@@ -295,7 +319,9 @@ enum ProjectTools {
                 clips = clips.filter { clip in wantedAsset == nil || wantedAsset == clip.assetId?.rawValue }
                 clips = clips.filter { clip in wantedClip == nil || wantedClip == clip.id.rawValue }
                 if let range {
-                    clips = clips.filter { clip in ToolSupport.overlaps(ToolSupport.range(of: clip, in: sequence), range) }
+                    clips = clips.filter { clip in
+                        ToolSupport.overlaps(ToolSupport.range(of: clip, in: sequence), range)
+                    }
                 }
                 clips = clips.filter { clip in matchesText([clip.label, clip.text]) }
                 clips.sort { a, b in a.start == b.start ? a.id.rawValue < b.id.rawValue : a.start < b.start }
@@ -306,9 +332,14 @@ enum ProjectTools {
                     .filter { matchesText([$0.kind]) }.sorted { $0.id < $1.id }.map(transitionSummary)
             case "markers":
                 results = sequence.markers.values.sorted { $0.at < $1.at }
-                    .filter { marker in range.map { r in r.contains(marker.at) } ?? true }.filter { matchesText([$0.label]) }
+                    .filter { marker in range.map { r in r.contains(marker.at) } ?? true }.filter {
+                        matchesText([$0.label])
+                    }
                     .map { m in
-                        .object(["markerId": .string(m.id.rawValue), "at": ToolSupport.timeJSON(m.at), "label": .string(m.label)])
+                        .object([
+                            "markerId": .string(m.id.rawValue), "at": ToolSupport.timeJSON(m.at),
+                            "label": .string(m.label),
+                        ])
                     }
             default:
                 throw ToolError.invalidInput("Unknown filter.kind \(kind)")
@@ -320,6 +351,8 @@ enum ProjectTools {
             "version": .number(Double(project.version)), "projectId": .string(project.id.rawValue),
         ]
         if let sequenceId { o["sequenceId"] = .string(sequenceId.rawValue) }
-        return ToolOutput(structured: .object(o), text: "\(limited.count) \(kind) (of \(results.count)) at version \(project.version).")
+        return ToolOutput(
+            structured: .object(o),
+            text: "\(limited.count) \(kind) (of \(results.count)) at version \(project.version).")
     }
 }

@@ -85,11 +85,15 @@ import TimelineCore
             guard case .object(let o) = node else { return }
             for (name, property) in o["properties"]?.objectValue ?? [:] {
                 let p = "\(path).\(name)"
-                if property["description"] == nil, property["$ref"] == nil, property["oneOf"] == nil, property["anyOf"] == nil {
+                if property["description"] == nil, property["$ref"] == nil, property["oneOf"] == nil,
+                    property["anyOf"] == nil
+                {
                     missing.append(p)
                 }
                 walk(property, p)
-                for option in (property["oneOf"]?.arrayValue ?? []) + (property["anyOf"]?.arrayValue ?? []) { walk(option, p) }
+                for option in (property["oneOf"]?.arrayValue ?? []) + (property["anyOf"]?.arrayValue ?? []) {
+                    walk(option, p)
+                }
             }
             if let items = o["items"] { walk(items, "\(path)[]") }
             for (name, def) in o["$defs"]?.objectValue ?? [:] { walk(def, "\(path)#\(name)") }

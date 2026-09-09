@@ -40,28 +40,42 @@ enum AlignTools {
             ], required: ["status"], additionalProperties: true),
         annotations: ToolAnnotations(title: "Align audio", readOnly: true, idempotent: true),
         examples: [
-            .object(["referenceAssetId": "00000000-0000-7000-8000-00000000000e", "targetAssetId": "00000000-0000-7000-8000-000000000016"])
+            .object([
+                "referenceAssetId": "00000000-0000-7000-8000-00000000000e",
+                "targetAssetId": "00000000-0000-7000-8000-000000000016",
+            ])
         ]
     ) { input, context in
         guard let aligner = context.services.aligner else { throw ToolError.serviceUnavailable("aligner") }
         guard let runner = context.services.jobRunner else { throw ToolError.serviceUnavailable("jobRunner") }
         let resolved = try await ToolSupport.resolve(input, context)
-        let reference = try ToolSupport.asset(try ToolSupport.requireString(input, "referenceAssetId"), in: resolved.project)
+        let reference = try ToolSupport.asset(
+            try ToolSupport.requireString(input, "referenceAssetId"), in: resolved.project)
         let target = try ToolSupport.asset(try ToolSupport.requireString(input, "targetAssetId"), in: resolved.project)
-        guard reference.hasAudio, target.hasAudio else { throw ToolError.invalidInput("Both assets need an audio track") }
-        let parameters = try ToolSupport.decode(input, "parameters", as: AlignmentParameters.self) ?? resolved.project.settings.alignment
+        guard reference.hasAudio, target.hasAudio else {
+            throw ToolError.invalidInput("Both assets need an audio track")
+        }
+        let parameters =
+            try ToolSupport.decode(input, "parameters", as: AlignmentParameters.self)
+            ?? resolved.project.settings.alignment
         // Measured: under 2 s for a 2-hour recording (spikes/audio-align); scale linearly.
         let estimate = Estimate(seconds: max(0.5, reference.duration.seconds / 3600), usd: 0)
         if reference.duration.seconds > longInputSeconds,
-            case .required(let request) = await context.checkApproval(tool: "align_audio", input: input, estimate: estimate)
+            case .required(let request) = await context.checkApproval(
+                tool: "align_audio", input: input, estimate: estimate)
         {
             return .approvalRequired(request)
         }
-        let referenceSource = AudioSource.file(ToolSupport.mediaURL(for: reference, context: context), contentHash: reference.contentHash)
-        let targetSource = AudioSource.file(ToolSupport.mediaURL(for: target, context: context), contentHash: target.contentHash)
-        let job = Job(kind: .alignment, memoryClass: .medium, label: "Align \(target.displayName) to \(reference.displayName)") { jobContext in
+        let referenceSource = AudioSource.file(
+            ToolSupport.mediaURL(for: reference, context: context), contentHash: reference.contentHash)
+        let targetSource = AudioSource.file(
+            ToolSupport.mediaURL(for: target, context: context), contentHash: target.contentHash)
+        let job = Job(
+            kind: .alignment, memoryClass: .medium, label: "Align \(target.displayName) to \(reference.displayName)"
+        ) { jobContext in
             jobContext.report(JobProgress(fraction: 0, stage: "coarse"))
-            let alignment = try await aligner.align(reference: referenceSource, target: targetSource, parameters: parameters)
+            let alignment = try await aligner.align(
+                reference: referenceSource, target: targetSource, parameters: parameters)
             jobContext.report(.done)
             return try JobOutcome(encoding: alignment)
         }
@@ -73,13 +87,16 @@ enum AlignTools {
         var o: [String: JSONValue] = [
             "status": .string(alignment.status.rawValue), "driftPPM": .number(alignment.driftPPM),
             "confidence": .number(alignment.confidence),
-            "candidates": .array(alignment.candidates.map { c in
-                .object([
-                    "offset": ToolSupport.timeJSON(c.offset), "driftPPM": .number(c.driftPPM), "confidence": .number(c.confidence),
-                    "verified": .bool(c.verified), "coarseScore": .number(c.coarseScore), "inlierFraction": .number(c.inlierFraction),
-                    "fitMADMs": .number(c.fitMADMs),
-                ])
-            }),
+            "candidates": .array(
+                alignment.candidates.map { c in
+                    .object([
+                        "offset": ToolSupport.timeJSON(c.offset), "driftPPM": .number(c.driftPPM),
+                        "confidence": .number(c.confidence),
+                        "verified": .bool(c.verified), "coarseScore": .number(c.coarseScore),
+                        "inlierFraction": .number(c.inlierFraction),
+                        "fitMADMs": .number(c.fitMADMs),
+                    ])
+                }),
             "elapsedSeconds": .number(alignment.elapsedSeconds), "referenceAssetId": .string(reference.id.rawValue),
             "targetAssetId": .string(target.id.rawValue), "jobId": .string(handle.id.rawValue),
             "parametersHash": .string(alignment.parametersHash), "projectId": .string(resolved.projectId.rawValue),
@@ -95,7 +112,9 @@ enum AlignTools {
         let text: String
         switch alignment.status {
         case .aligned:
-            text = String(format: "Aligned: target starts %.3f s into the reference, drift %.1f ppm, confidence %.2f.", alignment.offset?.seconds ?? 0, alignment.driftPPM, alignment.confidence)
+            text = String(
+                format: "Aligned: target starts %.3f s into the reference, drift %.1f ppm, confidence %.2f.",
+                alignment.offset?.seconds ?? 0, alignment.driftPPM, alignment.confidence)
         case .ambiguous:
             text = "Ambiguous: \(alignment.candidates.filter(\.verified).count) verified candidates; pick one."
         case .failed:

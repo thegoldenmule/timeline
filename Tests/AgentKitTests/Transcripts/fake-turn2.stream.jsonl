@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","cwd":"/tmp/TimelineAgent/session-fake","session_id":"fake-session","tools":[],"mcp_servers":[{"name":"timeline","status":"connected"}],"model":"fake-model","permissionMode":"dontAsk"}
+{"type":"assistant","message":{"model":"fake-model","id":"msg_4","type":"message","role":"assistant","content":[{"type":"text","text":"Resumed; the export finished."}]},"session_id":"fake-session","uuid":"u8"}
+{"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":10,"num_turns":1,"session_id":"fake-session","total_cost_usd":0.001,"errors":["Reached max turns"]}

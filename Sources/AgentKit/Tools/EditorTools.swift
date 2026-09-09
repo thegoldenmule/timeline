@@ -43,7 +43,9 @@ public enum EditorTools {
         into registry: any ToolRegistry, services: ToolServices? = nil, includeUnavailable: Bool = true
     ) async {
         for tool in all {
-            if !includeUnavailable, let services, let available = requiredService[tool.name], !available(services) { continue }
+            if !includeUnavailable, let services, let available = requiredService[tool.name], !available(services) {
+                continue
+            }
             await registry.register(tool)
         }
     }

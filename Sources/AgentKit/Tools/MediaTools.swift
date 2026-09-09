@@ -23,7 +23,8 @@ enum MediaTools {
             properties: ToolSupport.mutationOutputSchema.merging([
                 "asset": Schema.any("The asset summary as project_describe shows it."),
                 "alreadyInLibrary": Schema.bool("True when the library already had this content."),
-                "alreadyInProject": Schema.bool("True when the project already referenced this asset (no command applied)."),
+                "alreadyInProject": Schema.bool(
+                    "True when the project already referenced this asset (no command applied)."),
                 "libraryURL": Schema.string("Where the file lives now."),
             ]) { a, _ in a }, required: ["version", "asset", "alreadyInLibrary", "alreadyInProject"],
             additionalProperties: true),
@@ -81,7 +82,8 @@ enum MediaTools {
                 mutating: true,
                 [
                     "assetId": Schema.string("The asset to analyze."),
-                    "kinds": Schema.array("Analyses to run.", items: Schema.enum("Analysis kind.", analysisKinds), minItems: 1),
+                    "kinds": Schema.array(
+                        "Analyses to run.", items: Schema.enum("Analysis kind.", analysisKinds), minItems: 1),
                     "locale": Schema.string("Transcription locale, BCP-47 (default en-US)."),
                     "approvalToken": Schema.string("Token from a previous approval_required result, once granted."),
                 ]), required: ["assetId", "kinds"]),
@@ -113,7 +115,9 @@ enum MediaTools {
         if kinds.contains("transcript") {
             // SpeechAnalyzer runs about 65x realtime (spikes/speech); the estimate is what the card shows.
             let estimate = Estimate(seconds: (asset.duration.seconds / 65).rounded(.up), usd: 0)
-            if case .required(let request) = await context.checkApproval(tool: "media_analyze", input: input, estimate: estimate) {
+            if case .required(let request) = await context.checkApproval(
+                tool: "media_analyze", input: input, estimate: estimate)
+            {
                 return .approvalRequired(request)
             }
         }
@@ -124,7 +128,8 @@ enum MediaTools {
         var ops: [Command.Operation] = []
         for kind in kinds {
             let job = Job(
-                kind: kind == "transcript" ? .transcription : .analysis, memoryClass: kind == "transcript" ? .medium : .small,
+                kind: kind == "transcript" ? .transcription : .analysis,
+                memoryClass: kind == "transcript" ? .medium : .small,
                 label: "\(kind) \(asset.displayName)"
             ) { jobContext in
                 jobContext.report(JobProgress(fraction: 0, stage: kind))
@@ -134,15 +139,18 @@ enum MediaTools {
                     let t = try await analyzer.transcribe(media, locale: locale, options: TranscriptionOptions())
                     payload = try JSONValue(encoding: t)
                 case "silence":
-                    payload = try JSONValue(encoding: try await analyzer.detectSilence(media, parameters: SilenceParameters()))
+                    payload = try JSONValue(
+                        encoding: try await analyzer.detectSilence(media, parameters: SilenceParameters()))
                 case "shots":
-                    payload = try JSONValue(encoding: try await analyzer.detectShots(media, parameters: ShotParameters()))
+                    payload = try JSONValue(
+                        encoding: try await analyzer.detectShots(media, parameters: ShotParameters()))
                 case "peaks":
                     let peaks = try await analyzer.waveformPeaks(media, samplesPerPixel: 4800)
                     payload = .object([
                         "count": .number(Double(peaks.count)), "hop": .number(Double(peaks.hop)),
                         "sampleRate": .number(Double(peaks.sampleRate)),
-                        "cacheKey": .string(AnalysisCacheKey.make(contentHash: media.contentHash, kind: .peaks, paramsHash: "spp4800")),
+                        "cacheKey": .string(
+                            AnalysisCacheKey.make(contentHash: media.contentHash, kind: .peaks, paramsHash: "spp4800")),
                     ])
                 default:
                     let e = try await analyzer.onsetEnvelope(media, parameters: parameters)
@@ -165,7 +173,10 @@ enum MediaTools {
             results[kind] = summary
             ops.append(
                 .recordAssetAnalysis(
-                    .init(assetId: .id(asset.id), kind: kind == "onsetEnvelope" ? AnalysisKind.onsetEnvelope.rawValue : kind, cacheKey: cacheKey, summary: summary)))
+                    .init(
+                        assetId: .id(asset.id),
+                        kind: kind == "onsetEnvelope" ? AnalysisKind.onsetEnvelope.rawValue : kind, cacheKey: cacheKey,
+                        summary: summary)))
         }
         let command = try ToolSupport.command(ops.count == 1 ? ops[0] : .batch(ops), input: input, context: context)
         return try await ToolSupport.apply(
@@ -188,10 +199,17 @@ enum MediaTools {
             )
         case "silence":
             let ranges = payload["ranges"]?.arrayValue ?? []
-            return (.object(["ranges": .array(ranges), "count": .number(Double(ranges.count)), "cacheKey": .string(cacheKey)]), cacheKey)
+            return (
+                .object([
+                    "ranges": .array(ranges), "count": .number(Double(ranges.count)), "cacheKey": .string(cacheKey),
+                ]), cacheKey
+            )
         case "shots":
             let shots = payload["shots"]?.arrayValue ?? []
-            return (.object(["shots": .array(shots), "count": .number(Double(shots.count)), "cacheKey": .string(cacheKey)]), cacheKey)
+            return (
+                .object(["shots": .array(shots), "count": .number(Double(shots.count)), "cacheKey": .string(cacheKey)]),
+                cacheKey
+            )
         default:
             return (payload, cacheKey)
         }
@@ -237,7 +255,10 @@ enum MediaTools {
                 "searchedAssets": Schema.array("Assets searched.", items: Schema.string("Asset id.")),
             ], required: ["query", "hits", "count"]),
         annotations: .readOnly(title: "Search transcript"),
-        examples: [.object(["query": "welcome"]), .object(["query": "video editor", "assetId": "00000000-0000-7000-8000-00000000000e", "limit": 5])]
+        examples: [
+            .object(["query": "welcome"]),
+            .object(["query": "video editor", "assetId": "00000000-0000-7000-8000-00000000000e", "limit": 5]),
+        ]
     ) { input, context in
         guard let analyzer = context.services.analyzer else { throw ToolError.serviceUnavailable("analyzer") }
         let resolved = try await ToolSupport.resolve(input, context)
@@ -251,13 +272,16 @@ enum MediaTools {
         if let id = ToolSupport.string(input, "assetId") {
             assets = [try ToolSupport.asset(id, in: project)]
         } else {
-            assets = project.assets.values.filter { $0.analyses["transcript"] != nil && $0.hasAudio }.sorted { $0.id < $1.id }
+            assets = project.assets.values.filter { $0.analyses["transcript"] != nil && $0.hasAudio }.sorted {
+                $0.id < $1.id
+            }
         }
         func normalize(_ s: String) -> String { s.lowercased().filter { $0.isLetter || $0.isNumber } }
         var hits: [JSONValue] = []
         for asset in assets {
             let transcript = try await analyzer.transcribe(
-                ToolSupport.mediaReference(for: asset, context: context), locale: locale, options: TranscriptionOptions())
+                ToolSupport.mediaReference(for: asset, context: context), locale: locale,
+                options: TranscriptionOptions())
             let words = transcript.words
             guard words.count >= terms.count else { continue }
             for i in 0...(words.count - terms.count) {
@@ -282,7 +306,8 @@ enum MediaTools {
                 hits.append(
                     .object([
                         "assetId": .string(asset.id.rawValue), "t0": ToolSupport.timeJSON(window.first!.t0),
-                        "t1": ToolSupport.timeJSON(window.last!.t1), "text": .string(window.map(\.text).joined(separator: " ")),
+                        "t1": ToolSupport.timeJSON(window.last!.t1),
+                        "text": .string(window.map(\.text).joined(separator: " ")),
                         "context": .string(words[lo..<hi].map(\.text).joined(separator: " ")),
                         "confidence": .number(window.map(\.confidence).min() ?? 1), "placements": .array(placements),
                     ]))
@@ -293,8 +318,11 @@ enum MediaTools {
         return ToolOutput(
             structured: .object([
                 "query": .string(query), "hits": .array(hits), "count": .number(Double(hits.count)),
-                "searchedAssets": .array(assets.map { .string($0.id.rawValue) }), "projectId": .string(project.id.rawValue),
-            ]), text: hits.isEmpty ? "No hits for \"\(query)\" in \(assets.count) asset(s)." : "\(hits.count) hit(s) for \"\(query)\".")
+                "searchedAssets": .array(assets.map { .string($0.id.rawValue) }),
+                "projectId": .string(project.id.rawValue),
+            ]),
+            text: hits.isEmpty
+                ? "No hits for \"\(query)\" in \(assets.count) asset(s)." : "\(hits.count) hit(s) for \"\(query)\".")
     }
 
     static let lookAt = Tool(
@@ -308,7 +336,8 @@ enum MediaTools {
                     mutating: false,
                     [
                         "assetId": Schema.string("The asset to look at."),
-                        "timestamps": Schema.array("Media times to grab, in order.", items: Schema.ref("time"), minItems: 1),
+                        "timestamps": Schema.array(
+                            "Media times to grab, in order.", items: Schema.ref("time"), minItems: 1),
                         "height": Schema.integer("Cell height in pixels (default 180).", minimum: 32, maximum: 1080),
                         "columns": Schema.integer("Cells per row (default 3).", minimum: 1),
                     ]), required: ["assetId", "timestamps"]),
@@ -322,7 +351,8 @@ enum MediaTools {
                     items: Schema.object(
                         "A cell.",
                         properties: [
-                            "index": Schema.integer("Cell index, top-left first."), "time": Schema.any("Media time grabbed."),
+                            "index": Schema.integer("Cell index, top-left first."),
+                            "time": Schema.any("Media time grabbed."),
                         ], required: ["index", "time"])),
                 "columns": Schema.integer("Cells per row."), "rows": Schema.integer("Rows."),
                 "width": Schema.integer("Sheet width in pixels."), "height": Schema.integer("Sheet height in pixels."),
@@ -353,7 +383,10 @@ enum MediaTools {
         return ToolOutput(
             structured: .object([
                 "assetId": .string(asset.id.rawValue),
-                "frames": .array(frames.enumerated().map { .object(["index": .number(Double($0.offset)), "time": ToolSupport.timeJSON($0.element.time)]) }),
+                "frames": .array(
+                    frames.enumerated().map {
+                        .object(["index": .number(Double($0.offset)), "time": ToolSupport.timeJSON($0.element.time)])
+                    }),
                 "columns": .number(Double(sheet.columns)), "rows": .number(Double(sheet.rows)),
                 "width": .number(Double(sheet.image.width)), "height": .number(Double(sheet.image.height)),
             ]),

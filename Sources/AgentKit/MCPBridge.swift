@@ -53,7 +53,8 @@ public enum MCPBridge {
         let text = output.text ?? output.structured.flatMap(compactJSON) ?? ""
         content.append(.text(text: text, annotations: nil, _meta: nil))
         for image in output.images {
-            content.append(.image(data: image.data.base64EncodedString(), mimeType: image.mimeType, annotations: nil, _meta: nil))
+            content.append(
+                .image(data: image.data.base64EncodedString(), mimeType: image.mimeType, annotations: nil, _meta: nil))
         }
         return CallTool.Result(
             content: content, structuredContent: output.structured.map(value), isError: output.isError ? true : nil)
