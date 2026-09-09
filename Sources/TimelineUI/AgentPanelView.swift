@@ -222,15 +222,19 @@ struct AgentItemView: View {
             DisclosureGroup(isExpanded: $expanded) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Input").font(.caption).foregroundStyle(.secondary)
-                    Text(AgentItemView.pretty(input)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    Text(AgentItemView.pretty(input)).font(.system(.caption, design: .monospaced)).textSelection(
+                        .enabled)
                     if let output {
                         Text(isError ? "Error" : "Result").font(.caption).foregroundStyle(isError ? .red : .secondary)
-                        Text(AgentItemView.pretty(output)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        Text(AgentItemView.pretty(output)).font(.system(.caption, design: .monospaced)).textSelection(
+                            .enabled)
                     }
                 }
             } label: {
                 HStack {
-                    Image(systemName: output == nil ? "hourglass" : (isError ? "xmark.octagon" : "wrench.and.screwdriver"))
+                    Image(
+                        systemName: output == nil ? "hourglass" : (isError ? "xmark.octagon" : "wrench.and.screwdriver")
+                    )
                     Text(name).font(.system(.body, design: .monospaced))
                 }
             }

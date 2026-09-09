@@ -74,7 +74,9 @@ final class LabelCache {
 
     func font(_ size: CGFloat) -> CTFont {
         if let f = fonts[size] { return f }
-        let f = CTFontCreateUIFontForLanguage(.system, size, nil) ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
+        let f =
+            CTFontCreateUIFontForLanguage(.system, size, nil)
+            ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
         fonts[size] = f
         return f
     }
@@ -101,7 +103,9 @@ final class LabelCache {
         let key = Key(
             text: label.text, fontSize: label.fontSize, scale: scale, maxWidth: truncated ? Int(label.maxWidth) : nil)
         if let e = entries[key] { return e }
-        guard let e = rasterise(label.text, size: label.fontSize, scale: scale, maxWidth: truncated ? label.maxWidth : nil)
+        guard
+            let e = rasterise(
+                label.text, size: label.fontSize, scale: scale, maxWidth: truncated ? label.maxWidth : nil)
         else { return nil }
         if entries.count >= capacity, let oldest = order.first {
             order.removeFirst()

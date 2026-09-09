@@ -221,7 +221,8 @@ public enum TimelineSceneBuilder {
         public var showMedia: Bool
 
         public init(
-            project: Project, sequence: Sequence?, layout: TimelineLayout, selection: Set<ClipID>, playhead: RationalTime,
+            project: Project, sequence: Sequence?, layout: TimelineLayout, selection: Set<ClipID>,
+            playhead: RationalTime,
             preview: GesturePreview? = nil, pendingClipIds: Set<ClipID> = [], libraryLayout: LibraryLayout = .default,
             showMedia: Bool = true
         ) {
@@ -268,7 +269,8 @@ public enum TimelineSceneBuilder {
             SceneQuad(rect: CGRect(x: 0, y: 0, width: width, height: layout.rulerHeight), color: TimelineTheme.ruler))
         scene.quads.append(
             SceneQuad(
-                rect: CGRect(x: 0, y: layout.rulerHeight, width: layout.headerWidth, height: height - layout.rulerHeight),
+                rect: CGRect(
+                    x: 0, y: layout.rulerHeight, width: layout.headerWidth, height: height - layout.rulerHeight),
                 color: TimelineTheme.header))
         guard let seq = input.sequence else {
             scene.labels.append(
@@ -318,8 +320,9 @@ public enum TimelineSceneBuilder {
 
     // MARK: Pieces
 
-    private static func addTrackHeader(_ scene: inout TimelineScene, track: Track, row: TrackRow, layout: TimelineLayout)
-    {
+    private static func addTrackHeader(
+        _ scene: inout TimelineScene, track: Track, row: TrackRow, layout: TimelineLayout
+    ) {
         scene.quads.append(
             SceneQuad(
                 rect: CGRect(x: 0, y: row.y, width: layout.headerWidth, height: row.height),
@@ -434,18 +437,23 @@ public enum TimelineSceneBuilder {
             if input.selection.contains(clip.id) {
                 let c = TimelineTheme.selection
                 let w: CGFloat = 2
-                scene.overlayQuads.append(SceneQuad(rect: CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: w), color: c))
-                scene.overlayQuads.append(SceneQuad(rect: CGRect(x: rect.minX, y: rect.maxY - w, width: rect.width, height: w), color: c))
-                scene.overlayQuads.append(SceneQuad(rect: CGRect(x: rect.minX, y: rect.minY, width: w, height: rect.height), color: c))
-                scene.overlayQuads.append(SceneQuad(rect: CGRect(x: rect.maxX - w, y: rect.minY, width: w, height: rect.height), color: c))
+                scene.overlayQuads.append(
+                    SceneQuad(rect: CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: w), color: c))
+                scene.overlayQuads.append(
+                    SceneQuad(rect: CGRect(x: rect.minX, y: rect.maxY - w, width: rect.width, height: w), color: c))
+                scene.overlayQuads.append(
+                    SceneQuad(rect: CGRect(x: rect.minX, y: rect.minY, width: w, height: rect.height), color: c))
+                scene.overlayQuads.append(
+                    SceneQuad(rect: CGRect(x: rect.maxX - w, y: rect.minY, width: w, height: rect.height), color: c))
             }
         }
     }
 
     /// A transition is drawn as an overlap wedge centred on the cut: a light band of the transition's
     /// duration with a diagonal from the left clip's colour to the right clip's.
-    private static func addTransitions(_ scene: inout TimelineScene, seq: Sequence, layout: TimelineLayout, clip area: CGRect)
-    {
+    private static func addTransitions(
+        _ scene: inout TimelineScene, seq: Sequence, layout: TimelineLayout, clip area: CGRect
+    ) {
         for t in seq.transitions.values {
             guard let left = seq.clip(t.leftClipId), let row = layout.row(for: t.trackId) else { continue }
             let cut = seq.end(of: left)
@@ -467,9 +475,13 @@ public enum TimelineSceneBuilder {
                     CGPoint(x: rect.maxX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.maxY),
                     CGPoint(x: rect.minX, y: rect.maxY), color: clipColor.scaled(0.55)))
             scene.overlayQuads.append(
-                SceneQuad(rect: CGRect(x: rect.minX, y: rect.minY, width: 1, height: rect.height), color: TimelineTheme.transition))
+                SceneQuad(
+                    rect: CGRect(x: rect.minX, y: rect.minY, width: 1, height: rect.height),
+                    color: TimelineTheme.transition))
             scene.overlayQuads.append(
-                SceneQuad(rect: CGRect(x: rect.maxX - 1, y: rect.minY, width: 1, height: rect.height), color: TimelineTheme.transition))
+                SceneQuad(
+                    rect: CGRect(x: rect.maxX - 1, y: rect.minY, width: 1, height: rect.height),
+                    color: TimelineTheme.transition))
         }
     }
 
@@ -516,7 +528,8 @@ public enum TimelineSceneBuilder {
         let x = layout.x(for: time)
         guard x >= layout.trackAreaMinX - 1 && x <= layout.size.width + 1 else { return }
         scene.overlayQuads.append(
-            SceneQuad(rect: CGRect(x: x - 1, y: 0, width: 2, height: layout.size.height), color: TimelineTheme.playhead))
+            SceneQuad(rect: CGRect(x: x - 1, y: 0, width: 2, height: layout.size.height), color: TimelineTheme.playhead)
+        )
         scene.triangles.append(
             SceneTriangle(
                 CGPoint(x: x - 6, y: 0), CGPoint(x: x + 6, y: 0), CGPoint(x: x, y: 8), color: TimelineTheme.playhead))

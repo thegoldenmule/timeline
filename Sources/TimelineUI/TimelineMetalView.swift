@@ -27,11 +27,15 @@ public final class TimelineMetalView: MTKView {
     public private(set) var lastScene: TimelineScene?
     public private(set) var renderError: (any Error)?
     public private(set) var frameCount = 0
+    /// Redraws requested by model changes and media fetches (`needsDisplay` is inert without a window).
+    public private(set) var redrawRequests = 0
 
     public init(viewModel: TimelineViewModel, device: (any MTLDevice)? = MTLCreateSystemDefaultDevice()) {
         self.viewModel = viewModel
         self.gestures = TimelineGestureController(viewModel: viewModel)
-        super.init(frame: NSRect(x: 0, y: 0, width: viewModel.viewSize.width, height: viewModel.viewSize.height), device: device)
+        super.init(
+            frame: NSRect(x: 0, y: 0, width: viewModel.viewSize.width, height: viewModel.viewSize.height),
+            device: device)
         colorPixelFormat = TimelineRenderer.pixelFormat
         clearColor = MTLClearColor(
             red: Double(TimelineTheme.background.r), green: Double(TimelineTheme.background.g),
@@ -42,8 +46,9 @@ public final class TimelineMetalView: MTKView {
         if let device {
             do {
                 let r = try TimelineRenderer(device: device)
-                let cache = TimelineMediaCache(device: device, thumbnails: viewModel.thumbnails, waveforms: viewModel.waveforms)
-                cache.onUpdate = { [weak self] in self?.needsDisplay = true }
+                let cache = TimelineMediaCache(
+                    device: device, thumbnails: viewModel.thumbnails, waveforms: viewModel.waveforms)
+                cache.onUpdate = { [weak self] in self?.requestRedraw() }
                 r.mediaCache = cache
                 renderer = r
                 mediaCache = cache
@@ -60,6 +65,11 @@ public final class TimelineMetalView: MTKView {
     public override var isFlipped: Bool { true }
     public override var acceptsFirstResponder: Bool { true }
 
+    private func requestRedraw() {
+        redrawRequests += 1
+        needsDisplay = true
+    }
+
     /// Re-registers observation on every change so any tracked property triggers a redraw.
     private func observe() {
         withObservationTracking {
@@ -67,7 +77,7 @@ public final class TimelineMetalView: MTKView {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.needsDisplay = true
+                self.requestRedraw()
                 self.observe()
             }
         }

@@ -18,6 +18,7 @@ public struct TrackRow: Hashable, Sendable {
     public var height: CGFloat
 
     public var maxY: CGFloat { y + height }
+    public var midY: CGFloat { y + height / 2 }
     public func contains(_ y: CGFloat) -> Bool { y >= self.y && y < maxY }
 }
 

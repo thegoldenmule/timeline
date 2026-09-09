@@ -114,16 +114,19 @@ public final class TimelineGestureController {
         case .scrubbing:
             viewModel.setPlayhead(layout.time(atX: point.x))
         case .dragging:
-            viewModel.updateGesture(to: layout.time(atX: point.x), track: layout.row(atY: point.y)?.trackId, modifiers: modifiers)
+            viewModel.updateGesture(
+                to: layout.time(atX: point.x), track: layout.row(atY: point.y)?.trackId, modifiers: modifiers)
         case .idle:
             guard let armed else { return }
             let dx = point.x - armed.point.x
             let dy = point.y - armed.point.y
             guard abs(dx) >= dragThreshold || abs(dy) >= dragThreshold else { return }
             state = .dragging
-            viewModel.beginGesture(armed.kind, clip: armed.clip, at: layout.time(atX: armed.point.x), modifiers: modifiers)
+            viewModel.beginGesture(
+                armed.kind, clip: armed.clip, at: layout.time(atX: armed.point.x), modifiers: modifiers)
             self.armed = nil
-            viewModel.updateGesture(to: layout.time(atX: point.x), track: layout.row(atY: point.y)?.trackId, modifiers: modifiers)
+            viewModel.updateGesture(
+                to: layout.time(atX: point.x), track: layout.row(atY: point.y)?.trackId, modifiers: modifiers)
         }
     }
 
@@ -136,7 +139,9 @@ public final class TimelineGestureController {
         }
         switch state {
         case .dragging:
-            viewModel.updateGesture(to: viewModel.layout.time(atX: point.x), track: viewModel.layout.row(atY: point.y)?.trackId, modifiers: modifiers)
+            viewModel.updateGesture(
+                to: viewModel.layout.time(atX: point.x), track: viewModel.layout.row(atY: point.y)?.trackId,
+                modifiers: modifiers)
             return await viewModel.commit()
         case .scrubbing, .idle:
             return nil

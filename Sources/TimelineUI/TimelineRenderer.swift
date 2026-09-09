@@ -45,9 +45,9 @@ private let shaderSource = """
     fragment float4 solid_fragment(SolidOut in [[stage_in]]) {
         float alpha = in.color.a;
         if (in.radius > 0.0) {
-            float2 half = in.size * 0.5;
-            float2 p = in.local - half;
-            float2 q = abs(p) - (half - in.radius);
+            float2 halfSize = in.size * 0.5;
+            float2 p = in.local - halfSize;
+            float2 q = abs(p) - (halfSize - in.radius);
             float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - in.radius;
             alpha *= 1.0 - smoothstep(-0.6, 0.6, d);
         }
@@ -179,7 +179,9 @@ public final class TimelineRenderer {
         sd.magFilter = .linear
         sd.sAddressMode = .clampToEdge
         sd.tAddressMode = .clampToEdge
-        guard let sampler = device.makeSamplerState(descriptor: sd) else { throw TimelineRendererError.pipeline("sampler") }
+        guard let sampler = device.makeSamplerState(descriptor: sd) else {
+            throw TimelineRendererError.pipeline("sampler")
+        }
         self.sampler = sampler
         labels = LabelCache(device: device)
     }
@@ -315,7 +317,8 @@ public final class TimelineRenderer {
         let bytesPerRow = w * 4
         var data = [UInt8](repeating: 0, count: bytesPerRow * h)
         data.withUnsafeMutableBytes { ptr in
-            texture.getBytes(ptr.baseAddress!, bytesPerRow: bytesPerRow, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+            texture.getBytes(
+                ptr.baseAddress!, bytesPerRow: bytesPerRow, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
         }
         lastFrameStats.totalMilliseconds = (CACurrentMediaTime() - started) * 1000
         return RenderedFrame(width: w, height: h, bytesPerRow: bytesPerRow, data: data)

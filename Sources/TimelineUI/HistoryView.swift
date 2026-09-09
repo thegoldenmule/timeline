@@ -23,7 +23,8 @@ extension History {
         return transactions.filter { $0.kind == .edit }.map { t in
             HistoryRow(
                 id: t.id, label: t.label, actor: t.actor, eventCount: t.events.count, isLive: liveSet.contains(t.id),
-                isRedoable: redoSet.contains(t.id), isUndoTarget: live.last == t.id, isRedoTarget: redoStack.last == t.id
+                isRedoable: redoSet.contains(t.id), isUndoTarget: live.last == t.id,
+                isRedoTarget: redoStack.last == t.id
             )
         }
     }

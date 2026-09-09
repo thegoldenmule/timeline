@@ -60,7 +60,9 @@ public final class TimelineMediaCache {
             guard let self else { return }
             if let thumbs {
                 let frames = thumbs.compactMap { t -> FilmstripFrame? in
-                    MetalTextures.texture(from: t.image, device: self.device).map { FilmstripFrame(texture: $0, time: t.time) }
+                    MetalTextures.texture(from: t.image, device: self.device).map {
+                        FilmstripFrame(texture: $0, time: t.time)
+                    }
                 }
                 self.store(frames, for: key)
             } else {

@@ -82,11 +82,17 @@ public final class TimelineViewModel {
     public private(set) var history = History()
     public var selection: Set<ClipID> = []
     public var playhead: RationalTime = .zero
-    public var zoomIndex: Int = ZoomLevel.defaultIndex {
-        didSet { zoomIndex = min(max(zoomIndex, 0), ZoomLevel.count - 1) }
+    private var zoomStorage: Int = ZoomLevel.defaultIndex
+    private var scrollStorage: Double = 0
+    /// Index into `ZoomLevel.secondsPerPoint`, clamped.
+    public var zoomIndex: Int {
+        get { zoomStorage }
+        set { zoomStorage = min(max(newValue, 0), ZoomLevel.count - 1) }
     }
-    public var scrollSeconds: Double = 0 {
-        didSet { scrollSeconds = max(0, scrollSeconds) }
+    /// Sequence time at the left edge of the track area, never negative.
+    public var scrollSeconds: Double {
+        get { scrollStorage }
+        set { scrollStorage = max(0, newValue) }
     }
     public var snappingEnabled = true
     public var modifiers: EditModifiers = []
@@ -121,8 +127,11 @@ public final class TimelineViewModel {
 
     /// Re-reads state and history from the store; the timeline redraws through observation.
     public func refresh() async {
-        project = await store.state()
-        history = await store.history()
+        // Fetch both before assigning so observers never see a state without its history or selection.
+        let state = await store.state()
+        let fold = await store.history()
+        project = state
+        history = fold
         if let seq = sequence {
             selection = selection.filter { seq.clip($0) != nil }
         } else {
