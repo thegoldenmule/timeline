@@ -232,6 +232,69 @@ import TimelineCore
         await #expect(throws: ToolError.noProject) { try await empty.store(for: ToolInput()) }
     }
 
+    @Test func accountProviderAndPublisherThroughTheExistentials() async throws {
+        let services = try await TestServices.make()
+        let accounts: any AccountProvider = try #require(services.services.accounts[.google])
+        let publisher: any Publisher = try #require(services.services.publishers[.youtube])
+        let runner: any JobRunner = try #require(services.services.jobRunner)
+        let ledger = try #require(services.store as any ProjectStore as? any RenderLedger & PublishLedger)
+
+        // The account is connected out of the box; the token is fetched per request and never stored.
+        let account = try #require(await accounts.accounts().first)
+        #expect(account.channelHandle == "@skeleton" && account.provider == accounts.kind)
+        let token = try await accounts.accessToken(for: account.id, minimumLifetime: .seconds(300))
+        #expect(token.authorizationHeader.hasPrefix("Bearer fake-token-"))
+
+        // Export, record the render, publish the file, keep the ledger current from the events.
+        let project = await services.store.state()
+        let sequence = try #require(project.activeSequence)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "UsageExample-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("three-clips.mp4")
+        let compiled = try await services.renderer.compile(sequence, assets: project.assets, options: .full)
+        let render = try await ledger.recordRender(
+            id: nil, sequenceId: sequence.id, preset: .h264_1080p, projectVersion: nil)
+        let export = try await runner.submit(services.renderer.export(compiled, preset: .h264_1080p, to: file)).wait()
+        let exportReceipt = try #require(try export.payload(as: ExportReceipt.self))
+        let done = try await ledger.updateRender(
+            render.id, status: .done, outputURL: file, outputHash: exportReceipt.outputHash, receipt: exportReceipt)
+
+        var request = Fixtures.publishRequest(renderId: done.id, fileURL: file, accountId: account.id)
+        request.expectedContentHash = done.outputHash
+        request.projectVersion = done.projectVersion
+        #expect(try await publisher.validate(request).isEmpty)
+        let row = try await ledger.recordPublish(id: "publish-1", request: request, projectVersion: nil)
+        let size = try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber
+        #expect(row.bytesTotal == size?.int64Value)
+        let ledgerRef = ledger
+        let job = publisher.publish(request, publishId: row.id, resuming: nil) { event in
+            switch event {
+            case .session(let session):
+                _ = try? await ledgerRef.updatePublish(
+                    row.id, PublishUpdate(status: .uploading, session: session, bytesSent: session.bytesConfirmed))
+            case .uploaded(let remoteId, let remoteURL):
+                _ = try? await ledgerRef.updatePublish(
+                    row.id, PublishUpdate(status: .processing, remoteId: remoteId, remoteURL: remoteURL))
+            case .stage:
+                break
+            }
+        }
+        let handle = await runner.submit(job)
+        let tracked = try #require(await runner.handle(for: handle.id))
+        let receipt = try #require(try await tracked.wait().payload(as: PublishReceipt.self))
+        _ = try await ledger.updatePublish(row.id, PublishUpdate(status: .done, clearsSession: true, receipt: receipt))
+        let final = try #require(try await ledger.publish(row.id))
+        #expect(final.status == .done && final.session == nil && final.remoteId == "fake-video-1")
+        #expect(final.receipt?.contentHash == done.outputHash && final.bytesSent == final.bytesTotal)
+        #expect(try await ledger.publishes(forRender: done.id).map(\.id) == [row.id])
+        let remote = try await publisher.remoteStatus(remoteId: "fake-video-1", accountId: account.id)
+        #expect(remote.uploadStatus == "processed")
+        #expect(await services.store.version() == project.version)
+        let rendered = String(decoding: try ProjectCodec.encode(final), as: UTF8.self)
+        #expect(!rendered.contains("fake-token"))
+    }
+
     @Test func broadcasterFansOutAndFinishes() async {
         let broadcaster = Broadcaster<Int>()
         let a = broadcaster.subscribe()

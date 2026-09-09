@@ -75,6 +75,39 @@ import TimelineCore
         await #expect(throws: JobError.failed(code: "io", message: "disk full")) { try await handle.wait() }
     }
 
+    @Test func fakeRunnerFindsAHandleById() async throws {
+        let fake = FakeJobRunner()
+        let runner: any JobRunner = fake
+        let gate = AsyncStream<Void>.makeStream()
+        let job = Job(kind: .publish, memoryClass: .small, label: "Publish") { context in
+            context.report(JobProgress(fraction: 0.25, stage: "upload"))
+            for await _ in gate.stream { break }
+            context.report(JobProgress(fraction: 1, stage: "processing"))
+            return JobOutcome(payload: ["remoteId": "fake-video-1"])
+        }
+        let original = await runner.submit(job)
+        var first = original.progress.makeAsyncIterator()
+        #expect(await first.next()?.fraction == 0.25)
+
+        let found = try #require(await runner.handle(for: job.id))
+        #expect(found.id == job.id && found.kind == .publish && found.label == "Publish")
+        var late = found.progress.makeAsyncIterator()
+        gate.continuation.yield()
+        #expect(await late.next()?.stage == "processing", "a fresh stream sees reports after it was opened")
+        #expect(await late.next() == nil)
+        #expect(try await found.wait().payload?["remoteId"] == "fake-video-1")
+        #expect(try await original.wait().payload?["remoteId"] == "fake-video-1")
+        #expect(await runner.handle(for: JobID("missing")) == nil)
+        // A handle over a finished job yields an ended stream but still answers wait().
+        let finished = try #require(await runner.handle(for: job.id))
+        var ended = finished.progress.makeAsyncIterator()
+        #expect(await ended.next() == nil)
+        #expect(try await finished.wait().payload?["remoteId"] == "fake-video-1")
+        // The default implementation answers nil.
+        let minimal: any JobRunner = MinimalRunner()
+        #expect(await minimal.handle(for: job.id) == nil)
+    }
+
     @Test func budgetDescribesClasses() {
         let job = Job(kind: .export, memoryClass: .medium, label: "x") { _ in JobOutcome() }
         #expect(JobBudget.conservative.bytes(for: job) == 2 << 30)
@@ -83,4 +116,17 @@ import TimelineCore
         #expect(JobBudget.conservative.bytes(for: sized) == 10)
         #expect(JobBudget.conservative.maxConcurrent[.large] == 1)
     }
+}
+
+/// A runner that implements only the original requirements.
+private struct MinimalRunner: JobRunner {
+    var budget: JobBudget { .unlimited }
+    func submit(_ job: Job) async -> JobHandle {
+        JobHandle(
+            id: job.id, kind: job.kind, label: job.label, progress: AsyncStream { $0.finish() },
+            task: Task { JobOutcome() })
+    }
+    func cancel(_ id: JobID) async {}
+    func running() async -> [JobID] { [] }
+    func queued() async -> [JobID] { [] }
 }
