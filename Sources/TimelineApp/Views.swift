@@ -18,6 +18,7 @@ final class AppModel {
     private(set) var jobs = JobCenter()
     private(set) var tools: ToolConsole?
     private(set) var agent: AgentConsole?
+    private(set) var publish: PublishConsole?
     private(set) var bootError: String?
     private(set) var bootStage = "Starting services"
     var lastCommandError: String?
@@ -30,8 +31,12 @@ final class AppModel {
             let approvals = ApprovalCenter(gate: services.approvals)
             await approvals.start()
             self.approvals = approvals
-            tools = ToolConsole(services: services)
+            let tools = ToolConsole(services: services)
+            self.tools = tools
             agent = AgentConsole(services: services, approvals: approvals)
+            let publish = PublishConsole(services: services, tools: tools, jobs: jobs)
+            await publish.start()
+            self.publish = publish
             bootStage = "Opening project"
             try await open(AppServices.defaultProjectURL(in: services.layout), create: true)
         } catch {
@@ -45,6 +50,7 @@ final class AppModel {
         if let document {
             await document.close(using: services)
             self.document = nil
+            await publish?.attach(nil)
         }
         let name = url.deletingPathExtension().lastPathComponent
         let document =
@@ -52,9 +58,11 @@ final class AppModel {
             ? try await ProjectDocument.openOrCreate(at: url, name: name, using: services)
             : try await ProjectDocument.open(at: url, using: services)
         self.document = document
+        await publish?.attach(document)
     }
 
-    /// Runs an async action from a button, surfacing its error in the window.
+    /// Runs an async action from a button, surfacing its error in the window. The publish console
+    /// re-reads the ledgers afterwards, so an export enables the Publish button.
     func perform(_ body: @MainActor @escaping () async throws -> Void) {
         Task { @MainActor in
             do {
@@ -63,6 +71,7 @@ final class AppModel {
             } catch {
                 lastCommandError = "\(error)"
             }
+            await publish?.refresh()
         }
     }
 
@@ -135,8 +144,15 @@ final class AppModel {
         let name = url.deletingPathExtension().lastPathComponent
         perform {
             self.document = nil
-            self.document = try await document.fork(to: url, name: name, using: services)
+            let forked = try await document.fork(to: url, name: name, using: services)
+            self.document = forked
+            await self.publish?.attach(forked)
         }
+    }
+
+    /// The Publish sheet over the newest done render; the sheet's Upload goes through `publish_youtube`.
+    func presentPublishSheet() {
+        publish?.presentSheet()
     }
 
     /// Runs silence, onset-envelope, and (for video) shot detection on the selected clip's asset.
@@ -199,11 +215,11 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let services = model.services, let document = model.document, let approvals = model.approvals,
-                let tools = model.tools, let agent = model.agent
+                let tools = model.tools, let agent = model.agent, let publish = model.publish
             {
                 EditorView(
                     model: model, services: services, document: document, approvals: approvals, jobs: model.jobs,
-                    tools: tools, agent: agent)
+                    tools: tools, agent: agent, publish: publish)
             } else if let error = model.bootError {
                 ContentUnavailableView("Could not start", systemImage: "xmark.octagon", description: Text(error))
             } else {
@@ -223,6 +239,7 @@ struct EditorView: View {
     let jobs: JobCenter
     let tools: ToolConsole
     let agent: AgentConsole
+    let publish: PublishConsole
     @State private var goal = "Describe the project, then export a vertical reel of the active sequence."
 
     var body: some View {
@@ -241,6 +258,17 @@ struct EditorView: View {
         }
         .toolbar { toolbarContent }
         .navigationTitle("\(document.project.name) — v\(document.version)")
+        .sheet(isPresented: publishSheetPresented) {
+            if let sheet = publish.sheet {
+                PublishSheetView(
+                    model: sheet, onUpload: { draft in await publish.upload(draft) },
+                    onCancel: { publish.dismissSheet() })
+            }
+        }
+    }
+
+    private var publishSheetPresented: Binding<Bool> {
+        Binding(get: { publish.sheet != nil }, set: { if !$0 { publish.dismissSheet() } })
     }
 
     private var sidebar: some View {
@@ -254,6 +282,8 @@ struct EditorView: View {
                         .padding(8)
                     Divider()
                     JobList(center: jobs)
+                    Divider()
+                    PublishSection(publish: publish)
                     Divider()
                     HistoryView(viewModel: document.viewModel)
                         .frame(height: 220)
@@ -303,6 +333,16 @@ struct EditorView: View {
             Button("Export", systemImage: "square.and.arrow.up") { model.exportReel() }
                 .disabled(tools.isCalling)
         }
+        ToolbarItemGroup {
+            // The share control is the one place YouTube is named (policy III.F.2); the icon is generic.
+            Button("Publish", systemImage: "arrow.up.circle") { model.presentPublishSheet() }
+                .disabled(!publish.canPublish || tools.isCalling)
+                .help(publish.hint)
+            SettingsLink {
+                Label("Accounts", systemImage: "person.crop.circle")
+            }
+            .help("Connect a YouTube channel and see how to reach the app from Claude Code")
+        }
     }
 
     private var statusBar: some View {
@@ -345,6 +385,101 @@ struct ToolSection: View {
             }
         }
         .padding(8)
+    }
+}
+
+/// The publish history of the open project (with Resume for interrupted uploads), the last
+/// `publish_youtube` answer, and why the Publish button is disabled when it is.
+struct PublishSection: View {
+    let publish: PublishConsole
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let history = publish.history, publish.isAvailable {
+                PublishHistoryView(model: history) { publishId in
+                    Task { await publish.resume(publishId: publishId) }
+                }
+            } else {
+                Text("Publishes").font(.headline).padding(.horizontal, 8)
+            }
+            if !publish.canPublish {
+                Text(publish.hint).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
+            }
+            if publish.isPublishing {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Waiting for the approval card, then the upload runs as a job").font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+            }
+            if let error = publish.error {
+                Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 8)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Settings: the Google account (connect, reconnect, disconnect, with the app's notices), how
+/// publishing was configured, and how to reach the running app from Claude Code.
+struct SettingsView: View {
+    let model: AppModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let services = model.services, let publish = model.publish {
+                    Text("YouTube").font(.title3)
+                    if let accounts = publish.accounts {
+                        AccountView(model: accounts)
+                    } else {
+                        Text("Publishing is switched off (TIMELINE_PUBLISHING=off)").foregroundStyle(.secondary)
+                    }
+                    PublishingStateView(publishing: services.publishing)
+                    Divider()
+                    MCPSection(services: services)
+                } else if let error = model.bootError {
+                    Text(error).foregroundStyle(.red)
+                } else {
+                    ProgressView(model.bootStage)
+                }
+            }
+            .padding(16)
+        }
+        .frame(width: 560, height: 620)
+    }
+}
+
+/// Which publishing stack booted and where the tokens live; the forced-private notice until the audit.
+struct PublishingStateView: View {
+    let publishing: PublishingServices
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            switch publishing.state {
+            case .configured(let clientId, let audited):
+                Text("Google OAuth client \(clientId)").font(.caption).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if !audited {
+                    Label(PublishCapabilities.unauditedNote, systemImage: "lock").font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            case .notConfigured(let hint):
+                Text(hint).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            case .fake:
+                Label(
+                    "Publishing runs against the in-process fake YouTube server (TIMELINE_PUBLISHING=fake)",
+                    systemImage: "testtube.2"
+                ).font(.caption).foregroundStyle(.orange)
+            case .off:
+                EmptyView()
+            }
+            if publishing.state != .off {
+                Text("Refresh tokens: \(publishing.tokenStoreDescription)").font(.caption2).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
     }
 }
 
