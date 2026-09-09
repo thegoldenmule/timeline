@@ -1,6 +1,7 @@
 import Contracts
 import Foundation
 import GRDB
+import Synchronization
 import TimelineCore
 
 /// The SQLite `ProjectStore` of storage.md: one actor per open project over one GRDB connection
@@ -55,6 +56,8 @@ public actor SQLiteProjectStore: ProjectStore {
     nonisolated let ids: any IDGenerator
     nonisolated let clock: any Clock
     private let broadcaster = Broadcaster<ProjectChange>()
+    /// How to end each live observation stream when the store closes.
+    private let observers = Mutex<[UUID: @Sendable () -> Void]>([:])
 
     private var project: Project
     private var fold: History
@@ -78,8 +81,14 @@ public actor SQLiteProjectStore: ProjectStore {
         clock: any Clock = SystemClock(), options: Options = Options(), warnings: [String] = []
     ) throws {
         let config = Schema.configuration(journal: options.journal, label: "project:\(url?.lastPathComponent ?? path)")
-        let pool = try DatabasePool(path: path, configuration: config)
-        try self.init(writer: pool, url: url, ids: ids, clock: clock, options: options, warnings: warnings)
+        // A DELETE journal has no concurrent readers, so it is one connection (a pool's readers would
+        // fight the writer over the journal mode).
+        let writer: any DatabaseWriter =
+            switch options.journal {
+            case .wal: try DatabasePool(path: path, configuration: config)
+            case .delete: try DatabaseQueue(path: path, configuration: config)
+            }
+        try self.init(writer: writer, url: url, ids: ids, clock: clock, options: options, warnings: warnings)
     }
 
     /// An in-memory store (a `DatabaseQueue` at `:memory:`): the same schema, write path, and projections,
@@ -206,8 +215,19 @@ public actor SQLiteProjectStore: ProjectStore {
             _ = try? db.checkpoint(.truncate)
         }
         isClosed = true
-        broadcaster.finish()
+        finishStreams()
         try writer.close()
+    }
+
+    /// Ends the `changes` stream and every observation stream.
+    private func finishStreams() {
+        broadcaster.finish()
+        let finishers = observers.withLock { s in
+            let all = Array(s.values)
+            s.removeAll()
+            return all
+        }
+        for finish in finishers { finish() }
     }
 
     // MARK: State row
@@ -291,6 +311,12 @@ public actor SQLiteProjectStore: ProjectStore {
             ".\(url.lastPathComponent).vacuum-\(UUID().uuidString)")
         try? fm.removeItem(at: temp)
         try writer.vacuum(into: temp.path)
+        // The copy is complete and consistent: mark its session closed so opening it skips recovery.
+        let copy = try DatabaseQueue(path: temp.path)
+        try copy.write { db in
+            try Projections.setProjectionState(db, Schema.Projection.session, lastSeq: lastSeq, note: "closed")
+        }
+        try copy.close()
         if fm.fileExists(atPath: url.path) {
             _ = try fm.replaceItemAt(url, withItemAt: temp)
         } else {
@@ -329,7 +355,7 @@ public actor SQLiteProjectStore: ProjectStore {
         pendingFlush?.cancel()
         pendingFlush = nil
         isClosed = true
-        broadcaster.finish()
+        finishStreams()
         try writer.close()
     }
 
@@ -427,7 +453,12 @@ public actor SQLiteProjectStore: ProjectStore {
                 } catch {}
                 continuation.finish()
             }
-            continuation.onTermination = { _ in task.cancel() }
+            let id = UUID()
+            self.observers.withLock { $0[id] = { continuation.finish() } }
+            continuation.onTermination = { _ in
+                task.cancel()
+                self.observers.withLock { _ = $0.removeValue(forKey: id) }
+            }
         }
     }
 }
