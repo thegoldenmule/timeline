@@ -188,6 +188,9 @@ struct RenderTests {
         f.viewModel.setPlayhead(RationalTime(seconds: 2))
         #expect(await eventually { view.redrawRequests > requests })
         let afterModel = view.redrawRequests
+        // The first render's fetches may already have landed, so ask for new filmstrip keys at another zoom
+        // before draining; the landed fetches then request a redraw of their own.
+        f.viewModel.setZoom(index: max(0, f.viewModel.zoomIndex - 1))
         await view.mediaCache?.drain()
         #expect(await eventually { view.redrawRequests > afterModel })
         // The SwiftUI wrapper builds the same view.

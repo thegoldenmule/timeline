@@ -116,11 +116,14 @@ package, canonical state and history equal.
 
 ## Known issues
 
-- `swift test` over the whole package has twice stalled on this machine (once at the MediaKit
-  transcription suite, all suites running in parallel, the helper idle at 12% CPU for 20 minutes) and a
-  wall-clock assertion (`TestMediaTests.generationIsFast`) fails under that load. Every suite passes on its
-  own (`swift test --filter <Module>Tests`); the interaction is not understood yet and predates the
-  integration commits.
+- `swift test` over the whole package (every target in one parallel process) stalls on this machine:
+  sampling the helper shows 16 threads blocked in `-[AVAssetReaderOutput copyNextSampleBuffer]` on a
+  CoreMedia semaphore, and before that `AVAssetWriter` pausing its video input for good while dozens of
+  reader, writer, and export sessions are alive at once. `TestMedia.writeVideo` now feeds whichever input
+  is ready, finishes the audio input as soon as its last sample is in, and throws after 30 s without
+  progress instead of hanging. `make test` therefore runs the test targets one at a time (each target's
+  tests still run in parallel), which passes; `make test-parallel` is the one-process run for anyone
+  who wants to chase the CoreMedia interaction.
 - `render_export` without `outputPath` writes to `LibraryLayout.default.root/Exports`, not the app's root
   (AgentKit uses the default layout for that path). The fallback script passes `outputPath`; the toolbar
   Export button does not yet, so under `TIMELINE_ROOT` its file lands in `~/Movies/Timeline/Exports`.

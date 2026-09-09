@@ -258,52 +258,78 @@ extension TestMedia {
         let hlgSpace = CGColorSpace(name: CGColorSpace.itur_2100_HLG)
         let srgbSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
-        for f in 0..<frameCount {
-            while !video.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(1)) }
-            guard let pool = adaptor.pixelBufferPool else { throw Error.pixelBufferUnavailable }
-            var pooled: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pooled)
-            guard let pooled else { throw Error.pixelBufferUnavailable }
-            let canvas = scratch ?? pooled
+        // Feed whichever input is ready. AVAssetWriter interleaves its inputs by pausing the one that is
+        // ahead, so a lockstep "video frame, then its audio" loop can wait on video while the writer waits
+        // for audio (the encoded audio timeline lags the appended PCM by a packet). A pull loop with a
+        // watchdog never deadlocks: every pass appends to any ready input, and audio goes in 100 ms chunks.
+        let totalAudioFrames = audio.map { $0.samples.count / $0.channels } ?? 0
+        let audioChunk = audio.map { max(1, Int($0.sampleRate) / 10) } ?? 0
+        var nextVideoFrame = 0
+        var nextAudioFrame = 0
+        let watchdog = ContinuousClock()
+        var lastProgress = watchdog.now
+        while nextVideoFrame < frameCount || nextAudioFrame < totalAudioFrames {
+            var progressed = false
+            if nextVideoFrame < frameCount, video.isReadyForMoreMediaData {
+                let f = nextVideoFrame
+                guard let pool = adaptor.pixelBufferPool else { throw Error.pixelBufferUnavailable }
+                var pooled: CVPixelBuffer?
+                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pooled)
+                guard let pooled else { throw Error.pixelBufferUnavailable }
+                let canvas = scratch ?? pooled
 
-            CVPixelBufferLockBaseAddress(canvas, [])
-            if let ctx = CGContext(
-                data: CVPixelBufferGetBaseAddress(canvas), width: width, height: height, bitsPerComponent: 8,
-                bytesPerRow: CVPixelBufferGetBytesPerRow(canvas), space: srgbSpace, bitmapInfo: bgraBitmapInfo)
-            {
-                paint(ctx, f)
-            }
-            CVPixelBufferUnlockBaseAddress(canvas, [])
-
-            if codec.isHDR, let ciContext, let hlgSpace {
-                tagHLG(pooled)
-                let image = CIImage(cvPixelBuffer: canvas, options: [.colorSpace: srgbSpace])
-                ciContext.render(image, to: pooled, bounds: image.extent, colorSpace: hlgSpace)
-            }
-            let pts = CMTimeMultiply(frameDuration, multiplier: Int32(f))
-            guard adaptor.append(pooled, withPresentationTime: pts) else {
-                throw Error.writerFailed(writer.error?.localizedDescription ?? "append video frame \(f)")
-            }
-
-            if let audio, let audioInput, let audioFormat {
-                let frameSamples = Int64(audio.sampleRate) * frameDuration.value
-                let start = Int(frameSamples * Int64(f) / Int64(frameDuration.timescale))
-                let end = min(
-                    audio.samples.count / audio.channels,
-                    Int(frameSamples * Int64(f + 1) / Int64(frameDuration.timescale)))
-                if end > start {
-                    while !audioInput.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(1)) }
-                    let buffer = try pcmSampleBuffer(
-                        audio.samples, frames: start..<end, channels: audio.channels, sampleRate: audio.sampleRate,
-                        format: audioFormat)
-                    guard audioInput.append(buffer) else {
-                        throw Error.writerFailed(writer.error?.localizedDescription ?? "append audio at frame \(f)")
-                    }
+                CVPixelBufferLockBaseAddress(canvas, [])
+                if let ctx = CGContext(
+                    data: CVPixelBufferGetBaseAddress(canvas), width: width, height: height, bitsPerComponent: 8,
+                    bytesPerRow: CVPixelBufferGetBytesPerRow(canvas), space: srgbSpace, bitmapInfo: bgraBitmapInfo)
+                {
+                    paint(ctx, f)
                 }
+                CVPixelBufferUnlockBaseAddress(canvas, [])
+
+                if codec.isHDR, let ciContext, let hlgSpace {
+                    tagHLG(pooled)
+                    let image = CIImage(cvPixelBuffer: canvas, options: [.colorSpace: srgbSpace])
+                    ciContext.render(image, to: pooled, bounds: image.extent, colorSpace: hlgSpace)
+                }
+                let pts = CMTimeMultiply(frameDuration, multiplier: Int32(f))
+                guard adaptor.append(pooled, withPresentationTime: pts) else {
+                    throw Error.writerFailed(writer.error?.localizedDescription ?? "append video frame \(f)")
+                }
+                nextVideoFrame += 1
+                progressed = true
+            }
+            if let audio, let audioInput, let audioFormat, nextAudioFrame < totalAudioFrames,
+                audioInput.isReadyForMoreMediaData
+            {
+                let start = nextAudioFrame
+                let end = min(totalAudioFrames, start + audioChunk)
+                let buffer = try pcmSampleBuffer(
+                    audio.samples, frames: start..<end, channels: audio.channels, sampleRate: audio.sampleRate,
+                    format: audioFormat)
+                guard audioInput.append(buffer) else {
+                    throw Error.writerFailed(writer.error?.localizedDescription ?? "append audio at sample \(start)")
+                }
+                nextAudioFrame = end
+                // Finish the audio input the moment its last sample is in: the writer pauses the video input
+                // while it believes audio is behind, and an open audio input keeps it waiting for more.
+                if nextAudioFrame == totalAudioFrames { audioInput.markAsFinished() }
+                progressed = true
+            }
+            if progressed {
+                lastProgress = watchdog.now
+            } else {
+                if watchdog.now - lastProgress > .seconds(30) {
+                    throw Error.writerFailed(
+                        "writer made no progress for 30 s (video \(nextVideoFrame)/\(frameCount), "
+                            + "audio \(nextAudioFrame)/\(totalAudioFrames)): \(writer.error?.localizedDescription ?? "no error")"
+                    )
+                }
+                try await Task.sleep(for: .milliseconds(1))
             }
         }
         video.markAsFinished()
-        audioInput?.markAsFinished()
+        if totalAudioFrames == 0 { audioInput?.markAsFinished() }
         await writer.finishWriting()
         guard writer.status == .completed else {
             throw Error.writerFailed(writer.error?.localizedDescription ?? "finishWriting: \(writer.status.rawValue)")

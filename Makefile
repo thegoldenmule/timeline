@@ -1,9 +1,20 @@
-.PHONY: build test lint format e2e ci
+.PHONY: build test test-parallel lint format e2e ci
 
 build:
 	swift build
 
+# Test targets run one at a time. Running every target's tests in one parallel process opens dozens of
+# concurrent AVAssetReader/AVAssetWriter sessions and stalls inside CoreMedia (docs/design/integration.md).
+TEST_TARGETS = TimelineCoreTests ContractsTests ProjectStoreTests RenderKitTests MediaKitTests AudioAlignTests AgentKitTests TimelineUITests
+
 test:
+	swift build --build-tests
+	@for t in $(TEST_TARGETS); do \
+		echo "== $$t"; swift test --skip-build --filter "^$$t\." || exit 1; \
+	done
+
+# The whole package in one parallel process; see the note on `test`.
+test-parallel:
 	swift test
 
 # swift-format ships with the Xcode 26 toolchain.
