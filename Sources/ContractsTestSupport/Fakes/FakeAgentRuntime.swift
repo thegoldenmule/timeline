@@ -49,7 +49,7 @@ public final class FakeAgentSession: AgentSession, Sendable {
                 }
             }
         }
-        continuation.finish()
+        if !state.withLock({ $0.cancelled }) { continuation.finish() }
     }
 
     /// Verdicts given so far, in order.
@@ -87,11 +87,13 @@ public final class FakeAgentSession: AgentSession, Sendable {
             s.awaiting = nil
             return c
         }
+        // Terminate the event stream before waking the replay task: once `cancelled` is set, `run()` never
+        // finishes the stream itself, so `.failed(.cancelled)` is always the last event observers see.
+        continuation.yield(.failed(.cancelled))
+        continuation.finish()
         waiting?.resume(returning: .deny(reason: "cancelled"))
         scriptsContinuation.finish()
         replay.withLock { $0?.cancel() }
-        continuation.yield(.failed(.cancelled))
-        continuation.finish()
     }
 }
 
