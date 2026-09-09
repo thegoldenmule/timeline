@@ -358,6 +358,24 @@ struct MCPTestClient: Sendable {
         let malformed = try await hook.post("not an object")
         #expect(malformed.status == 400)
         #expect(h.log.all.contains { $0.contains("approval render_export -> allow") })
+
+        // A tool that supplies a presentation gets it back on the request the host's gate minted, so the
+        // card raised for the hook path shows the tool's details, not the generic summary.
+        guard
+            case .required(let presented) = await h.host.approvalGate.check(
+                tool: "publish_youtube", input: ToolInput(["title": "Band rehearsal"]), estimate: .none,
+                presentation: Fixtures.publishPresentation, actor: .human, sessionId: nil)
+        else {
+            Issue.record("expected a request")
+            return
+        }
+        #expect(presented.presentation == Fixtures.publishPresentation)
+        #expect(presented.inputSummary == Fixtures.publishPresentation.summary)
+        #expect(await h.services.approvals.pending().contains { $0.token == presented.token })
+        #expect(await h.services.approvals.checks.last?.presentation == Fixtures.publishPresentation)
+        let output = ToolOutput.approvalRequired(presented)
+        #expect(output.structured?["details"]?.arrayValue?.count == 3)
+        #expect(output.structured?["details"]?[0]?["label"] == "Channel")
     }
 
     @Test func approvalHookTimesOut() async throws {
