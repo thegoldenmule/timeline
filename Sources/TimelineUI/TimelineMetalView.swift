@@ -56,6 +56,7 @@ public final class TimelineMetalView: MTKView {
                 renderError = error
             }
         }
+        registerForDraggedTypes([.fileURL])
         observe()
     }
 
@@ -145,6 +146,35 @@ public final class TimelineMetalView: MTKView {
     public override func magnify(with event: NSEvent) {
         if event.magnification > 0.1 { viewModel.zoomIn(anchorX: point(event).x) }
         if event.magnification < -0.1 { viewModel.zoomOut(anchorX: point(event).x) }
+    }
+
+    // MARK: Drop (NSDraggingDestination; the view model owns the state and the scene draws it)
+
+    /// The file URLs on the drag's pasteboard.
+    private func fileURLs(_ sender: any NSDraggingInfo) -> [URL] {
+        sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+            as? [URL] ?? []
+    }
+
+    private func dragOperation(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard MediaFileTypes.mediaURLs(fileURLs(sender)).isEmpty == false else {
+            viewModel.endDrop()
+            return []
+        }
+        viewModel.updateDrop(at: convert(sender.draggingLocation, from: nil))
+        return .copy
+    }
+
+    public override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
+
+    public override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
+
+    public override func draggingExited(_ sender: (any NSDraggingInfo)?) { viewModel.endDrop() }
+
+    public override func draggingEnded(_ sender: any NSDraggingInfo) { viewModel.endDrop() }
+
+    public override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        viewModel.dropMedia(fileURLs(sender), at: convert(sender.draggingLocation, from: nil))
     }
 
     public override func keyDown(with event: NSEvent) {

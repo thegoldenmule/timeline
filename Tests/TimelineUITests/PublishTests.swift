@@ -451,7 +451,10 @@ struct PublishViewTests {
         let f = try await PublishFixture.make()
         let render = try #require(try await f.store.renders().first)
         let request = Fixtures.publishRequest(renderId: render.id, fileURL: try #require(render.outputURL))
-        await f.publisher.setStepDelay(.milliseconds(10))
+        // A one-second upload window: the benchmark suite can hold the main actor long enough for a
+        // 50 ms upload to finish before the poll below sees the stage.
+        await f.publisher.setUploadSteps(20)
+        await f.publisher.setStepDelay(.milliseconds(50))
         let job = f.publisher.publish(request, publishId: "publish-1", resuming: nil, onEvent: { _ in })
         let center = JobCenter()
         let handle = await center.submit(job, to: FakeJobRunner())

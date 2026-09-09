@@ -69,6 +69,9 @@ public enum TimelineTheme {
     public static let mutedBadge = SceneColor(0.85, 0.25, 0.25)
     public static let lockedBadge = SceneColor(0.95, 0.60, 0.15)
     public static let marker = SceneColor(0.4, 0.7, 1.0)
+    /// The row a file drag would land on, and the line at its drop time.
+    public static let dropHighlight = SceneColor(0.40, 0.90, 1.0, 0.18)
+    public static let dropIndicator = SceneColor(0.40, 0.90, 1.0)
 
     public static let clipCornerRadius: CGFloat = 4
     public static let labelBandHeight: CGFloat = 16
@@ -219,12 +222,14 @@ public enum TimelineSceneBuilder {
         public var pendingClipIds: Set<ClipID>
         public var libraryLayout: LibraryLayout
         public var showMedia: Bool
+        /// A file drag in progress: the scene highlights its row and draws a line at its time.
+        public var dropTarget: TimelineDropTarget?
 
         public init(
             project: Project, sequence: Sequence?, layout: TimelineLayout, selection: Set<ClipID>,
             playhead: RationalTime,
             preview: GesturePreview? = nil, pendingClipIds: Set<ClipID> = [], libraryLayout: LibraryLayout = .default,
-            showMedia: Bool = true
+            showMedia: Bool = true, dropTarget: TimelineDropTarget? = nil
         ) {
             self.project = project
             self.sequence = sequence
@@ -235,6 +240,7 @@ public enum TimelineSceneBuilder {
             self.pendingClipIds = pendingClipIds
             self.libraryLayout = libraryLayout
             self.showMedia = showMedia
+            self.dropTarget = dropTarget
         }
     }
 
@@ -250,7 +256,7 @@ public enum TimelineSceneBuilder {
         return Input(
             project: vm.project, sequence: vm.displaySequence, layout: vm.layout, selection: vm.selection,
             playhead: vm.playhead, preview: vm.preview, pendingClipIds: pendingIds, libraryLayout: vm.libraryLayout,
-            showMedia: showMedia && (vm.thumbnails != nil || vm.waveforms != nil))
+            showMedia: showMedia && (vm.thumbnails != nil || vm.waveforms != nil), dropTarget: vm.dropTarget)
     }
 
     @MainActor
@@ -308,6 +314,7 @@ public enum TimelineSceneBuilder {
             }
         }
         addPlayhead(&scene, at: input.playhead, layout: layout)
+        if let drop = input.dropTarget { addDropIndicator(&scene, drop: drop, layout: layout) }
         if let message = input.preview?.message {
             scene.labels.append(
                 SceneLabel(
@@ -522,6 +529,36 @@ public enum TimelineSceneBuilder {
             }
             t += minor
         }
+    }
+
+    /// A file drag over the view: the target row tinted, a playhead-style line at the drop time, and the
+    /// snap guide when the time snapped.
+    private static func addDropIndicator(_ scene: inout TimelineScene, drop: TimelineDropTarget, layout: TimelineLayout)
+    {
+        if let trackId = drop.trackId, let row = layout.row(for: trackId) {
+            scene.overlayQuads.append(
+                SceneQuad(
+                    rect: CGRect(x: layout.trackAreaMinX, y: row.y, width: layout.trackAreaWidth, height: row.height),
+                    color: TimelineTheme.dropHighlight))
+        }
+        let x = layout.x(for: drop.at)
+        guard x >= layout.trackAreaMinX - 1 && x <= layout.size.width + 1 else { return }
+        if drop.snappedTo != nil {
+            scene.overlayQuads.append(
+                SceneQuad(
+                    rect: CGRect(
+                        x: x - 3, y: layout.rulerHeight, width: 6, height: layout.size.height - layout.rulerHeight),
+                    color: TimelineTheme.snapGuide.with(alpha: 0.25)))
+        }
+        scene.overlayQuads.append(
+            SceneQuad(
+                rect: CGRect(
+                    x: x - 1, y: layout.rulerHeight, width: 2, height: layout.size.height - layout.rulerHeight),
+                color: TimelineTheme.dropIndicator))
+        scene.triangles.append(
+            SceneTriangle(
+                CGPoint(x: x - 6, y: layout.rulerHeight), CGPoint(x: x + 6, y: layout.rulerHeight),
+                CGPoint(x: x, y: layout.rulerHeight + 8), color: TimelineTheme.dropIndicator))
     }
 
     private static func addPlayhead(_ scene: inout TimelineScene, at time: RationalTime, layout: TimelineLayout) {

@@ -57,6 +57,12 @@ final class AppModel {
             create
             ? try await ProjectDocument.openOrCreate(at: url, name: name, using: services)
             : try await ProjectDocument.open(at: url, using: services)
+        await install(document)
+    }
+
+    /// Makes `document` the window's document and routes the timeline's file drops to the importer.
+    private func install(_ document: ProjectDocument) async {
+        document.viewModel.onDropMedia = { [weak self] urls, target in self?.importFiles(urls, at: target) }
         self.document = document
         await publish?.attach(document)
     }
@@ -77,27 +83,33 @@ final class AppModel {
 
     // MARK: Actions
 
-    /// Imports each file through the library as a job, records the asset, and appends it to the timeline.
-    func importFiles(_ urls: [URL]) {
+    /// Imports the media files through the library as jobs, records their assets, and lands them on the
+    /// timeline: back to back from `target` when given (a drop), else appended at the end. Non-media
+    /// files are skipped with a note in the status bar.
+    func importFiles(_ urls: [URL], at target: TimelineDropTarget? = nil) {
         guard let services, let document else { return }
-        for url in urls {
-            perform {
-                let handle = await self.jobs.submit(
-                    services.mediaLibrary.importJob(url: url, mode: .copy), to: services.jobRunner)
-                let outcome = try await handle.wait()
-                guard let result = try outcome.payload(as: ImportResult.self) else { return }
-                var asset = result.asset
-                if let existing = document.project.assets.values.first(where: { $0.contentHash == asset.contentHash }) {
-                    asset = existing
-                } else {
-                    let applied = try await document.apply(
-                        .importAsset(result.operation), label: "Import \(asset.displayName)")
-                    try await document.waitForVersion(applied.version)
-                }
-                let added = try await document.appendClip(for: asset)
-                try await document.waitForVersion(added.version)
+        let ignored = urls.filter { !MediaFileTypes.isMedia($0) }
+        lastCommandError =
+            ignored.isEmpty
+            ? nil
+            : "Ignored \(ignored.count) non-media file\(ignored.count == 1 ? "" : "s"): "
+                + ignored.map(\.lastPathComponent).joined(separator: ", ")
+        guard ignored.count < urls.count else { return }
+        let importer = MediaImporter(services: services, document: document, jobs: jobs)
+        Task { @MainActor in
+            do {
+                try await importer.importFiles(urls, at: target)
+            } catch {
+                lastCommandError = "\(error)"
             }
         }
+    }
+
+    /// The window-wide drop (preview, sidebar, status bar): imports at the playhead on the first
+    /// matching track. The timeline's own drop target takes precedence over it.
+    func dropFiles(_ urls: [URL]) {
+        guard let document else { return }
+        importFiles(urls, at: TimelineDropTarget(trackId: nil, at: document.viewModel.playhead))
     }
 
     func presentImportPanel() {
@@ -144,9 +156,7 @@ final class AppModel {
         let name = url.deletingPathExtension().lastPathComponent
         perform {
             self.document = nil
-            let forked = try await document.fork(to: url, name: name, using: services)
-            self.document = forked
-            await self.publish?.attach(forked)
+            await self.install(try await document.fork(to: url, name: name, using: services))
         }
     }
 
@@ -264,6 +274,10 @@ struct EditorView: View {
                     model: sheet, onUpload: { draft in await publish.upload(draft) },
                     onCancel: { publish.dismissSheet() })
             }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            model.dropFiles(urls)
+            return true
         }
     }
 

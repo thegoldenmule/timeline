@@ -101,12 +101,35 @@ below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd
 Cmd-scroll zooms, N toggles snapping), a status bar; the
 sidebar holds the inspector, the approval stack, the job list, the publishes, the history, the last tool
 result, the MCP section, and the agent panel. Toolbar: New, Open, Fork, Import (library import as a job,
-then the asset is appended to the timeline, video auto-linking its audio), Split, Delete, Undo, Redo,
+then the asset is appended to the timeline, video auto-linking its audio; files can also be dropped, see below), Split, Delete, Undo, Redo,
 Analyze (silence, onset envelope, shots on the selected clip's asset through `media_analyze`), Align (two
 selected clips: `align_audio` with the first as reference, then `moveClip` on the second), Export
 (`render_export`, gated by the approval stack, recorded in the render ledger), Publish (the sheet, then
 `publish_youtube` gated by the approval stack), Accounts (Settings). The player drives the playhead while
 playing; the timeline drives the player while paused.
+
+### Drag and drop
+
+Media files (anything whose `UTType` conforms to movie, audio, or image: `MediaFileTypes` in TimelineUI)
+can be dropped anywhere in the window. `TimelineMetalView` registers for `.fileURL` drags and is the
+precise target: while a drag is over it the scene tints the row under the pointer and draws a line at the
+drop time, snapped to clip edges, markers, the playhead, and zero like a gesture when snapping is on.
+The location is `TimelineViewModel.dropTarget(at:) -> TimelineDropTarget { trackId?, at }` (nil track on the
+ruler, the header column, or below the last track), so it is tested with view points and no
+`NSDraggingInfo`; the drop calls `viewModel.onDropMedia(urls, target)`. The whole editor view is a SwiftUI
+`dropDestination(for: URL.self)` fallback: a drop on the preview, sidebar, or status bar lands at the playhead.
+
+Both go through `MediaImporter` (`Sources/TimelineApp/MediaImporter.swift`), the same path as the Import
+button: every file is submitted to the library as a job up front (progress in the job list), then in the
+order dropped its asset is recorded with `importAsset` (or the project's existing asset with that content
+hash is reused) and `ProjectDocument.insertClip(for:at:)` adds it with `link: .auto`, so a file with video
+and audio lands as a linked pair. Placement rules: the clip goes on the target track when that track
+exists, is unlocked, and matches the asset (video for video and images, audio for audio), else on the
+first matching track (created when there is none); the mode is `ripple` (default `addClip`), so a drop
+between clips pushes what follows along, a drop inside a clip splits it around the insert, and a drop past
+the end simply appends. Several files land back to back from the drop time, each starting where the
+previous one ended. Non-media files are skipped with a note in the status bar's error line. The headless
+check drops the av file at 3 s on V1 and asserts the linked clips land at 3 s.
 
 ### Connecting Claude Code
 
@@ -129,7 +152,7 @@ YouTube (`PublishingMode.fake`), then:
 ```
 ok   boot: root TimelineSkeleton-7E4D6B9A, MCP http://127.0.0.1:54372/mcp, 18 tools, agent fallback, publishing fake
 ok   create: Skeleton v3 at Skeleton.tlproj; empty sequence, nothing to preview yet
-ok   import: 4 assets copied into Library/ with sidecars and cache rows; av 2.0s 1280x720, tone 3.0s @48000 Hz
+ok   import: 4 assets copied into Library/ with sidecars and cache rows; av 2.0s 1280x720, tone 3.0s @48000 Hz; drop at 3 s on V1 -> 2 linked clips at 3.0 s, notes.txt ignored
 ok   edit: linked clips v12, split via TimelineViewModel v14, dissolve v15; scene draws 7 clips, 1 transition
 ok   render: compiled 6.00s, item readyToPlay, frame at 0.5 s 320x180 not blank, h264_1080p export 6.00s in 0.3s to skeleton-1080p.mp4
 ok   analyze: silence + onset-8k on av-tone.mov: 122 envelope frames, 2 artifacts under Cache/, recorded at v17
@@ -149,7 +172,8 @@ Step by step: `SQLiteProjectStoreOpener.create` plus V1/A1; `TestMedia.videoWith
 can stall past a couple of seconds), `tone`, and `alignmentPair` (60 s camera, 20 s render: the default
 parameters want 10 s fine windows and 10 s of overlap) imported through `FileMediaLibrary.importJob` on the
 budgeted runner, with the library path, sidecar, `sha256-` hash, and cache row asserted before
-`importAsset` is applied; two auto-linked clips and a tone clip, a split through
+`importAsset` is applied, then the av file dropped at 3 s on V1 through `MediaImporter` lands as two linked clips
+at 3 s (removed again so the edit starts empty); two auto-linked clips and a tone clip, a split through
 `TimelineViewModel.splitAtPlayhead` (the linked audio splits too), a dissolve, and a `TimelineSceneBuilder`
 scene; RenderKit compiles the sequence over the imported clips, the preview item reaches `readyToPlay`,
 `frame(_:at:size:)` at 0.5 s is not a flat colour, and `export` with `ExportPreset.h264_1080p` through the

@@ -97,11 +97,40 @@ enum SkeletonCheck {
             let av = try unwrap(imported["av"], "import", "no av asset")
             let tone = try unwrap(imported["tone"], "import", "no tone asset")
             try require(av.hasVideo && av.hasAudio && !tone.hasVideo && tone.hasAudio, "import", "probe kinds")
+
+            // 3b. The drop path (MediaImporter, what the timeline and window drops call): the av file dropped
+            //     at 3 s on V1 resolves to the existing asset by hash and lands as linked clips at 3 s; a text
+            //     file in the same drop is ignored. The clips are removed again so the edit step starts empty.
+            let dropTrack = try unwrap(document.sequence?.tracks.first { $0.kind == .video }, "import", "no V1")
+            let dropped = try await MediaImporter(services: services, document: document, jobs: JobCenter())
+                .importFiles(
+                    [avClip.url, media.url.appendingPathComponent("notes.txt")],
+                    at: TimelineDropTarget(trackId: dropTrack.id, at: RationalTime(3, 1)))
+            try require(
+                dropped.ignored.map(\.lastPathComponent) == ["notes.txt"] && dropped.clipIds.count == 1, "import",
+                "drop: \(dropped.ignored.count) ignored, \(dropped.clipIds.count) clips")
+            try require(document.project.assets.count == 4, "import", "the drop re-imported an asset")
+            let droppedSequence = try unwrap(document.sequence, "import", "no sequence after the drop")
+            let droppedClip = try unwrap(droppedSequence.clip(dropped.clipIds[0]), "import", "dropped clip missing")
+            let droppedGroup = try unwrap(droppedClip.linkGroupId, "import", "the dropped clip was not linked")
+            let droppedMembers = droppedSequence.members(of: droppedGroup)
+            try require(
+                droppedClip.trackId == dropTrack.id && droppedMembers.count == 2
+                    && droppedMembers.allSatisfy { $0.start == RationalTime(3, 1) }, "import",
+                "dropped clips at \(droppedMembers.map { $0.start.seconds }) on \(droppedMembers.map(\.trackId))")
+            let cleared = try await document.apply(
+                .removeClip(.init(clipId: .id(droppedClip.id), mode: .overwrite)), label: "Remove dropped clip")
+            try await document.waitForVersion(cleared.version)
+            try require(
+                document.sequence?.tracks.allSatisfy { $0.clips.isEmpty } == true, "import",
+                "the timeline is not empty after removing the dropped clips")
             ok(
                 "import",
                 "\(imported.count) assets copied into Library/ with sidecars and cache rows; "
                     + "av \(av.duration.seconds)s \(av.probe.width ?? 0)x\(av.probe.height ?? 0), "
-                    + "tone \(tone.duration.seconds)s @\(tone.sampleRate ?? 0) Hz")
+                    + "tone \(tone.duration.seconds)s @\(tone.sampleRate ?? 0) Hz; "
+                    + "drop at 3 s on V1 -> \(droppedMembers.count) linked clips at \(droppedClip.start.seconds) s, "
+                    + "notes.txt ignored")
 
             // 4. Linked clips, a split through TimelineUI's view model, and a transition.
             let sequence = try unwrap(document.sequence, "clips", "no active sequence")
@@ -474,8 +503,8 @@ enum SkeletonCheck {
             let statusQueries = await fakeYouTube.statusQueries.count
             try require(statusQueries == 1, "publish", "\(statusQueries) status queries")
             try require(await !fakeYouTube.hasOverlappingChunks, "publish", "overlapping chunk ranges")
-            let dropped = await fakeYouTube.chunkRequests.filter(\.dropped).count
-            try require(dropped == 1, "publish", "\(dropped) dropped chunks")
+            let droppedChunks = await fakeYouTube.chunkRequests.filter(\.dropped).count
+            try require(droppedChunks == 1, "publish", "\(droppedChunks) dropped chunks")
             let insertedCaptions = await fakeYouTube.captions(forVideo: "fake-video-1")
             try require(insertedCaptions.count == 1, "publish", "\(insertedCaptions.count) captions on the video")
             try require(
