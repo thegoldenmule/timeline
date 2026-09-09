@@ -103,7 +103,8 @@ clock of its whole target on its own. `AUDIOALIGN_BENCH=1` runs `AudioAlignTests
 two-hour camera track against a five-minute render, ~45 s); `MEDIAKIT_BENCH=1` runs
 `MediaKitTests.BenchmarkTests` (streamed analyses over `MEDIAKIT_BENCH` minutes of audio, default 10);
 `TIMELINE_LIVE_CLAUDE=1` runs the one headless run against the real `claude` CLI. `make bench` sets the
-first two and runs them in release. Everything else runs in `make test`.
+first two and runs them in release (`make bench MEDIAKIT_BENCH=30` for a longer one). Everything else
+runs in `make test`.
 
 The window: the media library pane on the left (⌥⌘L, remembered in `showsLibrary`), the preview on top
 (Play in the status bar or the space bar), TimelineUI's Metal timeline

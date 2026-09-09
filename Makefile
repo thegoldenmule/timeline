@@ -20,9 +20,11 @@ test-parallel:
 # The scale tests, which `make test` leaves out because each one sets its target's wall clock on its own:
 # AudioAlign's two-hour alignment and MediaKit's streamed-analysis throughput. Release, because both are
 # measuring speed. Documented in docs/design/integration.md.
+# `MEDIAKIT_BENCH` is how many minutes of audio its benchmark synthesizes, so name the length here.
+MEDIAKIT_BENCH ?= 10
 bench:
 	AUDIOALIGN_BENCH=1 swift test -c release --filter "^AudioAlignTests\.LongRecordingTests"
-	MEDIAKIT_BENCH=1 swift test -c release --filter "^MediaKitTests\.BenchmarkTests"
+	MEDIAKIT_BENCH=$(MEDIAKIT_BENCH) swift test -c release --filter "^MediaKitTests\.BenchmarkTests"
 
 # swift-format ships with the Xcode 26 toolchain.
 lint:
