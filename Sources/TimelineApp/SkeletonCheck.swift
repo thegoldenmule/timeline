@@ -8,8 +8,8 @@ import TimelineUI
 
 /// `swift run TimelineApp --skeleton-check`: the end-to-end check on the real services, without a
 /// window. It boots the composition root over a temporary library root, creates a project, imports
-/// synthetic media through the real library, edits through TimelineUI's view model and the tool
-/// registry, runs analyses and an alignment through the job runner, talks to the MCP host over HTTP,
+/// synthetic media through the real library, browses the cross-project catalog and duplicates another
+/// project's asset into this one, edits through TimelineUI's view model and the tool registry, runs analyses and an alignment through the job runner, talks to the MCP host over HTTP,
 /// runs the scripted agent through the approval gate, undoes and redoes, then closes and reopens the
 /// project. Prints one line per step; returns false (exit 1) with the reason on the first failure.
 @MainActor
@@ -131,6 +131,89 @@ enum SkeletonCheck {
                     + "tone \(tone.duration.seconds)s @\(tone.sampleRate ?? 0) Hz; "
                     + "drop at 3 s on V1 -> \(droppedMembers.count) linked clips at \(droppedClip.start.seconds) s, "
                     + "notes.txt ignored")
+
+            // 3c. The media library: the catalog over every package on this machine, and a duplicate of a
+            //     foreign project's asset into this one (one importAsset, no second copy of the file).
+            let second = try await TestMedia.tone(frequency: 660, duration: 1, in: media.url, name: "second-project")
+            let secondImport = try await services.mediaLibrary.importAsset(url: second.url, mode: .copy)
+            let secondURL = services.layout.projectsDir.appendingPathComponent("Second.tlproj", isDirectory: true)
+            let secondStore = try await services.opener.create(
+                at: secondURL, name: "Second", settings: ProjectSettings(),
+                sequence: .init(name: "Sequence 1", frameDuration: RationalTime(1, 30), width: 1920, height: 1080))
+            _ = try await secondStore.apply(
+                Command(
+                    commandId: CommandID(minting: UUIDv7Generator()), actor: .system, label: "Import second",
+                    operation: .importAsset(secondImport.operation)))
+            try await secondStore.close()
+
+            let catalog = services.catalog
+            try require(try await catalog.refresh() >= 2, "library", "the scan found fewer than two packages")
+            let catalogProjects = try await catalog.projects()
+            let skeletonRow = try unwrap(
+                catalogProjects.first { $0.name == "Skeleton" }, "library", "the catalog did not find Skeleton")
+            try require(
+                skeletonRow.isReadable, "library", "Skeleton is unreadable: \(skeletonRow.unreadableReason ?? "")")
+            let everything = try await catalog.items()
+            try require(
+                everything.filter { $0.projectId == skeletonRow.id }.count == 4, "library",
+                "the catalog sees \(everything.filter { $0.projectId == skeletonRow.id }.count) assets in Skeleton")
+            let foreign = try unwrap(
+                try await catalog.items(excluding: [skeletonRow.id]).first {
+                    $0.contentHash == secondImport.asset.contentHash
+                }, "library", "the second package's asset is not in the catalog")
+            try require(foreign.projectName == "Second", "library", "foreign item names \(foreign.projectName ?? "no")")
+
+            // The duplicate: one importAsset, the same file, one clip at the target.
+            let libraryFilesBefore = SkeletonCheck.fileCount(under: services.layout.libraryDir)
+            let versionBeforeDuplicate = document.version
+            let importer = MediaImporter(services: services, document: document, jobs: JobCenter())
+            let duplicated = try await importer.insert(
+                [LibraryDragItem(foreign.asset, projectId: foreign.projectId, url: foreign.url(defaultRoot: root))],
+                at: TimelineDropTarget(trackId: nil, at: RationalTime(1, 1)))
+            try require(
+                duplicated.assets.count == 1 && duplicated.clipIds.count == 1 && duplicated.ignored.isEmpty, "library",
+                "duplicate: \(duplicated.assets.count) assets, \(duplicated.clipIds.count) clips")
+            try require(
+                document.version == versionBeforeDuplicate + 2, "library",
+                "duplicate applied \(document.version - versionBeforeDuplicate) commands, expected importAsset + addClip"
+            )
+            try require(document.project.assets.count == 5, "library", "the duplicate did not add exactly one asset")
+            try require(
+                SkeletonCheck.fileCount(under: services.layout.libraryDir) == libraryFilesBefore, "library",
+                "the duplicate copied the file again")
+
+            // The same item a second time: the project's asset is reused, only a clip is added.
+            let versionBeforeSecond = document.version
+            let again = try await importer.insert(
+                [LibraryDragItem(foreign.asset, projectId: foreign.projectId, url: foreign.url(defaultRoot: root))],
+                at: TimelineDropTarget(trackId: nil, at: RationalTime(5, 1)))
+            try require(
+                again.assets.first?.id == duplicated.assets.first?.id, "library", "the second insert re-imported")
+            try require(
+                document.project.assets.count == 5 && document.version == versionBeforeSecond + 1, "library",
+                "the second insert applied \(document.version - versionBeforeSecond) commands")
+
+            // The Import button path: into the library, never onto the timeline.
+            let buttonPath = try await importer.importFiles([avClip.url])
+            try require(
+                buttonPath.clipIds.isEmpty && buttonPath.assets.count == 1, "library",
+                "the Import button added \(buttonPath.clipIds.count) clips")
+            try require(document.project.assets.count == 5, "library", "the Import button re-imported an asset")
+
+            // Clear the two duplicate clips so the edit step starts on an empty timeline.
+            for clipId in duplicated.clipIds + again.clipIds {
+                let removed = try await document.apply(
+                    .removeClip(.init(clipId: .id(clipId), mode: .overwrite)), label: "Remove library clip")
+                try await document.waitForVersion(removed.version)
+            }
+            try require(
+                document.sequence?.tracks.allSatisfy { $0.clips.isEmpty } == true, "library",
+                "the timeline is not empty after the library step")
+            ok(
+                "library",
+                "\(catalogProjects.count) packages scanned, \(everything.count) items; "
+                    + "Second/\(foreign.asset.displayName) duplicated into Skeleton with one importAsset "
+                    + "(no second copy under Library/), inserted again with none; Import button left the tracks empty")
 
             // 4. Linked clips, a split through TimelineUI's view model, and a transition.
             let sequence = try unwrap(document.sequence, "clips", "no active sequence")
@@ -271,7 +354,8 @@ enum SkeletonCheck {
             try require(
                 describe.structured?["version"]?.intValue == Int(document.version), "project_describe", "stale version")
             let assetCount = describe.structured?["assets"]?.arrayValue?.count ?? 0
-            try require(assetCount == 4, "project_describe", "\(assetCount) assets")
+            // Four imported files plus the one duplicated out of the second project's library.
+            try require(assetCount == 5, "project_describe", "\(assetCount) assets")
             let generationBefore = document.playerItemGeneration
             let op = try JSONValue(
                 encoding: Command.Operation.setClipOpacity(.init(clipId: .id(rightHalf.id), after: .constant(0.5))))
@@ -709,5 +793,19 @@ struct MCPProbe {
         sessionId = reply.headers["mcp-session-id"]
         if sessionId != nil { _ = try await post(["jsonrpc": "2.0", "method": "notifications/initialized"]) }
         return reply
+    }
+}
+
+extension SkeletonCheck {
+    /// Regular files under `root`, so the check can prove a duplicate did not copy the original again.
+    static func fileCount(under root: URL) -> Int {
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey])
+        else { return 0 }
+        var count = 0
+        for case let url as URL in enumerator
+        where (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+            count += 1
+        }
+        return count
     }
 }
