@@ -225,6 +225,15 @@ public protocol ProjectStore: AnyObject, Sendable {
     func close() async throws
 }
 
+/// A store that can copy its whole event stream and projections into a new package. Forking a project is
+/// `saveAs` followed by opening the copy: both packages share the media library (assets are referenced by
+/// content hash), keep the full history, and diverge from there. The copy carries the same project id in
+/// its events, so the composition root must not hold both open at once.
+public protocol ProjectStoreCopying: ProjectStore {
+    /// Writes a consistent copy of this store to a new `.tlproj` package at `packageURL`, which must not exist.
+    func saveAs(to packageURL: URL) async throws
+}
+
 /// Opens and creates project stores. The composition root holds one of these per storage backend;
 /// `ContractsTestSupport` ships an in-memory one.
 public protocol ProjectStoreOpening: Sendable {

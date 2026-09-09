@@ -341,10 +341,31 @@ enum SkeletonCheck {
                 "v\(beforeUndo) -> v\(undone.version) -> v\(redone.version), \(document.history.live.count) live transactions"
             )
 
-            // 11. Close, reopen from disk, same version and state; then shut down.
-            let finalVersion = document.version
-            let finalState = document.project
-            await document.close(using: services)
+            // 11. Fork: the copy carries the whole stream plus one rename; the original is untouched.
+            let forkURL = projectURL.deletingLastPathComponent().appendingPathComponent("Skeleton fork.tlproj")
+            let preForkVersion = document.version
+            let preForkLive = document.history.live.count
+            let fork = try await document.fork(to: forkURL, name: "Skeleton fork", using: services)
+            try require(fork.project.name == "Skeleton fork", "fork", "name is \(fork.project.name)")
+            try require(fork.version > preForkVersion, "fork", "version \(fork.version) <= \(preForkVersion)")
+            try require(fork.history.live.count == preForkLive + 1, "fork", "history not carried over")
+            try require(
+                fork.history.latestLive?.label == "Fork of Skeleton", "fork",
+                "last transaction is \(fork.history.latestLive?.label ?? "nil")")
+            try require(fork.project.assets.count == document.project.assets.count, "fork", "assets differ")
+            await fork.close(using: services)
+            let original = try await ProjectDocument.open(at: projectURL, using: services)
+            try require(original.version == preForkVersion, "fork", "original changed: v\(document.version)")
+            try require(original.project.name == "Skeleton", "fork", "original renamed")
+            ok(
+                "fork",
+                "Skeleton fork.tlproj at v\(fork.version) with \(fork.history.live.count) live transactions; original still v\(preForkVersion)"
+            )
+
+            // 12. Close, reopen from disk, same version and state; then shut down.
+            let finalVersion = original.version
+            let finalState = original.project
+            await original.close(using: services)
             let reopened = try await ProjectDocument.open(at: projectURL, using: services)
             try require(reopened.version == finalVersion, "reopen", "version \(reopened.version) != \(finalVersion)")
             let before = String(decoding: try finalState.canonicalJSON(), as: UTF8.self)
@@ -352,7 +373,7 @@ enum SkeletonCheck {
             try require(
                 before == after, "reopen", "state differs after reopen: \(SkeletonCheck.firstDifference(before, after))"
             )
-            try require(reopened.history.live.count == document.history.live.count, "reopen", "history differs")
+            try require(reopened.history.live.count == original.history.live.count, "reopen", "history differs")
             await reopened.close(using: services)
             await services.shutdown()
             let receipts = await (services.receipts as? ReceiptLog)?.receipts.count ?? 0

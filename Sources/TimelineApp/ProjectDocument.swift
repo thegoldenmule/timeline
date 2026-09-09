@@ -109,6 +109,25 @@ final class ProjectDocument {
         return try await attach(store, url: url, using: services)
     }
 
+    /// Forks this project: copies its whole event stream into a new package at `url`, closes this document,
+    /// opens the copy, and records the new name as the fork's first transaction. The original is untouched
+    /// and both packages share the media library. Returns the document over the fork.
+    func fork(to url: URL, name: String, using services: AppServices) async throws -> ProjectDocument {
+        guard let copying = store as? any ProjectStoreCopying else { throw ForkError.unsupported }
+        try await copying.saveAs(to: url)
+        let originalName = project.name
+        await close(using: services)
+        let forked = try await ProjectDocument.open(at: url, using: services)
+        let result = try await forked.apply(.renameProject(.init(name: name)), label: "Fork of \(originalName)")
+        try await forked.waitForVersion(result.version)
+        return forked
+    }
+
+    enum ForkError: Error, CustomStringConvertible {
+        case unsupported
+        var description: String { "This project's store cannot be copied" }
+    }
+
     private static func attach(_ store: any ProjectStore, url: URL, using services: AppServices) async throws
         -> ProjectDocument
     {

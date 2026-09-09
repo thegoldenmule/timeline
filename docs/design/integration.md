@@ -18,6 +18,7 @@ temporary library root and exits 0.
 | `jobRunner` | `BudgetedJobRunner` (`Sources/TimelineApp/Services/`) | FIFO admission against `JobBudget.conservative`: bytes per memory class and `maxConcurrent` per class; cancellation before admission dequeues |
 | `approvals` | `StandardApprovalGate` (`Sources/TimelineApp/Services/`) | random single-use tokens, `status(of:)` implemented, one gate shared by the tools, the MCP host, and the approval stack |
 | `registry` | `AgentKit.EditorTools.standard(context:)` | the 15 real tools; `DemoTools` is gone |
+| Fork | toolbar button | `ProjectDocument.fork(to:name:)`: `ProjectStoreCopying.saveAs` copies the whole stream and projections into a new package, the window switches to the copy, and a `renameProject` transaction labelled "Fork of <name>" is the fork's first divergence; the original is untouched and both share the library |
 | `mcpHost` | `AgentKit.MCPServerHost` | started at launch on 127.0.0.1 with a per-launch bearer token; `claude mcp add` line shown in the window's MCP section and logged; proxy config written |
 | `agentRuntime` | `AgentKit.ClaudeCodeRuntime`, else `ToolLoopRuntime` over `FakeAgentRuntime` | `availability()` is probed at boot; when `claude` is missing or logged out the scripted fallback runs its tool calls through the registry itself (the client-side loop a Messages-API runtime has) |
 | `receipts` | `ReceiptLog` (`Sources/TimelineApp/Services/`) | in memory plus `<root>/Cache/receipts.jsonl`; ProjectStore does not expose the project's `commands` metadata yet |

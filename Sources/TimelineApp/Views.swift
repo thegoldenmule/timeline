@@ -123,6 +123,22 @@ final class AppModel {
         perform { try await self.open(url, create: true) }
     }
 
+    /// Copies the current project's whole stream into a new package and switches the window to it.
+    func presentForkPanel() {
+        guard let services, let document else { return }
+        let panel = NSSavePanel()
+        panel.directoryURL = services.layout.projectsDir
+        panel.nameFieldStringValue = "\(document.project.name) fork.tlproj"
+        panel.message = "Fork this project into a new package"
+        guard panel.runModal() == .OK, var url = panel.url else { return }
+        if url.pathExtension != "tlproj" { url = url.appendingPathExtension("tlproj") }
+        let name = url.deletingPathExtension().lastPathComponent
+        perform {
+            self.document = nil
+            self.document = try await document.fork(to: url, name: name, using: services)
+        }
+    }
+
     /// Runs silence, onset-envelope, and (for video) shot detection on the selected clip's asset.
     func analyzeSelection() {
         guard let document, let tools, let asset = selectedAssets(document).first else { return }
@@ -258,6 +274,8 @@ struct EditorView: View {
         ToolbarItemGroup {
             Button("New", systemImage: "doc.badge.plus") { model.presentNewPanel() }
             Button("Open", systemImage: "folder") { model.presentOpenPanel() }
+            Button("Fork", systemImage: "arrow.triangle.branch") { model.presentForkPanel() }
+                .disabled(model.document == nil)
             Button("Import", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
         }
         ToolbarItemGroup {

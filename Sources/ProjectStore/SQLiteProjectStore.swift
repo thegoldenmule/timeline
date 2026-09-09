@@ -486,3 +486,5 @@ struct MillisecondClock: Clock {
         return Date(timeIntervalSince1970: ms / 1000)
     }
 }
+
+extension SQLiteProjectStore: ProjectStoreCopying {}
