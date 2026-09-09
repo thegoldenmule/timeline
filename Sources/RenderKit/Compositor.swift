@@ -41,8 +41,24 @@ public class TimelineCompositor: NSObject, AVVideoCompositing, @unchecked Sendab
 
     let caches = OSAllocatedUnfairLock(initialState: Caches())
 
+    /// Weak references to every compositor AVFoundation has created, so tests can prove nothing is left in
+    /// flight after a scrub and that instances go away with their player items.
+    private static let registry = OSAllocatedUnfairLock(initialState: [WeakCompositor]())
+
     public override required init() {
         super.init()
+        TimelineCompositor.registry.withLock { list in
+            list.removeAll { $0.value == nil }
+            list.append(WeakCompositor(value: self))
+        }
+    }
+
+    /// The compositors still alive.
+    public static var liveInstances: [TimelineCompositor] {
+        registry.withLock { list in
+            list.removeAll { $0.value == nil }
+            return list.compactMap(\.value)
+        }
     }
 
     // MARK: AVVideoCompositing
@@ -269,16 +285,10 @@ public class TimelineCompositor: NSObject, AVVideoCompositing, @unchecked Sendab
         return upright.transformed(by: CGAffineTransform(translationX: -origin.x, y: -origin.y))
     }
 
-    /// Premultiplied opacity: every channel scaled, so source-over gives `a * src + (1 - a) * dst`.
+    /// Opacity: `CIColorMatrix` works on unpremultiplied colour (Core Image premultiplies its output again),
+    /// so only alpha is scaled and source-over gives `a * src + (1 - a) * dst`.
     static func faded(_ image: CIImage, alpha: Double) -> CIImage {
-        image.applyingFilter(
-            "CIColorMatrix",
-            parameters: [
-                "inputRVector": CIVector(x: alpha, y: 0, z: 0, w: 0),
-                "inputGVector": CIVector(x: 0, y: alpha, z: 0, w: 0),
-                "inputBVector": CIVector(x: 0, y: 0, z: alpha, w: 0),
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha),
-            ])
+        image.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)])
     }
 
     static func apply(_ effect: Effect, to image: CIImage, seconds: Double) -> CIImage {
@@ -391,6 +401,10 @@ public class TimelineCompositor: NSObject, AVVideoCompositing, @unchecked Sendab
         caches.withLock { $0.stills[url] = image }
         return image
     }
+}
+
+private struct WeakCompositor {
+    weak var value: TimelineCompositor?
 }
 
 /// The 10-bit HLG variant, used when every video source is HDR: sources arrive as 10-bit YUV tagged

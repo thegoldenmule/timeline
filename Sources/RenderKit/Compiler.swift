@@ -115,14 +115,15 @@ struct SequenceCompiler: Sendable {
             into: fillerComp, id: SequenceCompiler.fillerTrackID, clip: nil,
             range: TimeRange(start: .zero, end: duration))
 
-        // Transition handles per clip: left clips extend their tail, right clips their head.
-        var tailExtension: [ClipID: RationalTime] = [:]
+        // Transition handles per clip: left clips extend their tail, right clips their head. A video
+        // transition also crossfades the linked audio clips when they are adjacent on their track, so the
+        // picture and the sound of one take dissolve together.
+        let overlaps = SequenceCompiler.overlaps(in: sequence)
         var headExtension: [ClipID: RationalTime] = [:]
-        for transition in sequence.transitions.values {
-            let handles = transition.handles
-            tailExtension[transition.leftClipId] = handles.left
-            headExtension[transition.rightClipId] = handles.right
-        }
+        var tailExtension: [ClipID: RationalTime] = [:]
+        for (id, o) in overlaps.asRight { headExtension[id] = o.transition.handles.right }
+        for (id, o) in overlaps.asLeft { tailExtension[id] = o.transition.handles.left }
+        var placedRanges: [ClipID: TimeRange] = [:]
 
         var hdrSources: [Bool] = []
         var hasAudio = false
@@ -165,6 +166,7 @@ struct SequenceCompiler: Sendable {
                     }
                     let range = TimeRange(start: clip.start - head, end: end + tail)
                     previousOnSlot[slot] = range.end
+                    placedRanges[clip.id] = range
                     let content: LayerContent
                     if let source, let videoTrack = source.videoTrack {
                         let sourceRange = TimeRange(
@@ -219,6 +221,7 @@ struct SequenceCompiler: Sendable {
                     }
                     let range = TimeRange(start: clip.start - head, end: end + tail)
                     previousOnSlot[slot] = range.end
+                    placedRanges[clip.id] = range
                     // Speed-changed clips get a dedicated track so the pitch algorithm is per clip and an
                     // instructions-only property (FakeRenderer treats `audio` as instruction-only).
                     let compID: CMPersistentTrackID
@@ -249,15 +252,27 @@ struct SequenceCompiler: Sendable {
                             clipId: clip.id, sourceURL: source.url, sourceTrackID: audioTrack.trackID,
                             sourceRange: sourceRange, targetRange: range, speed: clip.speed, isFiller: false),
                         on: compID)
-                    let fadeIn = overlap(
-                        forRightClip: clip, head: head, in: sequence, transitions: sequence.transitions)
-                    let fadeOut = overlap(
-                        forLeftClip: clip, tail: tail, in: sequence, transitions: sequence.transitions)
                     audioPlacements[clip.id] = AudioPlacement(
-                        clipId: clip.id, compositionTrackID: compID, range: CMTimeRange(range), fadeIn: fadeIn,
-                        fadeOut: fadeOut)
+                        clipId: clip.id, compositionTrackID: compID, range: CMTimeRange(range), fadeIn: nil,
+                        fadeOut: nil)
                 }
             }
+        }
+
+        // Audio crossfades span the realized overlap: the right clip's (clamped) head to the left clip's tail.
+        for (id, placement) in audioPlacements {
+            var p = placement
+            if let o = overlaps.asRight[id], let left = placedRanges[o.left.id], let right = placedRanges[id],
+                left.end > right.start
+            {
+                p.fadeIn = CMTimeRange(TimeRange(start: right.start, end: left.end))
+            }
+            if let o = overlaps.asLeft[id], let left = placedRanges[id], let right = placedRanges[o.right.id],
+                left.end > right.start
+            {
+                p.fadeOut = CMTimeRange(TimeRange(start: right.start, end: left.end))
+            }
+            audioPlacements[id] = p
         }
 
         let hdr = !hdrSources.isEmpty && hdrSources.allSatisfy { $0 }
@@ -270,30 +285,35 @@ struct SequenceCompiler: Sendable {
             sources: loaded, filler: filler)
     }
 
-    /// The overlap a transition puts on the right clip's head (its fade-in), in timeline time.
-    private func overlap(
-        forRightClip clip: Clip, head: RationalTime, in sequence: Sequence,
-        transitions: [TransitionID: Transition]
-    ) -> CMTimeRange? {
-        guard let t = transitions.values.first(where: { $0.rightClipId == clip.id }),
-            let left = sequence.clip(t.leftClipId)
-        else { return nil }
-        let start = clip.start - head
-        let end = sequence.end(of: left) + t.handles.left
-        guard end > start else { return nil }
-        return CMTimeRange(TimeRange(start: start, end: end))
+    struct Overlap {
+        var transition: Transition
+        var left: Clip
+        var right: Clip
     }
 
-    private func overlap(
-        forLeftClip clip: Clip, tail: RationalTime, in sequence: Sequence, transitions: [TransitionID: Transition]
-    ) -> CMTimeRange? {
-        guard let t = transitions.values.first(where: { $0.leftClipId == clip.id }),
-            let right = sequence.clip(t.rightClipId)
-        else { return nil }
-        let start = right.start - t.handles.right
-        let end = sequence.end(of: clip) + tail
-        guard end > start else { return nil }
-        return CMTimeRange(TimeRange(start: start, end: end))
+    /// Every clip pair a transition overlaps, keyed by the left and by the right clip: the transition's own
+    /// clips, plus the audio clips linked to them that are adjacent on their track.
+    static func overlaps(in sequence: Sequence) -> (asLeft: [ClipID: Overlap], asRight: [ClipID: Overlap]) {
+        var asLeft: [ClipID: Overlap] = [:]
+        var asRight: [ClipID: Overlap] = [:]
+        for t in sequence.transitions.values.sorted(by: { $0.id < $1.id }) {
+            guard let left = sequence.clip(t.leftClipId), let right = sequence.clip(t.rightClipId) else { continue }
+            asLeft[left.id] = Overlap(transition: t, left: left, right: right)
+            asRight[right.id] = Overlap(transition: t, left: left, right: right)
+            guard let lg = left.linkGroupId, let rg = right.linkGroupId else { continue }
+            for track in sequence.tracks where track.kind == .audio && track.id != t.trackId {
+                let lefts = track.clips.values.filter { $0.linkGroupId == lg }
+                let rights = track.clips.values.filter { $0.linkGroupId == rg }
+                for l in lefts {
+                    for r in rights where sequence.end(of: l) == r.start && asLeft[l.id] == nil && asRight[r.id] == nil
+                    {
+                        asLeft[l.id] = Overlap(transition: t, left: l, right: r)
+                        asRight[r.id] = Overlap(transition: t, left: l, right: r)
+                    }
+                }
+            }
+        }
+        return (asLeft, asRight)
     }
 
     // MARK: Instructions

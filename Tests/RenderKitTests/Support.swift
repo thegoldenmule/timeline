@@ -8,7 +8,9 @@ import RenderKit
 import Testing
 import TimelineCore
 
-/// 8-bit sRGB BGRA pixels of an image or pixel buffer, with region means in top-left coordinates.
+/// 8-bit BGRA code values of an image or pixel buffer, with region means in top-left coordinates. An 8-bit
+/// image is read in its own colour space (AVFoundation tags composed frames BT.709), so values are the
+/// compositor's code values, not a display conversion; HDR images are converted to sRGB.
 struct Pixels {
     let width: Int
     let height: Int
@@ -20,11 +22,12 @@ struct Pixels {
         self.width = width
         self.height = height
         var buffer = [UInt8](repeating: 0, count: width * height * 4)
+        let own = image.colorSpace.flatMap { $0.model == .rgb && image.bitsPerComponent == 8 ? $0 : nil }
         buffer.withUnsafeMutableBytes { p in
             guard
                 let ctx = CGContext(
                     data: p.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                    space: own ?? CGColorSpace(name: CGColorSpace.sRGB)!,
                     bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
             else { return }
             ctx.interpolationQuality = .none
@@ -183,24 +186,55 @@ final class FixtureLibrary: Sendable {
         try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
         var clips: [String: TestMedia.Clip] = [:]
         // three-clips: IMG_1575.MOV (720 frames, A/V), Screen Recording.mov (480 frames, video only),
-        // band-mix-v3.wav (120 s). linked-transition: IMG_1581.MOV (600 frames, A/V).
-        clips["IMG_1575.MOV"] = try await TestMedia.videoWithAudio(
-            .tone(frequency: 440), background: .red, size: CGSize(width: 640, height: 360),
-            frameDuration: frameDuration, duration: 720 * frameDuration.seconds, in: media, name: "IMG_1575")
-        try FileManager.default.moveItem(
-            at: media.appendingPathComponent("IMG_1575.mov"), to: media.appendingPathComponent("IMG_1575.MOV"))
+        // band-mix-v3.wav (120 s). linked-transition: IMG_1581.MOV (600 frames, A/V). The A/V files are muxed
+        // here from a video-only clip and a tone: `TestMedia.videoWithAudio` stalls past a few seconds.
+        let scratch = directory.url.appendingPathComponent("scratch", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        clips["IMG_1575.MOV"] = try await muxed(
+            video: try await TestMedia.barcodeCounter(
+                background: .red, size: CGSize(width: 640, height: 360), frameDuration: frameDuration,
+                duration: 720 * frameDuration.seconds, in: scratch, name: "cam-v"),
+            audio: try await TestMedia.tone(
+                frequency: 440, duration: 720 * frameDuration.seconds, codec: .aac, in: scratch, name: "cam-a"),
+            to: media.appendingPathComponent("IMG_1575.MOV"))
         clips["Screen Recording.mov"] = try await TestMedia.barcodeCounter(
             background: .green, size: CGSize(width: 640, height: 360), frameDuration: frameDuration,
             duration: 480 * frameDuration.seconds, in: media, name: "Screen Recording")
         clips["band-mix-v3.wav"] = try await TestMedia.tone(
             frequency: 220, duration: 120, channels: 2, codec: .pcm16, in: media, name: "band-mix-v3")
-        clips["IMG_1581.MOV"] = try await TestMedia.videoWithAudio(
-            .tone(frequency: 880), background: .blue, size: CGSize(width: 640, height: 360),
-            frameDuration: frameDuration, duration: 600 * frameDuration.seconds, in: media, name: "IMG_1581")
-        try FileManager.default.moveItem(
-            at: media.appendingPathComponent("IMG_1581.mov"), to: media.appendingPathComponent("IMG_1581.MOV"))
+        clips["IMG_1581.MOV"] = try await muxed(
+            video: try await TestMedia.barcodeCounter(
+                background: .blue, size: CGSize(width: 640, height: 360), frameDuration: frameDuration,
+                duration: 600 * frameDuration.seconds, in: scratch, name: "cam2-v"),
+            audio: try await TestMedia.tone(
+                frequency: 880, duration: 600 * frameDuration.seconds, codec: .aac, in: scratch, name: "cam2-a"),
+            to: media.appendingPathComponent("IMG_1581.MOV"))
         return FixtureLibrary(directory: directory, layout: layout, clips: clips)
     }
+}
+
+/// Muxes a video-only clip and an audio clip into one QuickTime file with a passthrough export.
+func muxed(video: TestMedia.Clip, audio: TestMedia.Clip, to url: URL) async throws -> TestMedia.Clip {
+    let composition = AVMutableComposition()
+    let v = AVURLAsset(url: video.url)
+    let a = AVURLAsset(url: audio.url)
+    let videoTrack = try #require(try await v.loadTracks(withMediaType: .video).first)
+    let audioTrack = try #require(try await a.loadTracks(withMediaType: .audio).first)
+    let duration = try await v.load(.duration)
+    let cv = try #require(composition.addMutableTrack(withMediaType: .video, preferredTrackID: 1))
+    let ca = try #require(composition.addMutableTrack(withMediaType: .audio, preferredTrackID: 2))
+    try cv.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: videoTrack, at: .zero)
+    try ca.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: audioTrack, at: .zero)
+    let session = try #require(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough))
+    try? FileManager.default.removeItem(at: url)
+    try await session.export(to: url, as: .mov)
+    var description = video.description
+    description.hasAudio = true
+    description.sampleRate = audio.description.sampleRate
+    description.channels = audio.description.channels
+    description.audioCodec = audio.description.audioCodec
+    description.toneFrequency = audio.description.toneFrequency
+    return TestMedia.Clip(url: url, description: description)
 }
 
 /// A scratch library root for tests that write their own media.

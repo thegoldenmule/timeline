@@ -8,6 +8,7 @@ import TimelineCore
 enum RenderFingerprint {
     private struct Segment: Encodable {
         var clipId: ClipID
+        var linkGroupId: LinkGroupID?
         var assetId: AssetID?
         var source: String?
         var start: RationalTime
@@ -56,7 +57,7 @@ enum RenderFingerprint {
                     segments: track.clips.values.sorted { ($0.start, $0.id) < ($1.start, $1.id) }.map { clip in
                         let asset = clip.assetId.flatMap { assets[$0] }
                         return Segment(
-                            clipId: clip.id, assetId: clip.assetId,
+                            clipId: clip.id, linkGroupId: clip.linkGroupId, assetId: clip.assetId,
                             source: asset.map { "\($0.libraryPath)|\($0.offline || !present($0))|\($0.kind.rawValue)" },
                             start: clip.start, sourceIn: clip.sourceIn, sourceOut: clip.sourceOut, speed: clip.speed)
                     })
