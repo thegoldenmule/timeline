@@ -166,6 +166,95 @@ struct LayoutTests {
         #expect(l.control(atPoint: CGPoint(x: l.headerWidth - 1, y: row.midY), in: row) == nil)
     }
 
+    /// A fixture with two audio tracks, so solo has a peer to silence.
+    private func twoAudioTracks() async throws -> (UIFixture, TrackID, TrackID) {
+        let f = try await UIFixture.make("three-clips")
+        await f.viewModel.apply(.addTrack(.init(sequenceId: .id(f.sequence.id), kind: .audio)))
+        let audio = f.sequence.tracks.filter { $0.kind == .audio }
+        return (f, audio[0].id, audio[1].id)
+    }
+
+    /// The plate quads drawn for one track's buttons, keyed by control.
+    private func plates(_ scene: TimelineScene, _ layout: TimelineLayout, _ track: TrackID)
+        -> [TrackControl: [SceneQuad]]
+    {
+        guard let row = layout.row(for: track) else { return [:] }
+        var out: [TrackControl: [SceneQuad]] = [:]
+        for (control, rect) in layout.controls(in: row) {
+            out[control] = scene.overlayQuads.filter { rect.contains($0.rect) }
+        }
+        return out
+    }
+
+    @Test func aMutedTrackGetsAFilledMuteBadgeAndADimmedLane() async throws {
+        let (f, a1, _) = try await twoAudioTracks()
+        await f.viewModel.setTrackMuted(a1, true)
+        let layout = f.viewModel.layout
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        let mute = try #require(plates(scene, layout, a1)[.mute])
+        #expect(mute.count == 1, "a fill, not a ring")
+        #expect(mute[0].color == TimelineTheme.mutedBadge)
+        #expect(scene.labels.contains { $0.text == "M" })
+        let row = try #require(layout.row(for: a1))
+        let lane = try #require(scene.quads.first { $0.rect.minX == layout.trackAreaMinX && $0.rect.minY == row.y })
+        #expect(lane.color == TimelineTheme.row(.audio).scaled(TimelineTheme.silentRowDim))
+    }
+
+    @Test func aTrackSilencedByAnotherTracksSoloGetsARingRatherThanAFill() async throws {
+        let (f, a1, a2) = try await twoAudioTracks()
+        await f.viewModel.apply(.setTrackSolo(.init(trackId: .id(a2), solo: true)))
+        let layout = f.viewModel.layout
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        // A1 is silent but not muted: a red ring, drawn as the badge colour with the off plate inside it.
+        let silenced = try #require(plates(scene, layout, a1)[.mute])
+        #expect(silenced.count == 2)
+        #expect(silenced[0].color == TimelineTheme.mutedBadge)
+        #expect(silenced[1].color == TimelineTheme.controlOff)
+        #expect(
+            silenced[1].rect
+                == silenced[0].rect.insetBy(dx: TimelineTheme.controlRingWidth, dy: TimelineTheme.controlRingWidth))
+        // A2's own mute button is untouched; its solo button is filled.
+        let soloed = plates(scene, layout, a2)
+        #expect(soloed[.mute]?.count == 1 && soloed[.mute]?[0].color == TimelineTheme.controlOff)
+        #expect(soloed[.solo]?[0].color == TimelineTheme.soloBadge)
+    }
+
+    @Test func theSoloedLaneBrightensAndGetsAnAccentBarWhileItsPeerDims() async throws {
+        let (f, a1, a2) = try await twoAudioTracks()
+        await f.viewModel.apply(.setTrackSolo(.init(trackId: .id(a2), solo: true)))
+        let layout = f.viewModel.layout
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        func lane(_ id: TrackID) throws -> SceneQuad {
+            let row = try #require(layout.row(for: id))
+            return try #require(scene.quads.first { $0.rect.minX == layout.trackAreaMinX && $0.rect.minY == row.y })
+        }
+        let base = TimelineTheme.row(.audio)
+        #expect(try lane(a2).color == base.scaled(TimelineTheme.soloRowBoost))
+        #expect(try lane(a1).color == base.scaled(TimelineTheme.silentRowDim))
+        let soloRow = try #require(layout.row(for: a2))
+        let accent = try #require(
+            scene.overlayQuads.first {
+                $0.color == TimelineTheme.soloBadge && $0.rect.minX == layout.trackAreaMinX
+                    && $0.rect.minY == soloRow.y
+            })
+        #expect(accent.rect.width == TimelineTheme.soloAccentWidth && accent.rect.height == soloRow.height)
+        // The video track is a different kind and keeps its own colour.
+        let video = try #require(f.sequence.tracks.first { $0.kind == .video })
+        #expect(try lane(video.id).color == TimelineTheme.row(.video))
+    }
+
+    @Test func theRemoveButtonGoesInertOnALockedTrack() async throws {
+        let (f, a1, _) = try await twoAudioTracks()
+        await f.viewModel.setTrackLocked(a1, true)
+        let layout = f.viewModel.layout
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        let buttons = plates(scene, layout, a1)
+        #expect(buttons[.lock]?[0].color == TimelineTheme.lockedBadge)
+        #expect(buttons[.remove]?[0].color == TimelineTheme.controlOff.with(alpha: 0.4))
+        // A track that is only locked is still heard: the mute button stays off.
+        #expect(buttons[.mute]?[0].color == TimelineTheme.controlOff)
+    }
+
     @Test func sceneStatsCountLabelsAndMediaRequestsOnlyForWideClips() async throws {
         let f = try await UIFixture.make("three-clips", media: true, zoomIndex: 0)
         let scene = TimelineSceneBuilder.build(from: f.viewModel)

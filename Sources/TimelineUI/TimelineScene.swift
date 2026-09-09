@@ -68,12 +68,29 @@ public enum TimelineTheme {
     public static let dimText = SceneColor(0.75, 0.75, 0.8)
     public static let mutedBadge = SceneColor(0.85, 0.25, 0.25)
     public static let lockedBadge = SceneColor(0.95, 0.60, 0.15)
+    /// Blue rather than the conventional yellow: `selection` is already yellow, and red/blue is the pairing
+    /// that survives red-green colour blindness.
+    public static let soloBadge = SceneColor(0.35, 0.65, 0.95)
+    /// The plate of a header button in its off state.
+    public static let controlOff = SceneColor(0.24, 0.24, 0.27)
     public static let marker = SceneColor(0.4, 0.7, 1.0)
     /// The row a file drag would land on, and the line at its drop time.
     public static let dropHighlight = SceneColor(0.40, 0.90, 1.0, 0.18)
     public static let dropIndicator = SceneColor(0.40, 0.90, 1.0)
 
     public static let clipCornerRadius: CGFloat = 4
+    public static let controlCornerRadius: CGFloat = 3
+    /// Thickness of the ring a button draws instead of a fill when the state was not set on this track.
+    public static let controlRingWidth: CGFloat = 1.5
+    /// Where a button's capital sits inside its plate; the scene builder has no font metrics, so these are
+    /// tuned for a 10pt capital in an 18pt plate.
+    public static let controlGlyphInset = CGPoint(x: 5, y: 3)
+    public static let controlFontSize: CGFloat = 10
+    /// How much a soloed row brightens and a silenced row dims, relative to its kind's colour.
+    public static let soloRowBoost: Float = 1.12
+    public static let silentRowDim: Float = 0.75
+    /// Width of the accent bar down the left edge of a soloed track's lane.
+    public static let soloAccentWidth: CGFloat = 2
     public static let labelBandHeight: CGFloat = 16
     public static let labelFontSize: CGFloat = 11
     public static let rulerFontSize: CGFloat = 10
@@ -298,14 +315,26 @@ public enum TimelineSceneBuilder {
 
         for row in layout.rows where row.maxY > layout.rulerHeight && row.y < height {
             guard let track = seq.track(row.trackId) else { continue }
+            // One rule, asked once: the lane, the clips, and the header all read the same answer.
+            let silence = seq.silence(of: track)
             var rowColor = TimelineTheme.row(track.kind)
+            if track.solo { rowColor = rowColor.scaled(TimelineTheme.soloRowBoost) }
+            if silence != nil { rowColor = rowColor.scaled(TimelineTheme.silentRowDim) }
             if track.locked { rowColor = rowColor.scaled(0.8) }
             scene.quads.append(
                 SceneQuad(
                     rect: CGRect(x: layout.trackAreaMinX, y: row.y, width: layout.trackAreaWidth, height: row.height),
                     color: rowColor))
-            addTrackHeader(&scene, track: track, row: row, layout: layout)
-            addClips(&scene, track: track, row: row, seq: seq, input: input, clip: trackAreaRect)
+            if track.solo {
+                // Over the clips, not under them, so the soloed lane is findable however full it is.
+                scene.overlayQuads.append(
+                    SceneQuad(
+                        rect: CGRect(
+                            x: layout.trackAreaMinX, y: row.y, width: TimelineTheme.soloAccentWidth,
+                            height: row.height), color: TimelineTheme.soloBadge))
+            }
+            addTrackHeader(&scene, track: track, row: row, layout: layout, silence: silence)
+            addClips(&scene, track: track, row: row, seq: seq, input: input, clip: trackAreaRect, silence: silence)
         }
         addTransitions(&scene, seq: seq, layout: layout, clip: trackAreaRect)
         addMarkers(&scene, seq: seq, layout: layout)
@@ -334,42 +363,81 @@ public enum TimelineSceneBuilder {
     // MARK: Pieces
 
     private static func addTrackHeader(
-        _ scene: inout TimelineScene, track: Track, row: TrackRow, layout: TimelineLayout
+        _ scene: inout TimelineScene, track: Track, row: TrackRow, layout: TimelineLayout, silence: TrackSilence?
     ) {
         scene.quads.append(
             SceneQuad(
                 rect: CGRect(x: 0, y: row.y, width: layout.headerWidth, height: row.height),
                 color: TimelineTheme.header.scaled(track.locked ? 0.85 : 1.05)))
+        let name = layout.nameRect(in: row)
         scene.labels.append(
             SceneLabel(
-                text: track.name, origin: CGPoint(x: 8, y: row.y + 6), fontSize: 11, color: TimelineTheme.text,
-                maxWidth: layout.headerWidth - 52))
-        var badgeX = layout.headerWidth - 20
-        if track.locked {
-            scene.overlayQuads.append(
-                SceneQuad(
-                    rect: CGRect(x: badgeX, y: row.y + 6, width: 14, height: 14), color: TimelineTheme.lockedBadge,
-                    cornerRadius: 3))
-            scene.labels.append(
-                SceneLabel(
-                    text: "L", origin: CGPoint(x: badgeX + 3, y: row.y + 6), fontSize: 10, color: SceneColor(0, 0, 0),
-                    maxWidth: 14))
-            badgeX -= 18
-        }
-        if track.muted {
-            scene.overlayQuads.append(
-                SceneQuad(
-                    rect: CGRect(x: badgeX, y: row.y + 6, width: 14, height: 14), color: TimelineTheme.mutedBadge,
-                    cornerRadius: 3))
-            scene.labels.append(
-                SceneLabel(
-                    text: "M", origin: CGPoint(x: badgeX + 2, y: row.y + 6), fontSize: 10, color: SceneColor(1, 1, 1),
-                    maxWidth: 14))
+                text: track.name, origin: name.origin, fontSize: 11,
+                color: silence == nil ? TimelineTheme.text : TimelineTheme.dimText, maxWidth: name.width))
+        for (control, rect) in layout.controls(in: row) {
+            addTrackControl(&scene, control, rect: rect, track: track, silence: silence)
         }
     }
 
+    /// One header button: a rounded plate and a centred capital. A *filled* plate is a state this track was
+    /// put in; a *ring* is a state something else caused. That is how "you muted this" and "another track is
+    /// soloed" stay tellable apart while both meaning silence.
+    private static func addTrackControl(
+        _ scene: inout TimelineScene, _ control: TrackControl, rect: CGRect, track: Track, silence: TrackSilence?
+    ) {
+        var fill = TimelineTheme.controlOff
+        var glyph = TimelineTheme.dimText
+        var ring: SceneColor?
+        switch control {
+        case .mute:
+            if track.muted {
+                fill = TimelineTheme.mutedBadge
+                glyph = TimelineTheme.text
+            } else if silence == .solo {
+                ring = TimelineTheme.mutedBadge
+                glyph = TimelineTheme.mutedBadge
+            }
+        case .solo:
+            if track.solo {
+                fill = TimelineTheme.soloBadge
+                glyph = SceneColor(0, 0, 0)
+            }
+        case .lock:
+            if track.locked {
+                fill = TimelineTheme.lockedBadge
+                glyph = SceneColor(0, 0, 0)
+            }
+        case .remove:
+            // `decide` rejects removing a locked track, so the button shows itself inert instead of sending
+            // a command that would only come back as an error.
+            if track.locked {
+                fill = fill.with(alpha: 0.4)
+                glyph = glyph.with(alpha: 0.4)
+            }
+        }
+        if let ring {
+            scene.overlayQuads.append(
+                SceneQuad(rect: rect, color: ring, cornerRadius: TimelineTheme.controlCornerRadius))
+            let inset = TimelineTheme.controlRingWidth
+            scene.overlayQuads.append(
+                SceneQuad(
+                    rect: rect.insetBy(dx: inset, dy: inset), color: fill,
+                    cornerRadius: TimelineTheme.controlCornerRadius - 1))
+        } else {
+            scene.overlayQuads.append(
+                SceneQuad(rect: rect, color: fill, cornerRadius: TimelineTheme.controlCornerRadius))
+        }
+        scene.labels.append(
+            SceneLabel(
+                text: control.glyph,
+                origin: CGPoint(
+                    x: rect.minX + TimelineTheme.controlGlyphInset.x, y: rect.minY + TimelineTheme.controlGlyphInset.y),
+                fontSize: TimelineTheme.controlFontSize, color: glyph, maxWidth: rect.width))
+    }
+
     private static func addClips(
-        _ scene: inout TimelineScene, track: Track, row: TrackRow, seq: Sequence, input: Input, clip area: CGRect
+        _ scene: inout TimelineScene, track: Track, row: TrackRow, seq: Sequence, input: Input, clip area: CGRect,
+        silence: TrackSilence?
     ) {
         let layout = input.layout
         let visibleStart = layout.visibleStartSeconds
@@ -396,7 +464,7 @@ public enum TimelineSceneBuilder {
             if input.pendingClipIds.contains(clip.id) {
                 color = input.preview?.isValid == false ? TimelineTheme.clipInvalid : color.scaled(1.15)
             }
-            if track.muted { color = color.scaled(0.7) }
+            if silence != nil { color = color.scaled(0.7) }
             scene.quads.append(SceneQuad(rect: rect, color: color, cornerRadius: TimelineTheme.clipCornerRadius))
 
             if let group = clip.linkGroupId {

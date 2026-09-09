@@ -192,6 +192,40 @@ struct RenderTests {
         for wave in after.waveforms { #expect(wave.clipRect.minX >= vm.layout.trackAreaMinX) }
     }
 
+    @Test func theHeaderButtonsRasterizeInTheirStateColours() async throws {
+        let f = try await UIFixture.make("three-clips")
+        await f.viewModel.apply(.addTrack(.init(sequenceId: .id(f.sequence.id), kind: .audio)))
+        let audio = f.sequence.tracks.filter { $0.kind == .audio }
+        await f.viewModel.setTrackMuted(audio[0].id, true)
+        await f.viewModel.apply(.setTrackSolo(.init(trackId: .id(audio[1].id), solo: true)))
+        // The playhead is an overlay at the track area's left edge; move it off the solo accent bar.
+        f.viewModel.setPlayhead(RationalTime(seconds: 5))
+        let layout = f.viewModel.layout
+        let renderer = try TimelineRenderer()
+        let scene = TimelineSceneBuilder.build(from: f.viewModel)
+        let frame = try renderer.render(scene: scene)
+
+        /// A point inside a button's plate but clear of its capital.
+        func plate(_ track: TrackID, _ control: TrackControl) throws -> (x: Int, y: Int) {
+            let row = try #require(layout.row(for: track))
+            let rect = try #require(layout.controls(in: row).first { $0.control == control }?.rect)
+            return (Int(rect.maxX - 4), Int(rect.midY))
+        }
+        // A1: muted, so a solid red mute plate.
+        let muted = try plate(audio[0].id, .mute)
+        #expect(frame.pixel(x: muted.x, y: muted.y).matches(TimelineTheme.mutedBadge, tolerance: 0.03))
+        // A2: soloed, so a solid blue solo plate and an off mute plate beside it.
+        let solo = try plate(audio[1].id, .solo)
+        #expect(frame.pixel(x: solo.x, y: solo.y).matches(TimelineTheme.soloBadge, tolerance: 0.03))
+        let off = try plate(audio[1].id, .mute)
+        #expect(frame.pixel(x: off.x, y: off.y).matches(TimelineTheme.controlOff, tolerance: 0.03))
+        // The soloed lane carries its accent bar at the track area's left edge.
+        let soloRow = try #require(layout.row(for: audio[1].id))
+        #expect(
+            frame.pixel(x: Int(layout.trackAreaMinX), y: Int(soloRow.midY))
+                .matches(TimelineTheme.soloBadge, tolerance: 0.03))
+    }
+
     private func width(of clip: Clip, in f: UIFixture) -> CGFloat {
         f.viewModel.layout.width(for: clip.duration(frameDuration: f.sequence.frameDuration))
     }
