@@ -30,11 +30,13 @@ public final class YouTubePublisher: Publisher, Sendable {
     ///     in tests).
     ///   - quota: the per-library-root meter (D11).
     ///   - audited: the client configuration's flag (D6); false keeps `publicUploadsAllowed` false.
-    ///   - sleep: replaced in tests so backoff and the processing poll take no wall time.
+    ///   - sleep: replaced in tests so backoff and the processing poll take no wall time; nil is `Task.sleep`,
+    ///     formed in the body rather than as a default argument (a default-argument async closure trips the
+    ///     task allocator once it suspends; docs/design/contracts-notes.md).
     public init(
         accounts: any AccountProvider, session: URLSession, quota: QuotaMeter, audited: Bool = false,
         options: UploadOptions = UploadOptions(), clock: any Clock = SystemClock(),
-        sleep: @escaping Sleeper = { try await Task.sleep(for: $0) }
+        sleep: Sleeper? = nil
     ) {
         self.accounts = accounts
         self.api = YouTubeAPI(session: session, requestTimeout: options.requestTimeout)
@@ -42,7 +44,7 @@ public final class YouTubePublisher: Publisher, Sendable {
         self.audited = audited
         self.options = options
         self.clock = clock
-        self.sleep = sleep
+        self.sleep = sleep ?? { try await Task.sleep(for: $0) }
         self.measuredRate = Mutex(Self.defaultUploadRate)
     }
 

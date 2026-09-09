@@ -73,12 +73,12 @@ public struct ResumableUpload: Sendable {
 
     public init(
         session: URLSession, options: UploadOptions = UploadOptions(), clock: any Clock = SystemClock(),
-        sleep: @escaping Sleeper = { try await Task.sleep(for: $0) }
+        sleep: Sleeper? = nil
     ) {
         self.session = session
         self.options = options
         self.clock = clock
-        self.sleep = sleep
+        self.sleep = sleep ?? { try await Task.sleep(for: $0) }
     }
 
     /// Uploads `fileURL` into `upload`. `resuming` true starts with a status query (the local count is
