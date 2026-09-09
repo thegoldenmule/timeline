@@ -63,9 +63,13 @@ final class AppModel {
         await install(document)
     }
 
-    /// Makes `document` the window's document and routes the timeline's file drops to the importer.
+    /// Makes `document` the window's document and routes the timeline's two drops to the importer:
+    /// files from Finder, and rows dragged out of the library panel.
     private func install(_ document: ProjectDocument) async {
         document.viewModel.onDropMedia = { [weak self] urls, target in self?.importFiles(urls, at: target) }
+        document.viewModel.onDropLibraryItems = { [weak self] items, target in
+            self?.insertLibraryItems(items, at: target)
+        }
         self.document = document
         await publish?.attach(document)
     }
@@ -127,6 +131,28 @@ final class AppModel {
         Task { @MainActor in
             do {
                 lastStatusNote = try await body(importer, urls)
+            } catch {
+                lastCommandError = "\(error)"
+            }
+        }
+    }
+
+    /// A library row dropped on the timeline, double-clicked, or inserted from its context menu: the
+    /// asset is duplicated into this project when it belongs to another one, then a clip lands at
+    /// `target` (nil means the playhead).
+    func insertLibraryItems(_ items: [LibraryDragItem], at target: TimelineDropTarget? = nil) {
+        guard let services, let document else { return }
+        let at = target ?? TimelineDropTarget(trackId: nil, at: document.viewModel.playhead)
+        let importer = MediaImporter(services: services, document: document, jobs: jobs)
+        lastStatusNote = nil
+        Task { @MainActor in
+            do {
+                let outcome = try await importer.insert(items, at: at)
+                lastCommandError =
+                    outcome.ignored.isEmpty
+                    ? nil
+                    : "Could not find \(outcome.ignored.count) file\(outcome.ignored.count == 1 ? "" : "s"): "
+                        + outcome.ignored.map(\.lastPathComponent).joined(separator: ", ")
             } catch {
                 lastCommandError = "\(error)"
             }

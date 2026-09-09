@@ -38,6 +38,24 @@ struct MediaImporter {
         return outcome
     }
 
+    /// A drag out of the library panel, or its Insert commands: an asset that belongs to another
+    /// project is duplicated into this one first (one `importAsset`, no second copy of the file), then
+    /// a clip lands at `target`; a nil target appends at the end of the sequence. Items whose file
+    /// cannot be found on this machine are reported in `ignored`.
+    @discardableResult
+    func insert(_ items: [LibraryDragItem], at target: TimelineDropTarget?) async throws -> Outcome {
+        var outcome = Outcome()
+        for item in items {
+            guard let asset = try await duplicate(item) else {
+                outcome.ignored.append(item.url ?? URL(fileURLWithPath: item.displayName))
+                continue
+            }
+            outcome.assets.append(asset)
+        }
+        outcome.clipIds = try await insertClips(for: outcome.assets, at: target)
+        return outcome
+    }
+
     /// Imports the media files among `urls` through the library and records each one's asset.
     private func resolveAssets(_ urls: [URL]) async throws -> Outcome {
         var outcome = Outcome()
@@ -56,6 +74,27 @@ struct MediaImporter {
             outcome.assets.append(try await record(result))
         }
         return outcome
+    }
+
+    /// The project's asset for a library item: the one it already holds with that content hash, else
+    /// the file re-imported through the library (recognized by hash, so nothing is copied twice) and
+    /// recorded with exactly one `importAsset`. Nil when the file is nowhere on this machine.
+    private func duplicate(_ item: LibraryDragItem) async throws -> Asset? {
+        if let existing = document.project.assets.values.first(where: { $0.contentHash == item.contentHash }) {
+            return existing
+        }
+        guard let url = await resolve(item) else { return nil }
+        let handle = await jobs.submit(services.mediaLibrary.importJob(url: url, mode: .copy), to: services.jobRunner)
+        guard let result = try await handle.wait().payload(as: ImportResult.self) else { return nil }
+        return try await record(result)
+    }
+
+    /// The file behind a library item: the library's own answer for that hash first (it re-verifies the
+    /// paths it knows), then where the catalog last saw it.
+    private func resolve(_ item: LibraryDragItem) async -> URL? {
+        if let located = await services.mediaLibrary.locate(contentHash: item.contentHash) { return located }
+        guard let url = item.url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
     }
 
     /// A clip per asset: at `target` back to back (the next starts where the last one ends, on the same
