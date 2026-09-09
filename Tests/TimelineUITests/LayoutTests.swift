@@ -113,7 +113,7 @@ struct LayoutTests {
         #expect(!scene.labels.contains { $0.text == "IMG_1575.MOV" })
         f.viewModel.setZoom(index: 4)
         let wide = TimelineSceneBuilder.build(from: f.viewModel)
-        #expect(wide.stats.filmstrips == 3 && wide.stats.waveforms == 1)
+        #expect(wide.stats.filmstrips >= 3 && wide.stats.waveforms >= 1)
         #expect(wide.labels.contains { $0.text == "IMG_1575.MOV" })
         #expect(wide.labels.contains { $0.text == "V1" } && wide.labels.contains { $0.text == "A1" })
     }

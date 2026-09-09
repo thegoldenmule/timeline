@@ -365,8 +365,12 @@ public final class TimelineRenderer {
         }
     }
 
+    /// Columns span the chunk's whole rect, which runs off the edge of the view when the clip is scrolled
+    /// part-way off; only the ones inside `clipRect` are emitted, so the waveform scrolls under the clip
+    /// rather than being squeezed into what is left of it.
     private func appendWaveform(_ out: inout [SolidVertex], _ w: SceneWaveform, _ peaks: WaveformPeaks) {
         let r = w.rect
+        let bounds = w.clipRect
         let columns = peaks.count
         let stride = max(1, Int((CGFloat(columns) / max(1, r.width * 2)).rounded(.up)))
         let color = SIMD4<Float>(w.color.r, w.color.g, w.color.b, w.color.a)
@@ -381,16 +385,21 @@ public final class TimelineRenderer {
         func v(_ x: Float, _ y: Float) -> SolidVertex {
             SolidVertex(position: SIMD2(x, y), local: .zero, size: SIMD2(1, 1), radius: 0, color: color)
         }
+        let minX = Float(bounds.minX)
+        let maxX = Float(bounds.maxX)
         var i = 0
         while i + stride < columns {
             let a = column(i)
             let b = column(i + stride)
-            let topA = v(a.x, min(a.top, a.bottom - 1))
-            let botA = v(a.x, a.bottom)
-            let topB = v(b.x, min(b.top, b.bottom - 1))
-            let botB = v(b.x, b.bottom)
-            out.append(contentsOf: [topA, topB, botB, topA, botB, botA])
             i += stride
+            guard b.x >= minX, a.x <= maxX else { continue }
+            let ax = min(max(a.x, minX), maxX)
+            let bx = min(max(b.x, minX), maxX)
+            let topA = v(ax, min(a.top, a.bottom - 1))
+            let botA = v(ax, a.bottom)
+            let topB = v(bx, min(b.top, b.bottom - 1))
+            let botB = v(bx, b.bottom)
+            out.append(contentsOf: [topA, topB, botB, topA, botB, botA])
         }
     }
 
@@ -406,6 +415,9 @@ public final class TimelineRenderer {
         out.append(contentsOf: [a, b, c, a, c, d])
     }
 
+    /// Frames sit at fixed points along the chunk's rect, which runs off the edge of the view when the clip
+    /// is scrolled part-way off. Each frame is clipped to `clipRect` — cropped, not scaled — so the strip
+    /// scrolls under the clip instead of restretching to fit the visible remainder.
     private func appendFilmstrip(
         _ out: inout [TexVertex], _ draws: inout [(texture: any MTLTexture, start: Int, count: Int)],
         _ strip: SceneFilmstrip, _ frames: [TimelineMediaCache.FilmstripFrame]
@@ -418,12 +430,29 @@ public final class TimelineRenderer {
             let natural = r.height * aspect
             let width = min(slot, natural)
             guard width >= 1 else { continue }
-            let uvWidth = width / natural
+            let full = CGRect(x: x0, y: r.minY, width: width, height: r.height)
+            guard
+                let (rect, uv) = TimelineRenderer.crop(
+                    full, uv: CGRect(x: 0, y: 0, width: width / natural, height: 1), to: strip.clipRect)
+            else { continue }
             let start = out.count
-            appendTexturedQuad(
-                &out, rect: CGRect(x: x0, y: r.minY, width: width, height: r.height),
-                uv: CGRect(x: 0, y: 0, width: uvWidth, height: 1), tint: SceneColor(1, 1, 1, 1))
+            appendTexturedQuad(&out, rect: rect, uv: uv, tint: SceneColor(1, 1, 1, 1))
             draws.append((frame.texture, start, out.count - start))
         }
+    }
+
+    /// `rect` trimmed to `bounds` with `uv` narrowed by the same fractions, or nil when nothing is left.
+    static func crop(_ rect: CGRect, uv: CGRect, to bounds: CGRect) -> (CGRect, CGRect)? {
+        let clipped = rect.intersection(bounds)
+        guard !clipped.isNull, clipped.width >= 0.5, clipped.height >= 0.5 else { return nil }
+        if clipped == rect { return (rect, uv) }
+        func fraction(_ a: CGFloat, _ origin: CGFloat, _ size: CGFloat) -> CGFloat {
+            size > 0 ? (a - origin) / size : 0
+        }
+        let u0 = uv.minX + uv.width * fraction(clipped.minX, rect.minX, rect.width)
+        let u1 = uv.minX + uv.width * fraction(clipped.maxX, rect.minX, rect.width)
+        let v0 = uv.minY + uv.height * fraction(clipped.minY, rect.minY, rect.height)
+        let v1 = uv.minY + uv.height * fraction(clipped.maxY, rect.minY, rect.height)
+        return (clipped, CGRect(x: u0, y: v0, width: u1 - u0, height: v1 - v0))
     }
 }

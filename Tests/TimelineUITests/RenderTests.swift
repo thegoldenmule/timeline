@@ -120,16 +120,19 @@ struct RenderTests {
         let thumbs = try #require(f.thumbnails)
         let waves = try #require(f.waveforms)
 
-        // First frame: misses start fetches; bodies draw in the plain colour.
+        // First frame: misses start fetches; bodies draw in the plain colour. Each clip asks for media in
+        // aligned chunks, so a clip wider than one chunk contributes several keys.
         let scene = TimelineSceneBuilder.build(from: f.viewModel)
-        #expect(scene.stats.filmstrips == 3 && scene.stats.waveforms == 1)
+        let stripKeys = Set(scene.filmstrips.map(\.key))
+        let waveKeys = Set(scene.waveforms.map(\.key))
+        #expect(scene.stats.filmstrips >= 3 && scene.stats.waveforms >= 1)
         let before = try renderer.render(scene: scene)
-        #expect(cache.pendingCount == 4)
-        #expect(cache.fetchCount == 4)
+        #expect(cache.pendingCount == stripKeys.count + waveKeys.count)
+        #expect(cache.fetchCount == stripKeys.count + waveKeys.count)
         await cache.drain()
-        #expect(thumbs.calls.count == 3)
-        #expect(waves.calls.count == 1)
-        #expect(cache.filmstripCount == 3 && cache.waveformCount == 1)
+        #expect(thumbs.calls.count == stripKeys.count)
+        #expect(waves.calls.count == waveKeys.count)
+        #expect(cache.filmstripCount == stripKeys.count && cache.waveformCount == waveKeys.count)
         let strip = scene.filmstrips[0]
         #expect(thumbs.calls.contains { $0.count == strip.key.count && $0.height == strip.key.height })
 
@@ -148,9 +151,49 @@ struct RenderTests {
         let zoomed = TimelineSceneBuilder.build(from: f.viewModel)
         _ = try renderer.render(scene: zoomed)
         await cache.drain()
-        #expect(thumbs.calls.count > 3)
+        #expect(thumbs.calls.count > stripKeys.count)
         #expect(Set(waves.calls.map(\.samplesPerPixel)).count == 2)
         #expect(zoomed.waveforms[0].key.samplesPerPixel == Int(0.05 * 48000))
+    }
+
+    /// Scrolling must slide a clip's filmstrip and waveform under it, not restretch them into whatever part
+    /// of the clip is still on screen. The chunks that stay in view keep their keys and their widths, and
+    /// their rects move by exactly the distance scrolled.
+    @Test func mediaScrollsWithTheClipInsteadOfRescaling() async throws {
+        let f = try await UIFixture.make("three-clips", media: true, zoomIndex: 4)
+        let vm = f.viewModel
+        let clip = f.clips(.video).first { self.width(of: $0, in: f) > vm.layout.trackAreaWidth } ?? f.clips(.video)[0]
+        vm.scrollSeconds = clip.start.seconds
+        let before = TimelineSceneBuilder.build(from: vm)
+
+        // Scroll by a whole number of points so the shift is exact.
+        let points: CGFloat = 200
+        vm.scrollSeconds += Double(points) * vm.secondsPerPoint
+        let after = TimelineSceneBuilder.build(from: vm)
+
+        let shared = Set(before.filmstrips.map(\.key)).intersection(after.filmstrips.map(\.key))
+        #expect(!shared.isEmpty)
+        for key in shared {
+            let a = try #require(before.filmstrips.first { $0.key == key })
+            let b = try #require(after.filmstrips.first { $0.key == key })
+            #expect(abs(b.rect.width - a.rect.width) < 0.001)
+            #expect(abs((a.rect.minX - b.rect.minX) - points) < 0.001)
+        }
+        let sharedWaves = Set(before.waveforms.map(\.key)).intersection(after.waveforms.map(\.key))
+        #expect(!sharedWaves.isEmpty)
+        for key in sharedWaves {
+            let a = try #require(before.waveforms.first { $0.key == key })
+            let b = try #require(after.waveforms.first { $0.key == key })
+            #expect(abs(b.rect.width - a.rect.width) < 0.001)
+            #expect(abs((a.rect.minX - b.rect.minX) - points) < 0.001)
+        }
+        // Nothing draws over the track headers.
+        for strip in after.filmstrips { #expect(strip.clipRect.minX >= vm.layout.trackAreaMinX) }
+        for wave in after.waveforms { #expect(wave.clipRect.minX >= vm.layout.trackAreaMinX) }
+    }
+
+    private func width(of clip: Clip, in f: UIFixture) -> CGFloat {
+        f.viewModel.layout.width(for: clip.duration(frameDuration: f.sequence.frameDuration))
     }
 
     @Test func cullsClipsOutsideTheVisibleRange() async throws {

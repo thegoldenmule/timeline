@@ -160,7 +160,10 @@ public struct FilmstripKey: Hashable, Sendable {
 }
 
 public struct SceneFilmstrip: Hashable, Sendable {
+    /// Where the chunk's frames lay out. Extends past the visible area when the clip is scrolled off.
     public var rect: CGRect
+    /// The visible part of the clip; the renderer clips `rect` to it rather than squeezing it.
+    public var clipRect: CGRect
     public var key: FilmstripKey
 }
 
@@ -172,7 +175,10 @@ public struct WaveformKey: Hashable, Sendable {
 }
 
 public struct SceneWaveform: Hashable, Sendable {
+    /// Where the chunk's columns lay out. Extends past the visible area when the clip is scrolled off.
     public var rect: CGRect
+    /// The visible part of the clip; the renderer clips `rect` to it rather than squeezing it.
+    public var clipRect: CGRect
     public var key: WaveformKey
     public var color: SceneColor
 }
@@ -376,11 +382,11 @@ public enum TimelineSceneBuilder {
                 scene.stats.clipsCulled += 1
                 continue
             }
-            var rect = layout.rect(startSeconds: start, endSeconds: end, row: row)
+            let fullRect = layout.rect(startSeconds: start, endSeconds: end, row: row)
             // Clamp huge rects to the view so the GPU never rasterises kilometres of quad.
-            let minX = max(rect.minX, area.minX - 4)
-            let maxX = min(rect.maxX, area.maxX + 4)
-            rect = CGRect(x: minX, y: rect.minY, width: max(1, maxX - minX), height: rect.height)
+            let minX = max(fullRect.minX, area.minX - 4)
+            let maxX = min(fullRect.maxX, area.maxX + 4)
+            let rect = CGRect(x: minX, y: fullRect.minY, width: max(1, maxX - minX), height: fullRect.height)
             scene.stats.clipsDrawn += 1
             scene.clipRects[clip.id] = rect
 
@@ -400,36 +406,46 @@ public enum TimelineSceneBuilder {
                         color: TimelineTheme.linkGroupColor(group), cornerRadius: 1))
             }
 
-            if input.showMedia, rect.width >= TimelineTheme.minimumMediaWidth, let asset, let assetId = clip.assetId,
-                input.project.assets[assetId] != nil
+            if input.showMedia, fullRect.width >= TimelineTheme.minimumMediaWidth, let asset,
+                let assetId = clip.assetId, input.project.assets[assetId] != nil
             {
                 let media = MediaReference(asset: asset, layout: input.libraryLayout)
                 if track.kind == .video && asset.hasVideo && row.height >= 40 {
-                    let inset = CGRect(
-                        x: rect.minX + 1, y: rect.minY + TimelineTheme.labelBandHeight, width: rect.width - 2,
-                        height: rect.height - TimelineTheme.labelBandHeight - 6)
-                    let thumbHeight = Int(inset.height)
+                    let band = CGRect(
+                        x: fullRect.minX + 1, y: fullRect.minY + TimelineTheme.labelBandHeight,
+                        width: fullRect.width - 2, height: fullRect.height - TimelineTheme.labelBandHeight - 6)
+                    let thumbHeight = Int(band.height)
                     let thumbWidth = max(1, CGFloat(thumbHeight) * 16 / 9)
-                    let count = min(64, max(1, Int((inset.width / thumbWidth).rounded(.up))))
-                    scene.filmstrips.append(
-                        SceneFilmstrip(
-                            rect: inset,
-                            key: FilmstripKey(
-                                media: media, sourceIn: clip.sourceIn, sourceOut: clip.sourceOut, count: count,
-                                height: thumbHeight)))
-                    scene.stats.filmstrips += 1
+                    addMediaChunks(
+                        clip: clip, startSeconds: start, endSeconds: end, band: band, area: area, layout: layout,
+                        tileWidth: thumbWidth, tilesPerChunk: filmstripTilesPerChunk
+                    ) { chunk, rect, bounds, sourceIn, sourceOut in
+                        scene.filmstrips.append(
+                            SceneFilmstrip(
+                                rect: rect, clipRect: bounds,
+                                key: FilmstripKey(
+                                    media: media, sourceIn: sourceIn, sourceOut: sourceOut, count: chunk.tileCount,
+                                    height: thumbHeight)))
+                        scene.stats.filmstrips += 1
+                    }
                 } else if track.kind == .audio && asset.hasAudio {
-                    let inset = CGRect(
-                        x: rect.minX + 1, y: rect.minY + 4, width: rect.width - 2, height: rect.height - 10)
+                    let band = CGRect(
+                        x: fullRect.minX + 1, y: fullRect.minY + 4, width: fullRect.width - 2,
+                        height: fullRect.height - 10)
                     let sampleRate = asset.sampleRate ?? 48000
                     let spp = max(1, Int(layout.secondsPerPoint * Double(sampleRate)))
-                    scene.waveforms.append(
-                        SceneWaveform(
-                            rect: inset,
-                            key: WaveformKey(
-                                media: media, sourceIn: clip.sourceIn, sourceOut: clip.sourceOut, samplesPerPixel: spp),
-                            color: TimelineTheme.waveform))
-                    scene.stats.waveforms += 1
+                    addMediaChunks(
+                        clip: clip, startSeconds: start, endSeconds: end, band: band, area: area, layout: layout,
+                        tileWidth: waveformChunkWidth, tilesPerChunk: 1
+                    ) { _, rect, bounds, sourceIn, sourceOut in
+                        scene.waveforms.append(
+                            SceneWaveform(
+                                rect: rect, clipRect: bounds,
+                                key: WaveformKey(
+                                    media: media, sourceIn: sourceIn, sourceOut: sourceOut, samplesPerPixel: spp),
+                                color: TimelineTheme.waveform))
+                        scene.stats.waveforms += 1
+                    }
                 }
             }
 
@@ -453,6 +469,78 @@ public enum TimelineSceneBuilder {
                 scene.overlayQuads.append(
                     SceneQuad(rect: CGRect(x: rect.maxX - w, y: rect.minY, width: w, height: rect.height), color: c))
             }
+        }
+    }
+
+    /// One aligned chunk of a clip's media: which tiles it covers and the span of the clip it draws over.
+    private struct MediaChunk {
+        var tileStart: Int
+        var tileCount: Int
+        var startSeconds: Double
+        var endSeconds: Double
+    }
+
+    /// Filmstrip chunk size in thumbnails, and waveform chunk width in points. Large enough that a
+    /// screenful is a handful of requests, small enough that a chunk scrolling into view is cheap.
+    private static let filmstripTilesPerChunk = 8
+    private static let waveformChunkWidth: CGFloat = 512
+
+    /// Splits the visible part of a clip into chunks of `tilesPerChunk` tiles, each `tileWidth` points
+    /// wide. Tiles are aligned to the clip's start, so panning brings one new chunk in at the leading edge
+    /// and leaves the rest keyed — and drawn — where they were, instead of restretching a single request
+    /// spanning the whole clip into whatever part of it happens to be on screen.
+    private static func mediaChunks(
+        startSeconds: Double, endSeconds: Double, layout: TimelineLayout, tileWidth: CGFloat, tilesPerChunk: Int
+    ) -> [MediaChunk] {
+        let tileSeconds = Double(tileWidth) * layout.secondsPerPoint
+        guard tileSeconds > 0, endSeconds > startSeconds, tilesPerChunk > 0 else { return [] }
+        let totalTiles = max(1, Int(((endSeconds - startSeconds) / tileSeconds).rounded(.up)))
+        let first = max(0, Int(((layout.visibleStartSeconds - startSeconds) / tileSeconds).rounded(.down)))
+        let last = min(totalTiles, Int(((layout.visibleEndSeconds - startSeconds) / tileSeconds).rounded(.up)))
+        guard first < last else { return [] }
+        var chunks: [MediaChunk] = []
+        var tile = (first / tilesPerChunk) * tilesPerChunk
+        while tile < last {
+            let count = min(tilesPerChunk, totalTiles - tile)
+            chunks.append(
+                MediaChunk(
+                    tileStart: tile, tileCount: count,
+                    startSeconds: startSeconds + Double(tile) * tileSeconds,
+                    endSeconds: min(endSeconds, startSeconds + Double(tile + count) * tileSeconds)))
+            tile += tilesPerChunk
+        }
+        return chunks
+    }
+
+    /// Calls `body` for each visible media chunk of `clip` with its rect, the bounds the renderer clips it
+    /// to, and the source range it covers. `band` is the media area of the whole clip, unclamped.
+    private static func addMediaChunks(
+        clip: Clip, startSeconds: Double, endSeconds: Double, band: CGRect, area: CGRect, layout: TimelineLayout,
+        tileWidth: CGFloat, tilesPerChunk: Int,
+        body: (MediaChunk, CGRect, CGRect, RationalTime, RationalTime) -> Void
+    ) {
+        let bounds = band.intersection(area)
+        guard !bounds.isNull, bounds.width >= 1, bounds.height >= 1 else { return }
+        let sourcePerTile = Double(tileWidth) * layout.secondsPerPoint * clip.speed.doubleValue
+        let scale = TimelineLayout.pointerTimescale
+        for chunk in mediaChunks(
+            startSeconds: startSeconds, endSeconds: endSeconds, layout: layout, tileWidth: tileWidth,
+            tilesPerChunk: tilesPerChunk)
+        {
+            let x0 = layout.x(forSeconds: chunk.startSeconds)
+            let x1 = layout.x(forSeconds: chunk.endSeconds)
+            let rect = CGRect(x: x0, y: band.minY, width: max(1, x1 - x0), height: band.height)
+            guard rect.intersects(bounds) else { continue }
+            let offset = RationalTime(seconds: Double(chunk.tileStart) * sourcePerTile, timescale: scale)
+            let sourceIn = chunk.tileStart == 0 ? clip.sourceIn : clip.sourceIn + offset
+            let end =
+                clip.sourceIn
+                + RationalTime(
+                    seconds: Double(chunk.tileStart + chunk.tileCount) * sourcePerTile,
+                    timescale: scale)
+            let sourceOut = min(clip.sourceOut, end)
+            guard sourceIn < sourceOut else { continue }
+            body(chunk, rect, bounds, sourceIn, sourceOut)
         }
     }
 
