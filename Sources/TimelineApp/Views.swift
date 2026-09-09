@@ -3,6 +3,7 @@ import AppKit
 import Contracts
 import Foundation
 import Observation
+import RenderKit
 import SwiftUI
 import TimelineCore
 import TimelineUI
@@ -211,7 +212,7 @@ struct EditorView: View {
     var body: some View {
         HSplitView {
             VStack(spacing: 0) {
-                PlayerView(player: document.player)
+                PreviewLayerView(preview: document.preview)
                     .frame(minHeight: 240)
                 Divider()
                 TimelineView(viewModel: document.viewModel)
@@ -288,6 +289,11 @@ struct EditorView: View {
 
     private var statusBar: some View {
         HStack(spacing: 12) {
+            Button(document.isPlaying ? "Pause" : "Play", systemImage: document.isPlaying ? "pause.fill" : "play.fill")
+            {
+                document.togglePlayback()
+            }
+            .keyboardShortcut(.space, modifiers: [])
             Text(document.url.lastPathComponent)
             Text("Render: \(document.lastRenderPath.rawValue) #\(document.playerItemGeneration)")
             Text(String(format: "Playhead %.2fs", document.playheadSeconds))
@@ -372,21 +378,35 @@ struct AgentSection: View {
     }
 }
 
-/// `AVPlayerView` in SwiftUI. The AVKit SwiftUI overlay's `VideoPlayer` would do the same, but an SPM
-/// executable that only references the overlay does not load AVKit's ObjC classes at launch (the
-/// runtime fails to demangle `AVPlayerView`), so the view is wrapped by hand.
-struct PlayerView: NSViewRepresentable {
-    let player: AVPlayer
+/// Hosts RenderKit's two `AVPlayerLayer`s (the preview hides the idle one), so a structural swap never
+/// freezes the picture. AVKit is still linked for the day a control strip is wanted; the transport is
+/// the status bar's Play button and the space bar.
+struct PreviewLayerView: NSViewRepresentable {
+    let preview: PreviewPlayer
 
-    func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
-        view.player = player
-        view.controlsStyle = .inline
-        view.showsFullScreenToggleButton = false
+    final class HostView: NSView {
+        var playerLayers: [AVPlayerLayer] = []
+
+        override func layout() {
+            super.layout()
+            for layer in playerLayers { layer.frame = bounds }
+        }
+    }
+
+    func makeNSView(context: Context) -> HostView {
+        let view = HostView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.black.cgColor
+        for layer in preview.layers {
+            layer.videoGravity = .resizeAspect
+            layer.frame = view.bounds
+            view.layer?.addSublayer(layer)
+        }
+        view.playerLayers = preview.layers
         return view
     }
 
-    func updateNSView(_ view: AVPlayerView, context: Context) {
-        if view.player !== player { view.player = player }
+    func updateNSView(_ view: HostView, context: Context) {
+        view.needsLayout = true
     }
 }

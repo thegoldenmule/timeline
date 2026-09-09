@@ -5,6 +5,7 @@ import ContractsTestSupport
 import Foundation
 import MediaKit
 import ProjectStore
+import RenderKit
 import Synchronization
 import TimelineCore
 
@@ -24,8 +25,8 @@ final class AppLog: Sendable {
 }
 
 /// The composition root. Every service is held as an `any` existential; `AppServices.boot` builds the
-/// real modules over one `LibraryLayout` root (`~/Movies/Timeline`, or `TIMELINE_ROOT`). The one fake
-/// left is the renderer: see `renderer` below for the RenderKit swap point.
+/// real modules over one `LibraryLayout` root (`~/Movies/Timeline`, or `TIMELINE_ROOT`). Nothing is a
+/// fake any more except the agent runtime's scripted fallback when Claude Code is not usable.
 struct AppServices: Sendable {
     /// Which agent runtime to build: probe Claude Code and fall back to the scripted loop, or the
     /// scripted loop directly (the headless check, which must not spawn `claude`).
@@ -36,10 +37,10 @@ struct AppServices: Sendable {
 
     let layout: LibraryLayout
     let opener: any ProjectStoreOpening
-    /// SWAP POINT (RenderKit): replace `FakeRenderer()` in `boot` with RenderKit's renderer once it
-    /// merges. `ProjectDocument.refreshRender` is where its gesture path (video-only during a drag,
-    /// audio on release) plugs in; nothing else names the renderer's concrete type.
+    /// RenderKit's renderer, what the tools reach through `ToolServices.renderer`.
     let renderer: any Renderer
+    /// The same renderer, concretely, for `ProjectDocument`'s `PreviewPlayer` (the two-player swap).
+    let previewRenderer: AVFoundationRenderer
     let jobRunner: any JobRunner
     let mediaLibrary: any MediaLibrary
     /// MediaKit's `cache.sqlite` index, shared by the library, the analyzer, and both providers.
@@ -95,7 +96,7 @@ struct AppServices: Sendable {
         let approvals = StandardApprovalGate(policy: .standard)
         let receipts = ReceiptLog(fileURL: layout.cacheDir.appendingPathComponent("receipts.jsonl"))
         let projects = OpenProjects()
-        let renderer = FakeRenderer()  // SWAP POINT (RenderKit): the only fake left in the app.
+        let renderer = AVFoundationRenderer(layout: layout)
         let opener = SQLiteProjectStoreOpener(libraryRootHint: layout.root.path)
 
         let toolServices = ToolServices(
@@ -151,7 +152,8 @@ struct AppServices: Sendable {
         }
 
         return AppServices(
-            layout: layout, opener: opener, renderer: renderer, jobRunner: jobRunner, mediaLibrary: library,
+            layout: layout, opener: opener, renderer: renderer, previewRenderer: renderer, jobRunner: jobRunner,
+            mediaLibrary: library,
             cache: cache, thumbnails: thumbnails, waveforms: waveforms, analyzer: analyzer, aligner: aligner,
             approvals: approvals, registry: registry, agentRuntime: agentRuntime, agentAvailability: availability,
             agentIsFallback: isFallback, receipts: receipts, projects: projects, mcpHost: host, mcp: mcp,

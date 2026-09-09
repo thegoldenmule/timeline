@@ -3,6 +3,7 @@ import Contracts
 import Foundation
 import Observation
 import ProjectStore
+import RenderKit
 import TimelineCore
 import TimelineUI
 
@@ -23,10 +24,10 @@ enum DocumentError: Error, CustomStringConvertible {
 }
 
 /// One open project as the window sees it: the store, TimelineUI's view model over it (the timeline,
-/// inspector, and history draw from that), the compiled active sequence, and the `AVPlayer` showing it.
-/// Every store change arrives on `changes`; the document then re-reads state, runs `Renderer.update`,
-/// and either applies instructions to the live item or swaps in a new one. Main-actor bound because it
-/// owns the player and its item.
+/// inspector, and history draw from that), and RenderKit's `PreviewPlayer` showing the compiled active
+/// sequence. Every store change arrives on `changes`; the document then re-reads state and hands the
+/// sequence to the preview, which applies instructions to the live item or swaps in a new one on its
+/// second player so the picture never freezes. Main-actor bound because it owns the players.
 @MainActor @Observable
 final class ProjectDocument {
     enum RenderPath: String, Sendable {
@@ -36,43 +37,45 @@ final class ProjectDocument {
     }
 
     let store: any ProjectStore
-    let renderer: any Renderer
     let url: URL
-    let player = AVPlayer()
+    /// RenderKit's two-player preview; `preview.layers` are what the player view hosts.
+    let preview: PreviewPlayer
     /// TimelineUI's mirror of the store: selection, playhead, zoom, gestures, one command per release.
     let viewModel: TimelineViewModel
 
     private(set) var project: Project
     private(set) var history: History
-    private(set) var compiled: Compiled?
-    private(set) var playerItem: AVPlayerItem?
     /// Every change delivered on the store's stream, in order.
     private(set) var changes: [ProjectChange] = []
     private(set) var lastRenderPath: RenderPath = .none
-    /// Bumped each time a new player item is attached.
+    /// Bumped each time the preview swaps to a new player item.
     private(set) var playerItemGeneration = 0
-    /// The project version the player reflects: set after the render refresh for a change completes.
+    /// The project version the preview reflects: set after the render refresh for a change completes.
     private(set) var renderedVersion: Int64 = 0
     private(set) var playheadSeconds: Double = 0
+    private(set) var isPlaying = false
     private(set) var lastError: String?
 
     private var subscription: Task<Void, Never>?
-    private var timeObserver: Any?
-    private var seekingFromViewModel = false
+    private var timeObservers: [(AVPlayer, Any)] = []
+    private var seekingFromPlayer = false
     private static let commandIds = UUIDv7Generator()
 
     private init(
-        store: any ProjectStore, renderer: any Renderer, url: URL, project: Project, history: History,
+        store: any ProjectStore, preview: PreviewPlayer, url: URL, project: Project, history: History,
         viewModel: TimelineViewModel
     ) {
         self.store = store
-        self.renderer = renderer
+        self.preview = preview
         self.url = url
         self.project = project
         self.history = history
         self.viewModel = viewModel
         self.renderedVersion = project.version
     }
+
+    var compiled: Compiled? { preview.compiled }
+    var playerItem: AVPlayerItem? { preview.currentItem }
 
     /// Opens the package at `url`, registers it as an open project, compiles, attaches the player item,
     /// and starts mirroring changes. The change stream is subscribed before the state is read, so no
@@ -119,9 +122,9 @@ final class ProjectDocument {
         await viewModel.load()
         viewModel.startObserving()
         let document = ProjectDocument(
-            store: store, renderer: services.renderer, url: url, project: project, history: history,
-            viewModel: viewModel)
-        try await document.compileAndAttach()
+            store: store, preview: PreviewPlayer(renderer: services.previewRenderer), url: url, project: project,
+            history: history, viewModel: viewModel)
+        try await document.loadPreview()
         document.subscribe(to: changes)
         document.observePlayhead()
         return document
@@ -189,11 +192,18 @@ final class ProjectDocument {
             label: "Add \(asset.displayName)")
     }
 
+    // MARK: Transport
+
+    func togglePlayback() {
+        if preview.isPlaying { preview.pause() } else { preview.play() }
+        isPlaying = preview.isPlaying
+    }
+
     // MARK: Waiting (for the headless check and sequenced edits)
 
     /// Returns once the change stream has delivered `version`, the mirror reflects it, and the render
     /// refresh for it has run.
-    func waitForVersion(_ version: Int64, timeout: Duration = .seconds(5)) async throws {
+    func waitForVersion(_ version: Int64, timeout: Duration = .seconds(30)) async throws {
         let deadline = ContinuousClock.now + timeout
         while renderedVersion < version || viewModel.project.version < version {
             guard ContinuousClock.now < deadline else { throw DocumentError.timedOut("version \(version)") }
@@ -210,7 +220,7 @@ final class ProjectDocument {
     }
 
     func waitForReadyToPlay(timeout: Duration = .seconds(20)) async throws {
-        guard let item = playerItem else { throw DocumentError.noPlayerItem }
+        guard let item = preview.currentItem else { throw DocumentError.noPlayerItem }
         let deadline = ContinuousClock.now + timeout
         while item.status == .unknown {
             guard ContinuousClock.now < deadline else { throw DocumentError.timedOut("readyToPlay") }
@@ -224,10 +234,10 @@ final class ProjectDocument {
     func close(using services: AppServices) async {
         subscription?.cancel()
         viewModel.stopObserving()
-        if let timeObserver { player.removeTimeObserver(timeObserver) }
-        timeObserver = nil
-        player.pause()
-        player.replaceCurrentItem(with: nil)
+        for (player, observer) in timeObservers { player.removeTimeObserver(observer) }
+        timeObservers = []
+        preview.pause()
+        for player in preview.players { player.replaceCurrentItem(with: nil) }
         await services.projects.remove(project.id)
         do {
             try await store.close()
@@ -238,17 +248,17 @@ final class ProjectDocument {
 
     // MARK: Rendering
 
-    private func compileAndAttach() async throws {
+    /// An empty sequence has nothing to compile (`RenderError.sequenceEmpty`): the preview stays
+    /// unloaded until the first clip lands.
+    private func loadPreview() async throws {
         guard let sequence else { throw DocumentError.noActiveSequence }
-        let compiled = try await renderer.compile(sequence, assets: project.assets, options: .preview)
-        self.compiled = compiled
-        attach(renderer.playerItem(for: compiled))
-    }
-
-    private func attach(_ item: AVPlayerItem) {
-        player.replaceCurrentItem(with: item)
-        playerItem = item
-        playerItemGeneration += 1
+        do {
+            _ = try await preview.load(sequence, assets: project.assets)
+            playerItemGeneration = preview.swaps.count
+            lastRenderPath = .structural
+        } catch RenderError.sequenceEmpty {
+            lastRenderPath = .none
+        }
     }
 
     private func subscribe(to changes: AsyncStream<ProjectChange>) {
@@ -268,37 +278,24 @@ final class ProjectDocument {
         renderedVersion = project.version
     }
 
-    /// RenderKit swap point: the gesture path (video-only compile during a drag, audio on release) and
-    /// the second-player swap for structural edits while playing plug in here.
+    /// `PreviewPlayer.update`: instruction-only edits replace the live item's composition and mix,
+    /// structural edits are compiled and swapped in on the idle player. The gesture path
+    /// (`beginGesture` / `endGesture`, video-only compiles during a drag) is not driven yet: the timeline
+    /// previews a gesture on a scratch copy and emits its one command on release.
     private func refreshRender() async {
         guard let sequence else { return }
         do {
-            guard let compiled else {
-                try await compileAndAttach()
-                lastRenderPath = .structural
-                return
-            }
-            let update = try await renderer.update(compiled, to: sequence, assets: project.assets)
-            self.compiled = update.compiled
+            let update = try await preview.update(sequence, assets: project.assets)
             switch update {
-            case .instructionsOnly(let next):
-                if let playerItem {
-                    renderer.apply(next, to: playerItem)
-                } else {
-                    attach(renderer.playerItem(for: next))
-                }
-                lastRenderPath = .instructionsOnly
-            case .structural(let next):
-                let item = renderer.playerItem(for: next)
-                let wasPlaying = player.rate > 0
-                let time = player.currentTime()
-                if time.isNumeric, time.seconds > 0 {
-                    _ = await item.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-                }
-                attach(item)
-                if wasPlaying { player.play() }
-                lastRenderPath = .structural
+            case .instructionsOnly: lastRenderPath = .instructionsOnly
+            case .structural: lastRenderPath = .structural
             }
+            playerItemGeneration = preview.swaps.count
+            lastError = nil
+        } catch RenderError.sequenceEmpty {
+            preview.pause()
+            for player in preview.players { player.replaceCurrentItem(with: nil) }
+            lastRenderPath = .none
             lastError = nil
         } catch {
             lastError = "Render update failed: \(error)"
@@ -307,20 +304,25 @@ final class ProjectDocument {
 
     // MARK: Playhead
 
-    /// The player drives the timeline's playhead while playing; the timeline drives the player (a
-    /// ruler click, arrow keys) while paused.
+    /// The active player drives the timeline's playhead while playing; the timeline drives the player
+    /// (a ruler click, arrow keys) while paused. Both players carry an observer because a structural
+    /// swap changes which one is active.
     private func observePlayhead() {
         let interval = CMTime(value: 1, timescale: 30)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.playheadSeconds = time.isNumeric ? time.seconds : 0
-                if self.player.rate > 0 {
-                    self.seekingFromViewModel = true
-                    self.viewModel.setPlayhead(RationalTime(seconds: self.playheadSeconds, timescale: 48000))
-                    self.seekingFromViewModel = false
+        for player in preview.players {
+            let observer = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+                MainActor.assumeIsolated {
+                    guard let self, player === self.preview.activePlayer else { return }
+                    self.playheadSeconds = time.isNumeric ? time.seconds : 0
+                    self.isPlaying = self.preview.isPlaying
+                    if self.preview.isPlaying {
+                        self.seekingFromPlayer = true
+                        self.viewModel.setPlayhead(RationalTime(seconds: self.playheadSeconds, timescale: 48000))
+                        self.seekingFromPlayer = false
+                    }
                 }
             }
+            timeObservers.append((player, observer))
         }
         observeViewModelPlayhead()
     }
@@ -331,18 +333,17 @@ final class ProjectDocument {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.followViewModelPlayhead()
+                await self.followViewModelPlayhead()
                 self.observeViewModelPlayhead()
             }
         }
     }
 
-    private func followViewModelPlayhead() {
-        guard !seekingFromViewModel, player.rate == 0 else { return }
+    private func followViewModelPlayhead() async {
+        guard !seekingFromPlayer, !preview.isPlaying else { return }
         let target = viewModel.playhead.seconds
         guard abs(target - playheadSeconds) > 0.001 else { return }
         playheadSeconds = target
-        player.seek(
-            to: CMTime(seconds: target, preferredTimescale: 48000), toleranceBefore: .zero, toleranceAfter: .zero)
+        await preview.seek(to: CMTime(seconds: target, preferredTimescale: 48000))
     }
 }

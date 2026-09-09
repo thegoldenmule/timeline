@@ -1,9 +1,9 @@
 # Integration
 
-Status: Phase 2 in progress, 2026-09-08. Supersedes the Phase 0.5 walking-skeleton note: `TimelineApp` is
-now wired to the real modules end to end, with one fake left (the renderer, until RenderKit merges).
-`swift run TimelineApp` opens the window; `swift run TimelineApp --skeleton-check` (`make e2e`) runs the
-end-to-end check headlessly against a temporary library root and exits 0.
+Status: Phase 2 integration done, 2026-09-08. Supersedes the Phase 0.5 walking-skeleton note: `TimelineApp`
+is wired to every real module end to end, RenderKit included. `swift run TimelineApp` opens the window;
+`swift run TimelineApp --skeleton-check` (`make e2e`) runs the end-to-end check headlessly against a
+temporary library root and exits 0.
 
 ## What is real, what is fake
 
@@ -21,18 +21,19 @@ end-to-end check headlessly against a temporary library root and exits 0.
 | `mcpHost` | `AgentKit.MCPServerHost` | started at launch on 127.0.0.1 with a per-launch bearer token; `claude mcp add` line shown in the window's MCP section and logged; proxy config written |
 | `agentRuntime` | `AgentKit.ClaudeCodeRuntime`, else `ToolLoopRuntime` over `FakeAgentRuntime` | `availability()` is probed at boot; when `claude` is missing or logged out the scripted fallback runs its tool calls through the registry itself (the client-side loop a Messages-API runtime has) |
 | `receipts` | `ReceiptLog` (`Sources/TimelineApp/Services/`) | in memory plus `<root>/Cache/receipts.jsonl`; ProjectStore does not expose the project's `commands` metadata yet |
-| `renderer` | **`FakeRenderer`** | the RenderKit swap point; see below |
+| `renderer` | `RenderKit.AVFoundationRenderer` | compile, update, frame grabs, and export for the tools; built over the app's `LibraryLayout` |
+| Preview | `RenderKit.PreviewPlayer` | owned by `ProjectDocument`: instruction-only edits update the live item, structural edits are compiled and swapped in on the second player; the window hosts its two `AVPlayerLayer`s (`PreviewLayerView`) |
 | Timeline, inspector, approvals, jobs, agent, history | `TimelineUI` | `TimelineView(viewModel:)`, `InspectorView`, `ApprovalStackView`, `JobList`, `AgentPanelView`, `HistoryView` replace every placeholder view |
 
-### The RenderKit swap point
+### The preview path
 
-`AppServices.boot` builds `let renderer = FakeRenderer()`; that line and the `renderer` field's doc comment
-are the only places that name it. `ProjectDocument.refreshRender` runs `Renderer.update` on every change and
-either applies instructions to the live `AVPlayerItem` or swaps in a new item (seeking it while detached);
-RenderKit's gesture path (video-only compile during a drag, audio on release) and its second-player swap
-for structural edits while playing plug in there. The `render_export` and `render_preview` tools already go
-through `ToolServices.renderer`, so they switch with the same line. Until then exports are the fake's
-half-second synthetic clip plus a real `ExportReceipt`.
+`ProjectDocument.refreshRender` hands every store change to `PreviewPlayer.update(sequence, assets:)` and
+records whether it was instructions-only or a structural swap (`lastRenderPath`, `playerItemGeneration`
+= the preview's swap count). An empty sequence (`RenderError.sequenceEmpty`) leaves the preview unloaded
+until the first clip lands. The gesture path (`beginGesture` / `endGesture`, video-only compiles during a
+drag) is not driven yet: TimelineUI previews a drag on a scratch copy and emits its one command on
+release, so there is no structural edit to compile mid-gesture. Both players carry a periodic time
+observer; the active one drives the timeline playhead while playing, the timeline drives `seek` while paused.
 
 ## Layout on disk
 
@@ -53,8 +54,9 @@ make e2e                                    # swift run TimelineApp --skeleton-c
 ./ci.sh                                     # lint, swift test, e2e
 ```
 
-The window: player on top, TimelineUI's Metal timeline below (drag to move, trim handles, B splits at the
-playhead, Delete removes, Cmd-Z / Shift-Cmd-Z, Cmd-scroll zooms, N toggles snapping), a status bar; the
+The window: the preview on top (Play in the status bar or the space bar), TimelineUI's Metal timeline
+below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd-Z / Shift-Cmd-Z,
+Cmd-scroll zooms, N toggles snapping), a status bar; the
 sidebar holds the inspector, the approval stack, the job list, the history, the last tool result, the MCP
 section, and the agent panel. Toolbar: New, Open, Import (library import as a job, then the asset is
 appended to the timeline, video auto-linking its audio), Split, Delete, Undo, Redo, Analyze (silence,
@@ -80,27 +82,31 @@ The embedded agent uses the same endpoint through `ClaudeCodeRuntime` when `clau
 `--skeleton-check` boots the composition root over a temporary root with the scripted agent, then:
 
 ```
-ok   boot: root TimelineSkeleton-46B555EA, MCP http://127.0.0.1:55957/mcp, 15 tools, agent fallback
-ok   create: Skeleton v3 at Skeleton.tlproj; player item readyToPlay (fake renderer)
-ok   import: 4 assets copied into Library/ with sidecars and cache rows; av 4.0s 1280x720, tone 3.0s @48000 Hz
+ok   boot: root TimelineSkeleton-C7EE96E4, MCP http://127.0.0.1:60077/mcp, 15 tools, agent fallback
+ok   create: Skeleton v3 at Skeleton.tlproj; empty sequence, nothing to preview yet
+ok   import: 4 assets copied into Library/ with sidecars and cache rows; av 2.0s 1280x720, tone 3.0s @48000 Hz
 ok   edit: linked clips v12, split via TimelineViewModel v14, dissolve v15; scene draws 7 clips, 1 transition
-ok   analyze: silence + onset-8k on av-tone.mov: 247 envelope frames, 2 artifacts under Cache/, recorded at v17
+ok   render: compiled 6.00s, item readyToPlay, frame at 0.5 s 320x180 not blank, h264_1080p export 6.00s in 0.3s to skeleton-1080p.mp4
+ok   analyze: silence + onset-8k on av-tone.mov: 122 envelope frames, 2 artifacts under Cache/, recorded at v17
 ok   align: offset 7.3447 s (truth 7.345, error 0.255 ms), drift 0.0 ppm (truth 23), confidence 0.81
 ok   tools: project_describe v18 with 4 assets; timeline_apply v18 instructions-only; stale expectedVersion rejected with changedSince
-ok   mcp: 401 without token; initialize -> timeline session 83C85B2B; tools/list 15 tools; project_list over HTTP sees 1 project
+ok   mcp: 401 without token; initialize -> timeline session F627DC6B; tools/list 15 tools; project_list over HTTP sees 1 project
 ok   agent: 8 items, finished "Exported Reel 9:16."; export gated, approved on the stack, retried, wrote Reel 9x16.mp4
 ok   undo/redo: v18 -> v20 -> v22, 11 live transactions
 ok   reopen: v22 after close and reopen, state and history equal; 9 tool receipts logged
 
-Skeleton check passed: 11 steps in 5.66 seconds
+Skeleton check passed: 12 steps in 5.43 seconds
 ```
 
-Step by step: `SQLiteProjectStoreOpener.create` plus V1/A1; `TestMedia.videoWithAudio`, `tone`, and
-`alignmentPair` (60 s camera, 20 s render: the default parameters want 10 s fine windows and 10 s of
-overlap) imported through `FileMediaLibrary.importJob` on the budgeted runner, with the library path,
-sidecar, `sha256-` hash, and cache row asserted before `importAsset` is applied; two auto-linked clips and a
-tone clip, a split through `TimelineViewModel.splitAtPlayhead` (the linked audio splits too), a dissolve, and
-a `TimelineSceneBuilder` scene; `media_analyze` for silence and the onset envelope, with the artifacts
+Step by step: `SQLiteProjectStoreOpener.create` plus V1/A1; `TestMedia.videoWithAudio` (2 s: the generator
+can stall past a couple of seconds), `tone`, and `alignmentPair` (60 s camera, 20 s render: the default
+parameters want 10 s fine windows and 10 s of overlap) imported through `FileMediaLibrary.importJob` on the
+budgeted runner, with the library path, sidecar, `sha256-` hash, and cache row asserted before
+`importAsset` is applied; two auto-linked clips and a tone clip, a split through
+`TimelineViewModel.splitAtPlayhead` (the linked audio splits too), a dissolve, and a `TimelineSceneBuilder`
+scene; RenderKit compiles the sequence over the imported clips, the preview item reaches `readyToPlay`,
+`frame(_:at:size:)` at 0.5 s is not a flat colour, and `export` with `ExportPreset.h264_1080p` through the
+job runner writes a file whose `AVURLAsset` duration is positive; `media_analyze` for silence and the onset envelope, with the artifacts
 checked in `cache.sqlite` and on disk; `align_audio` on the real aligner, offset within 1 ms of the
 generator's truth; `project_describe` and `timeline_apply` (instructions-only path, then a stale
 `expectedVersion` rejected); the MCP host over HTTP (401 without the token, `initialize`, `tools/list`,
@@ -110,8 +116,11 @@ package, canonical state and history equal.
 
 ## Known issues
 
-- The renderer is `FakeRenderer`: playback shows a synthetic clip, `render_preview` returns hue frames,
-  exports are half-second clips. RenderKit replaces it at the swap point above.
+- `swift test` over the whole package has twice stalled on this machine (once at the MediaKit
+  transcription suite, all suites running in parallel, the helper idle at 12% CPU for 20 minutes) and a
+  wall-clock assertion (`TestMediaTests.generationIsFast`) fails under that load. Every suite passes on its
+  own (`swift test --filter <Module>Tests`); the interaction is not understood yet and predates the
+  integration commits.
 - `render_export` without `outputPath` writes to `LibraryLayout.default.root/Exports`, not the app's root
   (AgentKit uses the default layout for that path). The fallback script passes `outputPath`; the toolbar
   Export button does not yet, so under `TIMELINE_ROOT` its file lands in `~/Movies/Timeline/Exports`.

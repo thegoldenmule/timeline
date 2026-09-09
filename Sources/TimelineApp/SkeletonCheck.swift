@@ -1,5 +1,7 @@
+import AVFoundation
 import Contracts
 import ContractsTestSupport
+import CoreGraphics
 import Foundation
 import TimelineCore
 import TimelineUI
@@ -52,17 +54,19 @@ enum SkeletonCheck {
                 FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("project.sqlite").path),
                 "create", "no project.sqlite in the package")
             try require(document.sequence?.tracks.count == 2, "create", "expected V1 and A1")
-            try await document.waitForReadyToPlay(timeout: .seconds(20))
+            try require(
+                document.compiled == nil && document.lastRenderPath == .none, "create", "an empty sequence compiled")
             ok(
                 "create",
                 "\(document.project.name) v\(document.version) at \(projectURL.lastPathComponent); "
-                    + "player item readyToPlay (fake renderer)")
+                    + "empty sequence, nothing to preview yet")
 
             // 3. Synthetic media through the real library: hash, copy, sidecar, cache row, asset command.
             let media = try TestMedia.Directory(prefix: "SkeletonMedia")
             defer { media.cleanup() }
+            // 2 s: `TestMedia.videoWithAudio` can stall past a couple of seconds (RenderKit's note).
             let avClip = try await TestMedia.videoWithAudio(
-                .tone(frequency: 440), duration: 4, in: media.url, name: "av-tone")
+                .tone(frequency: 440), duration: 2, in: media.url, name: "av-tone")
             let toneClip = try await TestMedia.tone(duration: 3, in: media.url, name: "tone")
             // The default parameters need 10 s fine windows and 10 s of overlap, so the render is 20 s.
             let pair = try await TestMedia.alignmentPair(
@@ -110,16 +114,16 @@ enum SkeletonCheck {
                     .addClip(
                         .init(
                             id: clip1Id, sequenceId: .id(sequence.id), trackId: .id(v1.id), assetId: .id(av.id),
-                            at: .zero, sourceIn: .zero, sourceOut: RationalTime(3, 1), mode: .overwrite, link: .auto)),
+                            at: .zero, sourceIn: .zero, sourceOut: RationalTime(3, 2), mode: .overwrite, link: .auto)),
                     .addClip(
                         .init(
                             id: clip2Id, sequenceId: .id(sequence.id), trackId: .id(v1.id), assetId: .id(av.id),
-                            at: RationalTime(3, 1), sourceIn: RationalTime(1, 1), sourceOut: RationalTime(4, 1),
+                            at: RationalTime(3, 2), sourceIn: RationalTime(1, 2), sourceOut: RationalTime(2, 1),
                             mode: .overwrite, link: .auto)),
                     .addClip(
                         .init(
                             sequenceId: .id(sequence.id), trackId: .id(a1.id), assetId: .id(tone.id),
-                            at: RationalTime(6, 1), sourceIn: .zero, sourceOut: tone.duration, mode: .overwrite,
+                            at: RationalTime(3, 1), sourceIn: .zero, sourceOut: tone.duration, mode: .overwrite,
                             link: .none)),
                 ]), label: "Add clips")
             try await document.waitForVersion(added.version)
@@ -131,7 +135,7 @@ enum SkeletonCheck {
             try require(
                 afterAdd.track(a1.id)?.clips.count == 3, "clips", "A1 has \(afterAdd.track(a1.id)?.clips.count ?? 0)")
             let viewModel = document.viewModel
-            viewModel.setPlayhead(RationalTime(3, 2))
+            viewModel.setPlayhead(RationalTime(4, 5))
             viewModel.select(clip1Id)
             let split = try unwrap(
                 await viewModel.splitAtPlayhead(), "split", "\(String(describing: viewModel.lastError))")
@@ -142,13 +146,13 @@ enum SkeletonCheck {
                 "V1 has \(afterSplit.track(v1.id)?.clips.count ?? 0)")
             try require(afterSplit.track(a1.id)?.clips.count == 4, "split", "the linked audio was not split")
             let rightHalf = try unwrap(
-                afterSplit.track(v1.id)?.clips.values.first { $0.start == RationalTime(3, 2) }, "split", "no right half"
+                afterSplit.track(v1.id)?.clips.values.first { $0.start == RationalTime(4, 5) }, "split", "no right half"
             )
             let transition = try await document.apply(
                 .addTransition(
                     .init(
                         leftClipId: .id(rightHalf.id), rightClipId: .id(clip2Id), kind: "dissolve",
-                        duration: RationalTime(1, 1))), label: "Add dissolve")
+                        duration: RationalTime(8, 15))), label: "Add dissolve")
             try await document.waitForVersion(transition.version)
             try require(document.sequence?.transitions.count == 1, "transition", "no transition in the sequence")
             try require(document.lastRenderPath == .structural, "transition", "expected a structural render update")
@@ -159,6 +163,31 @@ enum SkeletonCheck {
                 "edit",
                 "linked clips v\(added.version), split via TimelineViewModel v\(split.version), "
                     + "dissolve v\(transition.version); scene draws \(scene.stats.clipsDrawn) clips, 1 transition")
+
+            // 4b. RenderKit over the imported clips: the preview item plays, a grabbed frame has content,
+            //     and an H.264 export through the job runner writes a file with a duration.
+            let compiled = try unwrap(document.compiled, "render", "no Compiled after the edits")
+            try require(compiled.duration.seconds > 3, "render", "compiled duration \(compiled.duration.seconds)s")
+            try await document.waitForReadyToPlay(timeout: .seconds(20))
+            let grabbed = try await services.renderer.frame(
+                compiled, at: RationalTime(1, 2), size: CGSize(width: 320, height: 180))
+            try require(!SkeletonCheck.isBlank(grabbed), "render", "the frame at 0.5 s is blank")
+            let exportURL = root.appendingPathComponent("Exports/skeleton-1080p.mp4")
+            let exportHandle = await services.jobRunner.submit(
+                services.renderer.export(compiled, preset: .h264_1080p, to: exportURL))
+            let exportOutcome = try await exportHandle.wait()
+            let exportReceipt = try unwrap(try exportOutcome.payload(as: ExportReceipt.self), "render", "no receipt")
+            try require(
+                FileManager.default.fileExists(atPath: exportURL.path), "render", "no export at \(exportURL.path)")
+            let exportedSeconds = try await AVURLAsset(url: exportURL).load(.duration).seconds
+            try require(exportedSeconds > 0, "render", "exported file has no duration")
+            ok(
+                "render",
+                String(
+                    format: "compiled %.2fs, item readyToPlay, frame at 0.5 s %dx%d not blank, h264_1080p export %.2fs "
+                        + "in %.1fs to %@",
+                    compiled.duration.seconds, grabbed.width, grabbed.height, exportedSeconds,
+                    exportReceipt.finishedAt.timeIntervalSince(exportReceipt.startedAt), exportURL.lastPathComponent))
 
             // 5. Silence and onset envelope through the analyzer, via the job runner, recorded on the asset.
             let tools = ToolConsole(services: services)
@@ -179,7 +208,7 @@ enum SkeletonCheck {
                     "missing artifact file \(artifact.path)")
             }
             let frames = analyzed.structured?["results"]?["onsetEnvelope"]?["frameCount"]?.intValue ?? 0
-            try require(frames > 200, "analyze", "onset envelope has \(frames) frames")
+            try require(frames > 100, "analyze", "onset envelope has \(frames) frames")
             ok(
                 "analyze",
                 "silence + onset-8k on \(av.displayName): \(frames) envelope frames, \(artifacts.count) artifacts "
@@ -338,6 +367,25 @@ enum SkeletonCheck {
             print("FAIL \(error)")
             return false
         }
+    }
+
+    /// True when every pixel of `image` is the same colour (a black or missing frame).
+    static func isBlank(_ image: CGImage) -> Bool {
+        let width = 32, height = 18
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard
+                let context = CGContext(
+                    data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                    bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return true }
+        let first = pixels[0..<3]
+        return stride(from: 0, to: pixels.count, by: 4).allSatisfy { pixels[$0..<($0 + 3)].elementsEqual(first) }
     }
 
     /// A window around the first byte where two canonical documents diverge.
