@@ -46,7 +46,9 @@ public final class AVFoundationRenderer: Renderer, Sendable {
         _ sequence: Sequence, assets: [AssetID: Asset], options: RenderOptions, structure: CompositionStructure
     ) -> Compiled {
         let blend = options.blendSpace ?? blendSpace
-        let table = compiler.instructions(sequence, assets: assets, structure: structure, blendSpace: blend)
+        let id = CompiledID(minting: UUIDv7Generator())
+        let table = compiler.instructions(
+            sequence, assets: assets, structure: structure, blendSpace: blend, compiledId: id)
         let renderSize = CGSize(width: sequence.width, height: sequence.height)
         let frameDuration = CMTime(sequence.frameDuration)
         let videoComposition = SequenceCompiler.videoComposition(
@@ -57,7 +59,7 @@ public final class AVFoundationRenderer: Renderer, Sendable {
             blendSpace: blend, renderSize: renderSize, frameDuration: frameDuration, sequence: sequence, assets: assets,
             options: options)
         return Compiled(
-            sequenceId: sequence.id,
+            id: id, sequenceId: sequence.id,
             structuralFingerprint: RenderFingerprint.structural(
                 sequence, assets: assets, layout: layout, audio: options.audio),
             instructionFingerprint: RenderFingerprint.instruction(

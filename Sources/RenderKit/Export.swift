@@ -166,7 +166,7 @@ extension InstructionTable {
             instructions.map {
                 RenderInstruction(
                     timeRange: $0.timeRange, layers: $0.layers, transitions: $0.transitions, captions: $0.captions,
-                    blendSpace: $0.blendSpace, hdr: hdr, sequenceSize: $0.sequenceSize)
+                    blendSpace: $0.blendSpace, hdr: hdr, sequenceSize: $0.sequenceSize, compiledId: $0.compiledId)
             })
     }
 }

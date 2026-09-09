@@ -319,7 +319,8 @@ struct SequenceCompiler: Sendable {
     // MARK: Instructions
 
     func instructions(
-        _ sequence: Sequence, assets: [AssetID: Asset], structure: CompositionStructure, blendSpace: BlendSpace
+        _ sequence: Sequence, assets: [AssetID: Asset], structure: CompositionStructure, blendSpace: BlendSpace,
+        compiledId: CompiledID
     ) -> InstructionTable {
         let size = CGSize(width: sequence.width, height: sequence.height)
         let duration = structure.duration
@@ -428,7 +429,7 @@ struct SequenceCompiler: Sendable {
             instructions.append(
                 RenderInstruction(
                     timeRange: range, layers: layers, transitions: transitions, captions: activeCaptions,
-                    blendSpace: blendSpace, hdr: structure.hdr, sequenceSize: size))
+                    blendSpace: blendSpace, hdr: structure.hdr, sequenceSize: size, compiledId: compiledId))
         }
         return InstructionTable(instructions)
     }

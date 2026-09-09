@@ -8,7 +8,7 @@ import TimelineCore
 
 /// A small 30 fps project over synthetic clips written into a scratch library, for the frame and
 /// latency tests.
-final class Scene {
+final class Scene: @unchecked Sendable {
     let library: ScratchLibrary
     let builder: ProjectBuilder
     let video: TrackID

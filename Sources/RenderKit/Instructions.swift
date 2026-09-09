@@ -1,4 +1,5 @@
 import AVFoundation
+import Contracts
 import CoreGraphics
 import CoreMedia
 import Foundation
@@ -142,10 +143,12 @@ public final class RenderInstruction: NSObject, AVVideoCompositionInstructionPro
     public let blendSpace: BlendSpace
     public let hdr: Bool
     public let sequenceSize: CGSize
+    /// The `Compiled` this table belongs to; compositors record the ids they served, for diagnostics.
+    public let compiledId: CompiledID
 
     public init(
         timeRange: CMTimeRange, layers: [LayerSpec], transitions: [Int: TransitionSpec], captions: [CaptionSpec],
-        blendSpace: BlendSpace, hdr: Bool, sequenceSize: CGSize
+        blendSpace: BlendSpace, hdr: Bool, sequenceSize: CGSize, compiledId: CompiledID = "unassigned"
     ) {
         self.timeRange = timeRange
         self.layers = layers
@@ -154,6 +157,7 @@ public final class RenderInstruction: NSObject, AVVideoCompositionInstructionPro
         self.blendSpace = blendSpace
         self.hdr = hdr
         self.sequenceSize = sequenceSize
+        self.compiledId = compiledId
         var ids: [CMPersistentTrackID] = []
         for layer in layers {
             if let id = layer.sourceTrackID, !ids.contains(id) { ids.append(id) }

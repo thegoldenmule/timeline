@@ -1,4 +1,5 @@
 import AVFoundation
+import Contracts
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreVideo
@@ -37,6 +38,7 @@ public class TimelineCompositor: NSObject, AVVideoCompositing, @unchecked Sendab
         var inFlight = 0
         var frames = 0
         var contextChanges = 0
+        var compiledIds: Set<CompiledID> = []
     }
 
     let caches = OSAllocatedUnfairLock(initialState: Caches())
@@ -109,6 +111,7 @@ public class TimelineCompositor: NSObject, AVVideoCompositing, @unchecked Sendab
             request.finish(with: RenderKitError.frameUnavailable("unexpected instruction class"))
             return
         }
+        caches.withLock { _ = $0.compiledIds.insert(instruction.compiledId) }
         let contextSize = request.renderContext.size
         let composed = compose(instruction, request: request, contextSize: contextSize)
         guard let output = request.renderContext.newPixelBuffer() else {
@@ -123,9 +126,10 @@ public class TimelineCompositor: NSObject, AVVideoCompositing, @unchecked Sendab
         request.finish(withComposedVideoFrame: output)
     }
 
-    /// Frames composed so far and requests in flight (always 0 between requests).
-    public var statistics: (frames: Int, inFlight: Int, contextChanges: Int) {
-        caches.withLock { ($0.frames, $0.inFlight, $0.contextChanges) }
+    /// Frames composed so far, requests in flight (always 0 between requests), render contexts seen, and the
+    /// `Compiled` ids this instance has rendered for.
+    public var statistics: (frames: Int, inFlight: Int, contextChanges: Int, compiledIds: Set<CompiledID>) {
+        caches.withLock { ($0.frames, $0.inFlight, $0.contextChanges, $0.compiledIds) }
     }
 
     // MARK: Contexts
