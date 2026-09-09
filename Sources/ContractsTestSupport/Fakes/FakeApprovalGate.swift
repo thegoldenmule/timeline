@@ -10,6 +10,7 @@ public actor FakeApprovalGate: ApprovalGate {
         public var input: ToolInput
         public var estimate: Estimate
         public var decision: Decision
+        public var presentation: ApprovalPresentation?
 
         public enum Decision: Sendable, Hashable {
             case granted
@@ -38,21 +39,35 @@ public actor FakeApprovalGate: ApprovalGate {
     public func check(tool: String, input: ToolInput, estimate: Estimate, actor: Actor, sessionId: String?)
         -> ApprovalDecision
     {
+        check(tool: tool, input: input, estimate: estimate, presentation: nil, actor: actor, sessionId: sessionId)
+    }
+
+    /// The presentation rides on the request and its summary becomes `inputSummary`.
+    public func check(
+        tool: String, input: ToolInput, estimate: Estimate, presentation: ApprovalPresentation?, actor: Actor,
+        sessionId: String?
+    ) -> ApprovalDecision {
         guard policy.requiresApproval(tool: tool, estimate: estimate) else {
-            checks.append(Check(tool: tool, input: input, estimate: estimate, decision: .granted))
+            checks.append(
+                Check(tool: tool, input: input, estimate: estimate, decision: .granted, presentation: presentation))
             return .granted
         }
         if let token = input.approvalToken, consume(token) {
-            checks.append(Check(tool: tool, input: input, estimate: estimate, decision: .grantedByToken(token)))
+            checks.append(
+                Check(
+                    tool: tool, input: input, estimate: estimate, decision: .grantedByToken(token),
+                    presentation: presentation))
             return .granted
         }
         counter += 1
         let token = ApprovalToken("tok-\(counter)")
         let request = ApprovalRequest(
-            id: "approval-\(counter)", token: token, tool: tool, inputSummary: FakeApprovalGate.summary(tool, input),
-            estimate: estimate, requestedAt: clock.now(), actor: actor, sessionId: sessionId)
+            id: "approval-\(counter)", token: token, tool: tool,
+            inputSummary: presentation?.summary ?? FakeApprovalGate.summary(tool, input), estimate: estimate,
+            requestedAt: clock.now(), actor: actor, sessionId: sessionId, presentation: presentation)
         pendingRequests[token] = request
-        checks.append(Check(tool: tool, input: input, estimate: estimate, decision: .required(token)))
+        checks.append(
+            Check(tool: tool, input: input, estimate: estimate, decision: .required(token), presentation: presentation))
         broadcaster.send(request)
         return .required(request)
     }

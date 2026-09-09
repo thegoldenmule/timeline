@@ -3,20 +3,20 @@ import Foundation
 import Synchronization
 import TimelineCore
 
-/// The context a `FakeJobRunner` hands to a job: progress goes to the handle's stream and is recorded.
+/// The context a `FakeJobRunner` hands to a job: progress fans out to every handle's stream (a
+/// `Broadcaster`, so `handle(for:)` can open a fresh stream later) and is recorded.
 public final class FakeJobContext: JobContext, Sendable {
     public let jobId: JobID
-    private let continuation: AsyncStream<JobProgress>.Continuation
+    private let broadcaster = Broadcaster<JobProgress>()
     private let reports = Mutex<[JobProgress]>([])
 
-    public init(jobId: JobID, continuation: AsyncStream<JobProgress>.Continuation) {
+    public init(jobId: JobID) {
         self.jobId = jobId
-        self.continuation = continuation
     }
 
     public func report(_ progress: JobProgress) {
         reports.withLock { $0.append(progress) }
-        continuation.yield(progress)
+        broadcaster.send(progress)
     }
 
     public var isCancelled: Bool { Task.isCancelled }
@@ -24,7 +24,10 @@ public final class FakeJobContext: JobContext, Sendable {
 
     public var reported: [JobProgress] { reports.withLock { $0 } }
 
-    func finish() { continuation.finish() }
+    /// A stream of every report after this call, ending when the job ends.
+    public func progressStream() -> AsyncStream<JobProgress> { broadcaster.subscribe() }
+
+    func finish() { broadcaster.finish() }
 }
 
 /// Runs jobs as `Task`s, honours cancellation, records every submission. `Mode.awaitCompletion` makes
@@ -57,8 +60,8 @@ public actor FakeJobRunner: JobRunner {
 
     public func submit(_ job: Job) async -> JobHandle {
         submissions.append(Submission(id: job.id, kind: job.kind, memoryClass: job.memoryClass, label: job.label))
-        let (stream, continuation) = AsyncStream<JobProgress>.makeStream(bufferingPolicy: .unbounded)
-        let context = FakeJobContext(jobId: job.id, continuation: continuation)
+        let context = FakeJobContext(jobId: job.id)
+        let stream = context.progressStream()
         contexts[job.id] = context
         runningIds.append(job.id)
         let id = job.id
@@ -86,6 +89,16 @@ public actor FakeJobRunner: JobRunner {
 
     public func running() -> [JobID] { runningIds }
     public func queued() -> [JobID] { [] }
+
+    /// A handle over a submitted job: the same task, a fresh progress stream (reports after this call;
+    /// an already finished job yields an ended stream). Nil for an unknown id.
+    public func handle(for id: JobID) -> JobHandle? {
+        guard let task = tasks[id], let context = contexts[id],
+            let submission = submissions.first(where: { $0.id == id })
+        else { return nil }
+        return JobHandle(
+            id: id, kind: submission.kind, label: submission.label, progress: context.progressStream(), task: task)
+    }
 
     /// Waits for every submitted job to end (success, failure, or cancellation).
     public func drain() async {

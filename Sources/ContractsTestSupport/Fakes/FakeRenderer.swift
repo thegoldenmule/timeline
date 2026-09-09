@@ -205,7 +205,8 @@ public final class FakeRenderer: Renderer, Sendable {
             context.report(.done)
             let receipt = ExportReceipt(
                 preset: preset, sequenceId: sequenceId, projectVersion: nil, outputURL: url,
-                durationSeconds: duration, startedAt: started, finishedAt: Date())
+                durationSeconds: duration, startedAt: started, finishedAt: Date(),
+                outputHash: try FileHash.sha256(of: url))
             return try JobOutcome(urls: [url], encoding: receipt)
         }
     }

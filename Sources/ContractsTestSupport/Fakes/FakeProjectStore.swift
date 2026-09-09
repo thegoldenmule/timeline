@@ -8,6 +8,8 @@ public enum FakeStoreError: Error, Hashable, Sendable {
     case alreadyExists(URL)
     /// `rebuildProjections` refolded the log and got a different state or history.
     case rebuildMismatch(String)
+    /// A render or publish ledger row that does not exist.
+    case unknownRecord(String)
 }
 
 /// An in-memory `ProjectStore` over TimelineCore's `decide` / `evolve` / `History`. It behaves like the
@@ -27,6 +29,8 @@ public actor FakeProjectStore: ProjectStore {
     public private(set) var isClosed = false
     public private(set) var rebuildCount = 0
     public var url: URL?
+    private var renderRows: [String: RenderRecord] = [:]
+    private var publishRows: [String: PublishRecord] = [:]
 
     public init(
         project: Project = .blank, history: History = History(),
@@ -148,6 +152,96 @@ public actor FakeProjectStore: ProjectStore {
         _ operation: Command.Operation, actor: Actor = .human, expectedVersion: Int64? = nil, label: String? = nil
     ) throws(EditorError) -> CommandResult {
         try apply(command(operation, actor: actor, expectedVersion: expectedVersion, label: label))
+    }
+}
+
+// MARK: Ledgers
+
+/// The render and publish ledgers in memory, with the rules of `RenderLedger` and `PublishLedger`:
+/// unknown ids throw `FakeStoreError.unknownRecord`, terminal states set `completedAt`, recording never
+/// touches the event log, the version, or `changes`; lists are newest first by `requestedAt` then id.
+extension FakeProjectStore: RenderLedger, PublishLedger {
+    public func recordRender(id: String?, sequenceId: SequenceID, preset: ExportPreset, projectVersion: Int64?) throws
+        -> RenderRecord
+    {
+        if isClosed { throw FakeStoreError.closed }
+        let record = RenderRecord(
+            id: id ?? ids.next(), sequenceId: sequenceId, preset: preset,
+            projectVersion: projectVersion ?? project.version, status: .queued, requestedAt: clock.now())
+        renderRows[record.id] = record
+        return record
+    }
+
+    public func updateRender(
+        _ id: String, status: RenderStatus, outputURL: URL?, outputHash: String?, receipt: ExportReceipt?
+    ) throws -> RenderRecord {
+        if isClosed { throw FakeStoreError.closed }
+        guard var record = renderRows[id] else { throw FakeStoreError.unknownRecord(id) }
+        record.status = status
+        if let outputURL { record.outputURL = outputURL }
+        if let outputHash { record.outputHash = outputHash }
+        if let receipt { record.receipt = receipt }
+        if status.isTerminal { record.completedAt = clock.now() }
+        renderRows[id] = record
+        return record
+    }
+
+    public func renders() throws -> [RenderRecord] {
+        if isClosed { throw FakeStoreError.closed }
+        return renderRows.values.sorted { a, b in
+            a.requestedAt != b.requestedAt ? a.requestedAt > b.requestedAt : a.id > b.id
+        }
+    }
+
+    public func render(_ id: String) throws -> RenderRecord? {
+        if isClosed { throw FakeStoreError.closed }
+        return renderRows[id]
+    }
+
+    public func recordPublish(id: String?, request: PublishRequest, projectVersion: Int64?) throws -> PublishRecord {
+        if isClosed { throw FakeStoreError.closed }
+        guard let render = renderRows[request.renderId] else { throw FakeStoreError.unknownRecord(request.renderId) }
+        let size = (try? FileManager.default.attributesOfItem(atPath: request.fileURL.path))?[.size] as? NSNumber
+        let record = PublishRecord(
+            id: id ?? ids.next(), renderId: request.renderId, destination: request.destination,
+            accountId: request.accountId, status: .queued, request: request, bytesTotal: size?.int64Value,
+            projectVersion: projectVersion ?? render.projectVersion, requestedAt: clock.now())
+        publishRows[record.id] = record
+        return record
+    }
+
+    public func updatePublish(_ id: String, _ update: PublishUpdate) throws -> PublishRecord {
+        if isClosed { throw FakeStoreError.closed }
+        guard var record = publishRows[id] else { throw FakeStoreError.unknownRecord(id) }
+        if let status = update.status {
+            record.status = status
+            if status.isTerminal { record.completedAt = clock.now() }
+        }
+        if let session = update.session { record.session = session }
+        if update.clearsSession { record.session = nil }
+        if let bytesSent = update.bytesSent { record.bytesSent = bytesSent }
+        if let remoteId = update.remoteId { record.remoteId = remoteId }
+        if let remoteURL = update.remoteURL { record.remoteURL = remoteURL }
+        if let receipt = update.receipt { record.receipt = receipt }
+        if let error = update.error { record.error = error }
+        publishRows[id] = record
+        return record
+    }
+
+    public func publishes() throws -> [PublishRecord] {
+        if isClosed { throw FakeStoreError.closed }
+        return publishRows.values.sorted { a, b in
+            a.requestedAt != b.requestedAt ? a.requestedAt > b.requestedAt : a.id > b.id
+        }
+    }
+
+    public func publish(_ id: String) throws -> PublishRecord? {
+        if isClosed { throw FakeStoreError.closed }
+        return publishRows[id]
+    }
+
+    public func publishes(forRender renderId: String) throws -> [PublishRecord] {
+        try publishes().filter { $0.renderId == renderId }
     }
 }
 
