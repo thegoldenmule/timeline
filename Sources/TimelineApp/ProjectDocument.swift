@@ -151,6 +151,10 @@ final class ProjectDocument {
 
     var version: Int64 { project.version }
     var sequence: Sequence? { project.activeSequence }
+    /// The store's render ledger (`renders` table), the way Fork reaches `ProjectStoreCopying`.
+    var renderLedger: (any RenderLedger)? { store as? any RenderLedger }
+    /// The store's publish ledger (`publishes` table).
+    var publishLedger: (any PublishLedger)? { store as? any PublishLedger }
     var canUndo: Bool { viewModel.canUndo }
     var canRedo: Bool { viewModel.canRedo }
 

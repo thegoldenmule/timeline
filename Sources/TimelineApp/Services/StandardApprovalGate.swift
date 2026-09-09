@@ -26,14 +26,24 @@ actor StandardApprovalGate: ApprovalGate {
     func check(tool: String, input: ToolInput, estimate: Estimate, actor: Actor, sessionId: String?)
         -> ApprovalDecision
     {
+        check(tool: tool, input: input, estimate: estimate, presentation: nil, actor: actor, sessionId: sessionId)
+    }
+
+    /// The six-argument form: the tool's card content rides on the request, and its summary is what
+    /// the card's first line shows (`publish_youtube` hands over channel, privacy, and the certification).
+    func check(
+        tool: String, input: ToolInput, estimate: Estimate, presentation: ApprovalPresentation?, actor: Actor,
+        sessionId: String?
+    ) -> ApprovalDecision {
         guard policy.requiresApproval(tool: tool, estimate: estimate) else { return .granted }
         if let token = input.approvalToken, consume(token) { return .granted }
         counter += 1
         let token = ApprovalToken(StandardApprovalGate.mintToken())
         let request = ApprovalRequest(
             id: "approval-\(counter)", token: token, tool: tool,
-            inputSummary: StandardApprovalGate.summary(tool, input),
-            estimate: estimate, requestedAt: clock.now(), actor: actor, sessionId: sessionId)
+            inputSummary: presentation?.summary ?? StandardApprovalGate.summary(tool, input),
+            estimate: estimate, requestedAt: clock.now(), actor: actor, sessionId: sessionId,
+            presentation: presentation)
         entries[token] = .pending(request)
         broadcaster.send(request)
         return .required(request)

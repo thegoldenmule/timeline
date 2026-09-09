@@ -3,26 +3,28 @@ import Foundation
 import Synchronization
 import TimelineCore
 
-/// The context a `BudgetedJobRunner` hands to a job: progress goes to the handle's stream.
+/// The context a `BudgetedJobRunner` hands to a job: progress fans out to every handle's stream (a
+/// `Broadcaster`, so `handle(for:)` can open a fresh stream for a job a tool submitted earlier).
 final class RunnerJobContext: JobContext, Sendable {
     let jobId: JobID
-    private let continuation: AsyncStream<JobProgress>.Continuation
+    private let broadcaster = Broadcaster<JobProgress>()
     private let last = Mutex<JobProgress?>(nil)
 
-    init(jobId: JobID, continuation: AsyncStream<JobProgress>.Continuation) {
+    init(jobId: JobID) {
         self.jobId = jobId
-        self.continuation = continuation
     }
 
     func report(_ progress: JobProgress) {
         last.withLock { $0 = progress }
-        continuation.yield(progress)
+        broadcaster.send(progress)
     }
 
     var isCancelled: Bool { Task.isCancelled }
     func checkCancellation() throws { try Task.checkCancellation() }
     var lastProgress: JobProgress? { last.withLock { $0 } }
-    func finish() { continuation.finish() }
+    /// Every report after this call, ending when the job ends.
+    func progressStream() -> AsyncStream<JobProgress> { broadcaster.subscribe() }
+    func finish() { broadcaster.finish() }
 }
 
 /// The app's `JobRunner`: a FIFO queue admitted against a `JobBudget`. A job runs when its bytes fit
@@ -46,9 +48,18 @@ actor BudgetedJobRunner: JobRunner {
     private var runningJobs: [JobID: Running] = [:]
     private var order: [JobID] = []
     private var tasks: [JobID: Task<JobOutcome, any Error>] = [:]
+    /// Every submission, kept after completion so `handle(for:)` can answer for a finished job.
+    private var records: [JobID: Record] = [:]
     /// Jobs cancelled before their continuation was registered.
     private var cancelledEarly: Set<JobID> = []
     private(set) var completed = 0
+
+    private struct Record {
+        var kind: JobKind
+        var label: String
+        var context: RunnerJobContext
+        var task: Task<JobOutcome, any Error>
+    }
 
     init(budget: JobBudget = .conservative) {
         self.budget = budget
@@ -57,8 +68,8 @@ actor BudgetedJobRunner: JobRunner {
     var usedBytes: Int64 { runningJobs.values.reduce(0) { $0 + $1.bytes } }
 
     func submit(_ job: Job) -> JobHandle {
-        let (stream, continuation) = AsyncStream<JobProgress>.makeStream(bufferingPolicy: .unbounded)
-        let context = RunnerJobContext(jobId: job.id, continuation: continuation)
+        let context = RunnerJobContext(jobId: job.id)
+        let stream = context.progressStream()
         let id = job.id
         let task = Task<JobOutcome, any Error> { [weak self] in
             guard let self else { throw JobError.rejected(reason: "The job runner is gone") }
@@ -80,6 +91,7 @@ actor BudgetedJobRunner: JobRunner {
             return try result.get()
         }
         tasks[id] = task
+        records[id] = Record(kind: job.kind, label: job.label, context: context, task: task)
         return JobHandle(id: id, kind: job.kind, label: job.label, progress: stream, task: task)
     }
 
@@ -91,6 +103,16 @@ actor BudgetedJobRunner: JobRunner {
     func running() -> [JobID] { order.filter { runningJobs[$0] != nil } }
 
     func queued() -> [JobID] { waiting.map(\.job.id) }
+
+    /// A handle over a submitted job: the same task, a fresh progress stream (reports after this call;
+    /// a finished job yields an ended stream). Nil for an unknown id. What the window uses to track a
+    /// job a tool submitted (`publish_youtube` answers with its `jobId`).
+    func handle(for id: JobID) -> JobHandle? {
+        guard let record = records[id] else { return nil }
+        return JobHandle(
+            id: id, kind: record.kind, label: record.label, progress: record.context.progressStream(),
+            task: record.task)
+    }
 
     /// Waits for every submitted job to end (the headless check).
     func drain() async {

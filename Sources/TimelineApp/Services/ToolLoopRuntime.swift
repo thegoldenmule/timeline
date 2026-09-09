@@ -87,15 +87,27 @@ final class ToolLoopSession: AgentSession, Sendable {
     }
 
     /// The gate's request as the `approval_required` output carries it: the token is what `grant`
-    /// needs, the summary and estimate are what the card shows.
+    /// needs, the summary and estimate are what the card shows, and the `details` and `warnings` a tool
+    /// supplied become the card's presentation, so this path's card matches the MCP path's.
     static func request(from output: ToolOutput) -> ApprovalRequest? {
         guard let s = output.structured, let id = s["requestId"]?.stringValue,
             let token = s["approvalToken"]?.stringValue, let tool = s["tool"]?.stringValue
         else { return nil }
         let estimate = (try? s["estimate"]?.decoded(as: Estimate.self)) ?? .none
+        let summary = s["summary"]?.stringValue ?? tool
+        let details = (s["details"]?.arrayValue ?? []).compactMap { detail -> ApprovalDetail? in
+            guard let label = detail["label"]?.stringValue, let value = detail["value"]?.stringValue else {
+                return nil
+            }
+            return ApprovalDetail(label: label, value: value)
+        }
+        let warnings = (s["warnings"]?.arrayValue ?? []).compactMap(\.stringValue)
+        let presentation =
+            details.isEmpty && warnings.isEmpty
+            ? nil : ApprovalPresentation(summary: summary, details: details, warnings: warnings)
         return ApprovalRequest(
-            id: id, token: ApprovalToken(token), tool: tool, inputSummary: s["summary"]?.stringValue ?? tool,
-            estimate: estimate, requestedAt: Date(), actor: .agent(sessionId: "fallback"), sessionId: nil)
+            id: id, token: ApprovalToken(token), tool: tool, inputSummary: summary, estimate: estimate,
+            requestedAt: Date(), actor: .agent(sessionId: "fallback"), sessionId: nil, presentation: presentation)
     }
 
     /// Grants or denies the token on the gate; the loop observes the verdict and continues. The base

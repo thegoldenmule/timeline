@@ -5,6 +5,7 @@ import ContractsTestSupport
 import Foundation
 import MediaKit
 import ProjectStore
+import PublishKit
 import RenderKit
 import Synchronization
 import TimelineCore
@@ -57,6 +58,8 @@ struct AppServices: Sendable {
     /// True when `agentRuntime` is the scripted fallback rather than the Claude Code sidecar.
     let agentIsFallback: Bool
     let receipts: any ToolReceiptSink
+    /// The Google account provider and the YouTube publisher (publish-plan.md 4.5), or how they are missing.
+    let publishing: PublishingServices
     /// The open projects, what tools resolve `projectId` against. App-owned in every phase.
     let projects: OpenProjects
     let mcpHost: MCPServerHost
@@ -79,9 +82,10 @@ struct AppServices: Sendable {
     }
 
     /// Builds every service, starts the MCP host, and writes the proxy configuration.
-    static func boot(root: URL = configuredRoot, agent: AgentMode = .auto, log: AppLog = AppLog()) async throws
-        -> AppServices
-    {
+    static func boot(
+        root: URL = configuredRoot, agent: AgentMode = .auto, publishing: PublishingMode = .fromEnvironment(),
+        log: AppLog = AppLog()
+    ) async throws -> AppServices {
         let layout = LibraryLayout(root: root)
         for dir in [layout.libraryDir, layout.cacheDir, layout.projectsDir] {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -98,10 +102,11 @@ struct AppServices: Sendable {
         let projects = OpenProjects()
         let renderer = AVFoundationRenderer(layout: layout)
         let opener = SQLiteProjectStoreOpener(libraryRootHint: layout.root.path)
+        let publishingServices = try await PublishingServices.make(mode: publishing, layout: layout, log: log)
 
-        let toolServices = ToolServices(
+        let toolServices = AppServices.toolServices(
             renderer: renderer, mediaLibrary: library, analyzer: analyzer, aligner: aligner, jobRunner: jobRunner,
-            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts)
+            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts, publishing: publishingServices)
         let baseContext = ToolContext(projects: projects, services: toolServices, approvals: approvals, actor: .human)
         let registry = await EditorTools.standard(context: baseContext)
 
@@ -156,16 +161,36 @@ struct AppServices: Sendable {
             mediaLibrary: library,
             cache: cache, thumbnails: thumbnails, waveforms: waveforms, analyzer: analyzer, aligner: aligner,
             approvals: approvals, registry: registry, agentRuntime: agentRuntime, agentAvailability: availability,
-            agentIsFallback: isFallback, receipts: receipts, projects: projects, mcpHost: host, mcp: mcp,
-            proxyConfigurationURL: proxyURL, log: log)
+            agentIsFallback: isFallback, receipts: receipts, publishing: publishingServices, projects: projects,
+            mcpHost: host, mcp: mcp, proxyConfigurationURL: proxyURL, log: log)
     }
 
-    /// The services a tool handler may reach. Everything is wired, so no tool answers `serviceUnavailable`.
+    /// The services a tool handler may reach. Everything is wired, so no tool answers `serviceUnavailable`;
+    /// the publisher is absent without a Google OAuth client, which hides `publish_youtube`.
     var toolServices: ToolServices {
-        ToolServices(
+        AppServices.toolServices(
             renderer: renderer, mediaLibrary: mediaLibrary, analyzer: analyzer, aligner: aligner, jobRunner: jobRunner,
-            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts)
+            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts, publishing: publishing)
     }
+
+    private static func toolServices(
+        renderer: any Renderer, mediaLibrary: any MediaLibrary, analyzer: any MediaAnalyzer, aligner: any AudioAligner,
+        jobRunner: any JobRunner, thumbnails: any ThumbnailProvider, waveforms: any WaveformProvider,
+        receipts: any ToolReceiptSink, publishing: PublishingServices
+    ) -> ToolServices {
+        var accounts: [AccountProviderKind: any AccountProvider] = [:]
+        if let provider = publishing.accounts { accounts[.google] = provider }
+        var publishers: [PublishDestination: any Publisher] = [:]
+        if let publisher = publishing.publisher { publishers[.youtube] = publisher }
+        return ToolServices(
+            renderer: renderer, mediaLibrary: mediaLibrary, analyzer: analyzer, aligner: aligner, jobRunner: jobRunner,
+            thumbnails: thumbnails, waveforms: waveforms, receipts: receipts, accounts: accounts, publishers: publishers)
+    }
+
+    /// The Google provider, when publishing is not switched off.
+    var accounts: (any AccountProvider)? { publishing.accounts }
+    /// The YouTube publisher, when a client is configured (or the fake is in use).
+    var publisher: (any Publisher)? { publishing.publisher }
 
     func toolContext(actor: Actor, sessionId: String? = nil) -> ToolContext {
         ToolContext(
