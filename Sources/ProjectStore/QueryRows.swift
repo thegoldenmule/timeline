@@ -1,3 +1,4 @@
+import Contracts
 import Foundation
 import GRDB
 import TimelineCore
@@ -335,5 +336,51 @@ public struct RenderRow: Codable, Hashable, Sendable, FetchableRecord, Persistab
         case projectVersion = "project_version"
         case status
         case receipt
+    }
+}
+
+/// A row of `publishes` (publish-plan.md section 4.2; operational, not part of the event stream). The JSON
+/// columns hold a `PublishRequest`, a `PublishSession`, and a `PublishReceipt` through `ProjectCodec`;
+/// `session` is the only place the resumable upload URL (a capability URL) is ever stored.
+public struct PublishRow: Codable, Hashable, Sendable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "publishes"
+
+    public var publishId: String
+    public var renderId: String
+    public var destination: PublishDestination
+    public var accountId: String
+    public var requestedAt: String
+    public var completedAt: String?
+    public var status: PublishStatus
+    /// JSON `PublishRequest`.
+    public var request: String
+    /// JSON `PublishSession`, kept while the upload can be resumed.
+    public var session: String?
+    public var bytesTotal: Int64?
+    public var bytesSent: Int64?
+    public var remoteId: String?
+    public var remoteUrl: String?
+    public var projectVersion: Int64
+    /// JSON `PublishReceipt`.
+    public var receipt: String?
+    public var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case publishId = "publish_id"
+        case renderId = "render_id"
+        case destination
+        case accountId = "account_id"
+        case requestedAt = "requested_at"
+        case completedAt = "completed_at"
+        case status
+        case request
+        case session
+        case bytesTotal = "bytes_total"
+        case bytesSent = "bytes_sent"
+        case remoteId = "remote_id"
+        case remoteUrl = "remote_url"
+        case projectVersion = "project_version"
+        case receipt
+        case error
     }
 }

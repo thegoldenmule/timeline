@@ -359,7 +359,7 @@ public actor SQLiteProjectStore: ProjectStore {
         try writer.close()
     }
 
-    // MARK: Renders
+    // MARK: Renders (row level; the `RenderLedger` and `PublishLedger` forms live in Ledgers.swift)
 
     /// Records an export request in `renders` (storage.md section 5). Receipts live here, not in events, so
     /// a finished export never bumps the project version.
@@ -403,15 +403,16 @@ public actor SQLiteProjectStore: ProjectStore {
         }
     }
 
-    /// Every render, newest first.
-    public func renders() throws -> [RenderRow] {
+    /// Every `renders` row, newest first. The `RenderLedger` form is `renders()`.
+    public func renderRows() throws -> [RenderRow] {
         if isClosed { throw ProjectStoreError.closed }
         return try writer.read { db in
             try RenderRow.fetchAll(db, sql: "SELECT * FROM renders ORDER BY requested_at DESC, render_id DESC")
         }
     }
 
-    public func render(_ id: String) throws -> RenderRow? {
+    /// The `renders` row with `id`. The `RenderLedger` form is `render(_:)`.
+    public func renderRow(_ id: String) throws -> RenderRow? {
         if isClosed { throw ProjectStoreError.closed }
         return try writer.read { db in try RenderRow.fetchOne(db, key: id) }
     }

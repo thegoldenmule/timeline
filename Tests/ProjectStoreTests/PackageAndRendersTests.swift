@@ -165,7 +165,7 @@ import TimelineCore
         let row = try await t.store.recordRender(sequenceId: sequenceId, preset: .reel9x16)
         #expect(row.status == .queued)
         #expect(row.projectVersion == version)
-        #expect(try await t.store.render(row.renderId) == row)
+        #expect(try await t.store.renderRow(row.renderId) == row)
         let running = try await t.store.updateRender(row.renderId, status: .running)
         #expect(running.completedAt == nil)
         let receipt = ExportReceipt(
@@ -180,7 +180,7 @@ import TimelineCore
         let decoded = try ProjectCodec.decode(ExportReceipt.self, from: Data(try #require(done.receipt).utf8))
         #expect(decoded.warnings == ["asset offline"])
         #expect(try ProjectCodec.decode(ExportPreset.self, from: Data(done.preset.utf8)) == .reel9x16)
-        #expect(try await t.store.renders().map(\.renderId) == [row.renderId])
+        #expect(try await t.store.renderRows().map(\.renderId) == [row.renderId])
         // No event, no version bump: an export never makes an agent stale.
         #expect(await t.store.version() == version)
         await #expect(throws: ProjectStoreError.self) { try await t.store.updateRender("nope", status: .failed) }

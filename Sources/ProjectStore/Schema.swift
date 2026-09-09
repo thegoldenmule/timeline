@@ -28,7 +28,7 @@ enum Schema {
     }
 
     /// `PRAGMA user_version` after the latest migration, for tooling that reads it.
-    static let currentUserVersion = 1
+    static let currentUserVersion = 2
 
     /// Migrations are named `v<n>`; each one also sets `PRAGMA user_version = n` (GRDB tracks what ran in
     /// its own `grdb_migrations` table, which is the source of truth).
@@ -37,6 +37,10 @@ enum Schema {
         m.registerMigration("v1") { db in
             try db.execute(sql: v1)
             try db.execute(sql: "PRAGMA user_version = 1")
+        }
+        m.registerMigration("v2") { db in
+            try db.execute(sql: v2)
+            try db.execute(sql: "PRAGMA user_version = 2")
         }
         return m
     }()
@@ -171,7 +175,33 @@ enum Schema {
         ) STRICT;
         """
 
-    /// The projection tables `rebuildProjections` truncates, in an order foreign keys accept.
+    /// The `publishes` ledger next to `renders` (publish-plan.md section 4.2). Operational rows: never an
+    /// event, never a projection, so `rebuildProjections` leaves them alone and `VACUUM INTO` carries them.
+    static let v2 = """
+        CREATE TABLE publishes (                        -- operational, not part of the event stream
+          publish_id      TEXT PRIMARY KEY,
+          render_id       TEXT NOT NULL REFERENCES renders(render_id),
+          destination     TEXT NOT NULL CHECK (destination IN ('youtube')),
+          account_id      TEXT NOT NULL,                -- provider subject; the account record lives outside the project
+          requested_at    TEXT NOT NULL,
+          completed_at    TEXT,
+          status          TEXT NOT NULL CHECK (status IN ('queued','uploading','processing','done','failed','cancelled')),
+          request         TEXT NOT NULL,                -- JSON PublishRequest (no secrets by construction)
+          session         TEXT,                         -- JSON PublishSession: upload URI + bytes confirmed, for resume
+          bytes_total     INTEGER,
+          bytes_sent      INTEGER,
+          remote_id       TEXT,
+          remote_url      TEXT,
+          project_version INTEGER NOT NULL,             -- copied from the render row at request time
+          receipt         TEXT,                         -- JSON PublishReceipt
+          error           TEXT
+        ) STRICT;
+        CREATE INDEX publishes_render_idx ON publishes(render_id, requested_at);
+        CREATE INDEX publishes_active_idx ON publishes(status) WHERE status IN ('queued','uploading','processing');
+        """
+
+    /// The projection tables `rebuildProjections` truncates, in an order foreign keys accept. `renders` and
+    /// `publishes` are not projections and are never truncated.
     static let queryTablesInDeleteOrder = ["transitions", "markers", "clips", "tracks", "sequences", "assets"]
 
     /// Names of the `projection_state` rows.
