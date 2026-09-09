@@ -22,6 +22,9 @@ final class AppModel {
     private(set) var bootError: String?
     private(set) var bootStage = "Starting services"
     var lastCommandError: String?
+    /// A one-line note in the status bar, for things that went right but are worth saying (an import
+    /// that stopped at the library rather than the timeline).
+    var lastStatusNote: String?
 
     func boot() async {
         guard services == nil else { return }
@@ -83,10 +86,34 @@ final class AppModel {
 
     // MARK: Actions
 
-    /// Imports the media files through the library as jobs, records their assets, and lands them on the
-    /// timeline: back to back from `target` when given (a drop), else appended at the end. Non-media
-    /// files are skipped with a note in the status bar.
-    func importFiles(_ urls: [URL], at target: TimelineDropTarget? = nil) {
+    /// Imports the media files through the library as jobs and records their assets. Nothing lands on
+    /// the timeline: only a drop on the timeline itself asks for clips, through `importFiles(_:at:)`.
+    /// Non-media files are skipped with a note in the status bar.
+    func importFiles(_ urls: [URL]) {
+        runImport(urls) { importer, media in
+            let outcome = try await importer.importFiles(media)
+            return "Imported \(outcome.assets.count) file\(outcome.assets.count == 1 ? "" : "s") into the library"
+        }
+    }
+
+    /// The timeline drop: the same import, then the clips land back to back from `target`.
+    func importFiles(_ urls: [URL], at target: TimelineDropTarget) {
+        runImport(urls) { importer, media in
+            try await importer.importFiles(media, at: target)
+            return nil
+        }
+    }
+
+    /// The window-wide drop (preview, sidebar, status bar): the files go into the library, nowhere else.
+    /// The timeline has its own drop target and inserts there.
+    func dropFiles(_ urls: [URL]) {
+        importFiles(urls)
+    }
+
+    /// Reports the non-media files, runs `body` on an importer, and surfaces its note or its error.
+    private func runImport(
+        _ urls: [URL], _ body: @MainActor @escaping (MediaImporter, [URL]) async throws -> String?
+    ) {
         guard let services, let document else { return }
         let ignored = urls.filter { !MediaFileTypes.isMedia($0) }
         lastCommandError =
@@ -95,21 +122,15 @@ final class AppModel {
             : "Ignored \(ignored.count) non-media file\(ignored.count == 1 ? "" : "s"): "
                 + ignored.map(\.lastPathComponent).joined(separator: ", ")
         guard ignored.count < urls.count else { return }
+        lastStatusNote = nil
         let importer = MediaImporter(services: services, document: document, jobs: jobs)
         Task { @MainActor in
             do {
-                try await importer.importFiles(urls, at: target)
+                lastStatusNote = try await body(importer, urls)
             } catch {
                 lastCommandError = "\(error)"
             }
         }
-    }
-
-    /// The window-wide drop (preview, sidebar, status bar): imports at the playhead on the first
-    /// matching track. The timeline's own drop target takes precedence over it.
-    func dropFiles(_ urls: [URL]) {
-        guard let document else { return }
-        importFiles(urls, at: TimelineDropTarget(trackId: nil, at: document.viewModel.playhead))
     }
 
     func presentImportPanel() {
@@ -370,6 +391,7 @@ struct EditorView: View {
             Text("Render: \(document.lastRenderPath.rawValue) #\(document.playerItemGeneration)")
             Text(String(format: "Playhead %.2fs", document.playheadSeconds))
             Text("Jobs: \(jobs.running.count) running")
+            if let note = model.lastStatusNote { Text(note).foregroundStyle(.secondary).lineLimit(1) }
             if let error = model.lastCommandError ?? document.lastError ?? document.viewModel.lastError.map({ "\($0)" })
             {
                 Text(error).foregroundStyle(.red).lineLimit(1)
