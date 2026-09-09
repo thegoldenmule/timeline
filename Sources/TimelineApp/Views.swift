@@ -333,6 +333,9 @@ struct EditorView: View {
             sidebar
                 .frame(minWidth: 360, idealWidth: 420, maxWidth: 560)
         }
+        // Fill the window whatever the panes contain. A pane whose content sizes to itself — an empty
+        // library, say — would otherwise shrink the split view and take the rest of the editor with it.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .toolbar { toolbarContent }
         .navigationTitle("\(document.project.name) — v\(document.version)")
         .sheet(isPresented: publishSheetPresented) {

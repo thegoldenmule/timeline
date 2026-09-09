@@ -312,6 +312,10 @@ public struct MediaLibraryView: View {
                 .listStyle(.inset)
             }
         }
+        // Both branches must fill the pane. `List` does on its own but `ContentUnavailableView` sizes to
+        // its content, so without this the pane collapses to the empty state's intrinsic size the moment a
+        // filter matches nothing — and the split view hands the slack to its siblings, resizing the window.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// A drag that starts on a selected row carries the whole selection; otherwise just that row.
