@@ -40,7 +40,7 @@ func rms(_ x: ArraySlice<Float>) -> Float {
     return Float((acc / Double(max(1, x.count))).squareRoot())
 }
 
-@Suite(.serialized) struct VerdictTests {
+@Suite struct VerdictTests {
     /// The same render twice inside one camera track: two verified candidates and `ambiguous`, never a single
     /// confident answer.
     @Test func repeatedMaterialIsAmbiguous() async throws {
@@ -249,11 +249,16 @@ func rms(_ x: ArraySlice<Float>) -> Float {
     }
 }
 
+/// The scale tests: real two-hour fixtures, minutes of synthesis, a wall-clock budget. Off by default because
+/// they set the whole target's wall clock on their own; run them with `AUDIOALIGN_BENCH=1 make bench`.
 @Suite(.serialized) struct LongRecordingTests {
+    static var enabled: Bool { ProcessInfo.processInfo.environment["AUDIOALIGN_BENCH"] != nil }
+
     /// A two-hour camera track against a five-minute render: streamed through the chunked envelope path with
     /// bounded resident audio, aligned in well under the budget (2 s release; asserted generously here because
     /// the test may run in debug), and the offset still within 0.1 ms.
-    @Test func twoHourRecordingAlignsQuickly() async throws {
+    @Test(.enabled(if: LongRecordingTests.enabled), .timeLimit(.minutes(10)))
+    func twoHourRecordingAlignsQuickly() async throws {
         let dir = try TestMedia.Directory()
         let renderDuration = 300.0, insertSeconds = 5.0, cameraDuration = 7200.0
         let pair = try await TestMedia.alignmentPair(

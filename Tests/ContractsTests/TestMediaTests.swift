@@ -411,10 +411,12 @@ private func expectVideo(_ clip: TestMedia.Clip, tracks: (video: Int, audio: Int
 
     @Test func alignmentPairIsDeterministic() async throws {
         let dir = try TestMedia.Directory()
+        // `cacheSynthesis: false` on both: the point is that the generator recomputes the same samples, not that
+        // the memo hands back the buffer it kept.
         let a = try await TestMedia.alignmentPair(
-            seed: 9, cameraDuration: 4, renderDuration: 1, offsetSeconds: 1, in: dir.url)
+            seed: 9, cameraDuration: 4, renderDuration: 1, offsetSeconds: 1, cacheSynthesis: false, in: dir.url)
         let b = try await TestMedia.alignmentPair(
-            seed: 9, cameraDuration: 4, renderDuration: 1, offsetSeconds: 1, in: dir.url)
+            seed: 9, cameraDuration: 4, renderDuration: 1, offsetSeconds: 1, cacheSynthesis: false, in: dir.url)
         let ra = try await TestMedia.readAudio(url: a.render.url).samples
         let rb = try await TestMedia.readAudio(url: b.render.url).samples
         #expect(ra == rb)

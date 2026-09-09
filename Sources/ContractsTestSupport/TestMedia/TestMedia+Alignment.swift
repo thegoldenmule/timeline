@@ -15,23 +15,42 @@ extension TestMedia {
     ///   reverb, a bass line present only in the camera, low-frequency rumble, and a soft-knee compressor (AGC).
     /// - render: the same performance through a different reverb, low shelf +6 dB at 200 Hz and high shelf -6 dB
     ///   at 4 kHz, no noise, no bass, rendered at `renderSampleRate * (1 + driftPPM * 1e-6)`, plus a 0.1 s tail.
+    ///
+    /// The performance, the bass line, the pink noise, and the DAW render are memoized by the parameters that
+    /// determine them (`AlignmentSynthesisCache`), so a suite that sweeps offset and SNR over one seed pays for
+    /// them once. Pass `cacheSynthesis: false` to force a full recomputation — a test that asserts the generator
+    /// is deterministic must not be handed the same buffer twice.
     public static func alignmentPair(
         seed: UInt64 = 1, cameraDuration: Double = 20, renderDuration: Double = 5, offsetSeconds: Double = 7.345,
         driftPPM: Double = 23, snrDB: Double = 0, cameraSampleRate: Double = defaultSampleRate,
-        renderSampleRate: Double = 44100, in directory: URL? = nil, name: String? = nil
+        renderSampleRate: Double = 44100, cacheSynthesis: Bool = true, in directory: URL? = nil, name: String? = nil
     ) async throws -> AlignmentPair {
         guard offsetSeconds >= 0, offsetSeconds + renderDuration <= cameraDuration else {
             throw Error.unsupportedParameters("the render must lie inside the camera recording")
         }
-        let score = AlignScore.make(length: renderDuration, seed: seed)
-        let performance = score.render(sampleRate: cameraSampleRate)
-        let bass = AlignScore.bassLine(length: renderDuration, seed: seed &+ 4).render(sampleRate: cameraSampleRate)
-        let noise = AlignSynth.pinkNoise(count: Int(cameraDuration * cameraSampleRate), seed: seed &+ 6)
+        let cache = AlignmentSynthesisCache.shared
+        let performance = await cache.samples(
+            "perf-\(seed)-\(renderDuration)-\(cameraSampleRate)", caching: cacheSynthesis
+        ) {
+            AlignScore.make(length: renderDuration, seed: seed).render(sampleRate: cameraSampleRate)
+        }
+        let bass = await cache.samples("bass-\(seed)-\(renderDuration)-\(cameraSampleRate)", caching: cacheSynthesis) {
+            AlignScore.bassLine(length: renderDuration, seed: seed &+ 4).render(sampleRate: cameraSampleRate)
+        }
+        let noiseCount = Int(cameraDuration * cameraSampleRate)
+        let noise = await cache.samples("noise-\(seed)-\(noiseCount)", caching: cacheSynthesis) {
+            AlignSynth.pinkNoise(count: noiseCount, seed: seed &+ 6)
+        }
+        let render = await cache.samples(
+            "render-\(seed)-\(renderDuration)-\(renderSampleRate)-\(driftPPM)", caching: cacheSynthesis
+        ) {
+            AlignSynth.dawProcess(
+                AlignScore.make(length: renderDuration, seed: seed).render(
+                    sampleRate: renderSampleRate * (1 + driftPPM * 1e-6)), fs: renderSampleRate)
+        }
         let camera = AlignSynth.buildCamera(
             noise: noise, inserts: [(offset: offsetSeconds, perf: performance)], bass: bass, snrDB: snrDB,
             fs: cameraSampleRate, seed: seed &+ 10)
-        let render = AlignSynth.dawProcess(
-            score.render(sampleRate: renderSampleRate * (1 + driftPPM * 1e-6)), fs: renderSampleRate)
 
         let base = name ?? "align-\(UUID().uuidString.prefix(8))"
         let cameraURL = try outputURL(in: directory, name: "\(base)-camera", defaultName: base, ext: "caf")
@@ -52,6 +71,62 @@ extension TestMedia {
         return AlignmentPair(
             camera: Clip(url: cameraURL, description: cameraDescription),
             render: Clip(url: renderURL, description: renderDescription), truth: truth)
+    }
+}
+
+/// Memoizes the deterministic, expensive halves of `alignmentPair`: the performance, the bass line, the pink
+/// noise, and the DAW render are each a pure function of the parameters in their key, so building the same
+/// fixture twice recomputes nothing. `AudioAlignTests`' SNR matrix sweeps offset, drift, and SNR over one seed
+/// and one camera length, which means eighteen cases share one 600 s noise buffer instead of synthesizing it
+/// eighteen times.
+///
+/// Concurrent callers that miss the same key await one `Task` rather than racing to compute it. Entries live for
+/// the process, capped at `budgetBytes` with the least recently used evicted first; sharing the buffers lowers
+/// the peak resident set as well, since the parallel cases no longer each hold their own copy.
+actor AlignmentSynthesisCache {
+    static let shared = AlignmentSynthesisCache()
+
+    /// One gigabyte holds every fixture `AudioAlignTests` builds; past that the oldest key is dropped and
+    /// recomputed on its next use.
+    private let budgetBytes = 1 << 30
+    private var tasks: [String: Task<[Float], Never>] = [:]
+    private var sizes: [String: Int] = [:]
+    /// Keys least recently used first.
+    private var order: [String] = []
+    private var bytes = 0
+
+    /// The samples for `key`, computed by `make` at most once. With `caching` false, `make` always runs and
+    /// nothing is stored or read.
+    func samples(_ key: String, caching: Bool = true, _ make: @Sendable @escaping () -> [Float]) async -> [Float] {
+        guard caching else { return await Task.detached(priority: .userInitiated, operation: make).value }
+        if let task = tasks[key] {
+            touch(key)
+            return await task.value
+        }
+        let task = Task.detached(priority: .userInitiated, operation: make)
+        tasks[key] = task
+        order.append(key)
+        let value = await task.value
+        record(key, size: value.count * MemoryLayout<Float>.stride)
+        return value
+    }
+
+    private func touch(_ key: String) {
+        guard let index = order.firstIndex(of: key) else { return }
+        order.remove(at: index)
+        order.append(key)
+    }
+
+    private func record(_ key: String, size: Int) {
+        guard sizes[key] == nil else { return }
+        sizes[key] = size
+        bytes += size
+        while bytes > budgetBytes, let oldest = order.first, oldest != key, let evicted = sizes[oldest] {
+            order.removeFirst()
+            tasks[oldest] = nil
+            sizes[oldest] = nil
+            bytes -= evicted
+        }
     }
 }
 
