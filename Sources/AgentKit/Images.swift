@@ -6,7 +6,7 @@ import ImageIO
 import TimelineCore
 
 /// CoreGraphics-only image helpers for the tools' image blocks (no AppKit, so they run off the main
-/// actor): PNG encoding, the `look_at` contact sheet, and the `align_audio` proof image.
+/// actor): PNG and JPEG encoding, the `look_at` contact sheet, and the `align_audio` proof image.
 public enum ToolImages {
     public enum Failure: Error, Sendable { case contextFailed, encodingFailed }
 
@@ -17,6 +17,19 @@ public enum ToolImages {
             throw Failure.encodingFailed
         }
         CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw Failure.encodingFailed }
+        return out as Data
+    }
+
+    /// Encodes a `CGImage` as JPEG through ImageIO (`quality` 0...1; 0.85 keeps a 1280x720 thumbnail
+    /// well under YouTube's 2 MB limit).
+    public static func jpeg(_ image: CGImage, quality: Double = 0.85) throws -> Data {
+        let out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil) else {
+            throw Failure.encodingFailed
+        }
+        let options = [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+        CGImageDestinationAddImage(destination, image, options)
         guard CGImageDestinationFinalize(destination) else { throw Failure.encodingFailed }
         return out as Data
     }
