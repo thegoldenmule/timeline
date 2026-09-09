@@ -643,7 +643,7 @@ struct AgentSection: View {
                 ContentUnavailableView {
                     Label("No session yet", systemImage: "sparkles")
                 } description: {
-                    Text("Say what you want done. Drop clips on the box below to hand the agent their paths.")
+                    Text("Say what you want done. Drop clips anywhere in this pane to hand over their paths.")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -654,9 +654,11 @@ struct AgentSection: View {
             AgentComposerView(
                 composer: agent.composer, isBusy: agent.isRunning || agent.isStarting,
                 placeholder: agent.transcript == nil
-                    ? "Tell the agent what to do — drop clips here to attach them" : "Message the agent",
+                    ? "Tell the agent what to do — drop clips anywhere here" : "Message the agent",
                 onSend: { model.sendToAgent($0) }, onAttach: { model.presentAttachPanel() })
         }
+        // The whole pane takes the drop, not just the message box.
+        .agentAttachmentTarget(agent.composer)
     }
 }
 

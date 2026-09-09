@@ -72,6 +72,9 @@ public struct AgentAttachment: Identifiable, Hashable, Sendable {
 public final class AgentComposer {
     public var draft = ""
     public private(set) var attachments: [AgentAttachment] = []
+    /// A drag is over the agent pane. The whole pane is the target — the transcript as much as the
+    /// message box — and the box draws the highlight wherever in the pane the pointer is.
+    public var isDropTargeted = false
     /// Posters for the chips, on the same cache the library panel uses, so a file both panes show is
     /// fetched once.
     public let thumbnails: LibraryThumbnailCache
@@ -163,6 +166,34 @@ public final class AgentComposer {
         return text
     }
 
+    // MARK: Dropping
+
+    /// The types the agent pane accepts: a library row's own payload, and any file.
+    public static let dropTypes = [LibraryDragPayload.typeIdentifier, UTType.fileURL.identifier]
+
+    /// Reads a drop: library rows carry their own payload, everything else arrives as a file URL. Returns
+    /// false when the drop held neither, so the pane refuses it rather than swallowing it.
+    @discardableResult
+    public func stage(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(LibraryDragPayload.typeIdentifier) {
+                handled = true
+                provider.loadDataRepresentation(forTypeIdentifier: LibraryDragPayload.typeIdentifier) { data, _ in
+                    guard let data, let payload = try? LibraryDragPayload(data: data) else { return }
+                    Task { @MainActor [weak self] in self?.add(libraryItems: payload.items) }
+                }
+            } else if provider.canLoadObject(ofClass: URL.self) {
+                handled = true
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
+                    Task { @MainActor [weak self] in self?.add(urls: [url]) }
+                }
+            }
+        }
+        return handled
+    }
+
     // MARK: Drawing
 
     /// The poster for a chip, or nil while it is being fetched. Only a staged library row has one: a file
@@ -187,7 +218,6 @@ public struct AgentComposerView: View {
     /// Opens the app's file panel; nil hides the paperclip.
     public var onAttach: (() -> Void)?
 
-    @State private var isTargeted = false
     @FocusState private var isFocused: Bool
 
     public init(
@@ -234,19 +264,9 @@ public struct AgentComposerView: View {
                     isTargeted ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: isTargeted ? 2 : 1)
         )
         .padding(8)
-        .onDrop(of: [LibraryDragPayload.typeIdentifier, UTType.fileURL.identifier], isTargeted: $isTargeted) {
-            providers in
-            AgentComposerView.stage(providers, into: composer)
-        }
-        .overlay(alignment: .center) {
-            if isTargeted {
-                Text("Attach to the message — not imported")
-                    .font(.caption).padding(6)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-                    .allowsHitTesting(false)
-            }
-        }
     }
+
+    private var isTargeted: Bool { composer.isDropTargeted }
 
     private var attachmentStrip: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -281,27 +301,6 @@ public struct AgentComposerView: View {
         onSend(message)
     }
 
-    /// Reads a drop: library rows carry their own payload, everything else arrives as a file URL. Returns
-    /// false when the drop held neither, so the pane refuses it.
-    static func stage(_ providers: [NSItemProvider], into composer: AgentComposer) -> Bool {
-        var handled = false
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(LibraryDragPayload.typeIdentifier) {
-                handled = true
-                provider.loadDataRepresentation(forTypeIdentifier: LibraryDragPayload.typeIdentifier) { data, _ in
-                    guard let data, let payload = try? LibraryDragPayload(data: data) else { return }
-                    Task { @MainActor in composer.add(libraryItems: payload.items) }
-                }
-            } else if provider.canLoadObject(ofClass: URL.self) {
-                handled = true
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url, url.isFileURL else { return }
-                    Task { @MainActor in composer.add(urls: [url]) }
-                }
-            }
-        }
-        return handled
-    }
 }
 
 /// One staged file: its poster or kind, its name, and the button that unstages it.
@@ -357,5 +356,41 @@ struct AgentAttachmentChip: View {
         case .image: return "photo"
         case nil: return "doc"
         }
+    }
+}
+
+/// Makes a whole view the agent's attachment target: anything dropped on it — a library row, a file from
+/// the Finder — is staged on `composer` and nothing is imported. Put it on the pane, not on the message
+/// box: a clip dragged at the transcript is aimed at the agent just as squarely as one dragged at the
+/// field.
+public struct AgentAttachmentTarget: ViewModifier {
+    public let composer: AgentComposer
+
+    public init(composer: AgentComposer) { self.composer = composer }
+
+    public func body(content: Content) -> some View {
+        @Bindable var composer = composer
+        content
+            .onDrop(of: AgentComposer.dropTypes, isTargeted: $composer.isDropTargeted) { providers in
+                composer.stage(providers)
+            }
+            .overlay {
+                if composer.isDropTargeted {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor, lineWidth: 2)
+                        Label("Attach to the message — not imported", systemImage: "paperclip")
+                            .font(.caption).padding(8)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+    }
+}
+
+extension View {
+    /// See `AgentAttachmentTarget`.
+    public func agentAttachmentTarget(_ composer: AgentComposer) -> some View {
+        modifier(AgentAttachmentTarget(composer: composer))
     }
 }

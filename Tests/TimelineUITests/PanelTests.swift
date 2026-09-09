@@ -376,17 +376,23 @@ struct AgentComposerTests {
         #expect(c.poster(for: attachment) == nil)
     }
 
-    /// The drop itself, on the same providers AppKit hands SwiftUI: a library payload and a file URL.
+    /// The drop itself, on the providers a real drag hands over: the library row registered through the
+    /// same `Transferable` bridge `.draggable` uses, and a file URL. This is what catches the pane and the
+    /// library disagreeing about the payload's type identifier.
     @Test func aDropStagesLibraryRowsAndFileURLs() async throws {
         let c = composer()
-        let payload = try LibraryDragPayload(items: [item("cam.mov")]).data()
-        let library = NSItemProvider(item: payload as NSData, typeIdentifier: LibraryDragPayload.typeIdentifier)
+        let payload = LibraryDragPayload(items: [item("cam.mov")])
+        let library = NSItemProvider()
+        library.register(payload)
+        #expect(library.hasItemConformingToTypeIdentifier(LibraryDragPayload.typeIdentifier))
+        #expect(AgentComposer.dropTypes.contains { library.hasItemConformingToTypeIdentifier($0) })
         let file = NSItemProvider(object: URL(fileURLWithPath: "/tmp/notes.txt") as NSURL)
-        #expect(AgentComposerView.stage([library, file], into: c))
+        #expect(AgentComposer.dropTypes.contains { file.hasItemConformingToTypeIdentifier($0) })
+        #expect(c.stage([library, file]))
         #expect(await eventually { c.attachments.count == 2 })
         #expect(Set(c.attachments.map(\.displayName)) == ["cam.mov", "notes.txt"])
         // Nothing else is offered anything: a drop of an unknown type is refused.
-        #expect(!AgentComposerView.stage([NSItemProvider(object: "hello" as NSString)], into: c))
+        #expect(!c.stage([NSItemProvider(object: "hello" as NSString)]))
     }
 
     @Test func theComposerAndTheTranscriptRender() async throws {
