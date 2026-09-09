@@ -196,19 +196,48 @@ final class ProjectDocument {
         return end
     }
 
+    /// The track kind an asset's clip goes on: video for anything with a picture (images included).
+    static func trackKind(for asset: Asset) -> TrackKind { asset.hasVideo || asset.kind == .image ? .video : .audio }
+
     /// Appends the whole asset at the end of the timeline on a matching track; video auto-links its audio.
+    /// Returns the result and the id of the clip it created.
     @discardableResult
-    func appendClip(for asset: Asset) async throws(EditorError) -> CommandResult {
+    func appendClip(for asset: Asset) async throws(EditorError) -> (result: CommandResult, clipId: ClipID) {
+        let track = try await track(of: ProjectDocument.trackKind(for: asset))
+        return try await addClip(for: asset, on: track, at: sequenceEnd, mode: .overwrite)
+    }
+
+    /// Inserts the whole asset at a drop target: on the target track when it exists, is unlocked, and
+    /// matches the asset's kind, else on the first matching track (created when there is none). Ripple by
+    /// default, so a drop between clips pushes what follows along and a drop past the end appends; video
+    /// auto-links its audio. Returns the result and the id of the clip it created.
+    @discardableResult
+    func insertClip(for asset: Asset, at target: TimelineDropTarget, mode: EditMode = .ripple) async throws(EditorError)
+        -> (result: CommandResult, clipId: ClipID)
+    {
+        let kind = ProjectDocument.trackKind(for: asset)
+        let track: Track
+        if let id = target.trackId, let named = sequence?.track(id), named.kind == kind, !named.locked {
+            track = named
+        } else {
+            track = try await self.track(of: kind)
+        }
+        return try await addClip(for: asset, on: track, at: target.at, mode: mode)
+    }
+
+    private func addClip(for asset: Asset, on track: Track, at: RationalTime, mode: EditMode) async throws(EditorError)
+        -> (result: CommandResult, clipId: ClipID)
+    {
         guard let sequence else { throw .notFound(id: "activeSequence") }
-        let kind: TrackKind = asset.hasVideo ? .video : .audio
-        let track = try await track(of: kind)
         if asset.hasVideo, asset.hasAudio { _ = try await self.track(of: .audio) }
-        return try await apply(
+        let clipId = ClipID(minting: ProjectDocument.commandIds)
+        let result = try await apply(
             .addClip(
                 .init(
-                    sequenceId: .id(sequence.id), trackId: .id(track.id), assetId: .id(asset.id), at: sequenceEnd,
-                    sourceIn: .zero, sourceOut: asset.duration, mode: .overwrite, link: .auto)),
+                    id: clipId, sequenceId: .id(sequence.id), trackId: .id(track.id), assetId: .id(asset.id), at: at,
+                    sourceIn: .zero, sourceOut: asset.duration, mode: mode, link: .auto)),
             label: "Add \(asset.displayName)")
+        return (result, clipId)
     }
 
     // MARK: Transport
