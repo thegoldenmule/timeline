@@ -86,6 +86,7 @@ TIMELINE_ROOT=/tmp/tl swift run TimelineApp   # the window over another root
 TIMELINE_PUBLISHING=fake swift run TimelineApp  # the window with the in-process fake YouTube
 swift run TimelineApp --connect-google        # connect a Google account from the terminal
 make e2e                                      # swift run TimelineApp --skeleton-check
+make bench                                    # the opt-in scale tests, in release
 ./ci.sh                                       # lint, swift test, e2e
 ```
 
@@ -96,6 +97,13 @@ Environment: `TIMELINE_ROOT` (the library root); `TIMELINE_GOOGLE_CLIENT_ID` and
 `TIMELINE_TOKEN_STORE=file|keychain` (default: file unbundled, Keychain from an `.app`);
 `TIMELINE_PUBLISHING=auto|fake|off`; `TIMELINE_LIVE_YOUTUBE=1` and `TIMELINE_KEYCHAIN_TESTS=1` for the
 opt-in PublishKit tests (never run by the agents).
+
+Test environment: the scale tests are off unless their variable is set, because each one sets the wall
+clock of its whole target on its own. `AUDIOALIGN_BENCH=1` runs `AudioAlignTests.LongRecordingTests` (the
+two-hour camera track against a five-minute render, ~45 s); `MEDIAKIT_BENCH=1` runs
+`MediaKitTests.BenchmarkTests` (streamed analyses over `MEDIAKIT_BENCH` minutes of audio, default 10);
+`TIMELINE_LIVE_CLAUDE=1` runs the one headless run against the real `claude` CLI. `make bench` sets the
+first two and runs them in release. Everything else runs in `make test`.
 
 The window: the media library pane on the left (⌥⌘L, remembered in `showsLibrary`), the preview on top
 (Play in the status bar or the space bar), TimelineUI's Metal timeline

@@ -1,4 +1,4 @@
-.PHONY: build test test-parallel lint format e2e ci
+.PHONY: build test test-parallel bench lint format e2e ci
 
 build:
 	swift build
@@ -16,6 +16,13 @@ test:
 # The whole package in one parallel process; see the note on `test`.
 test-parallel:
 	swift test
+
+# The scale tests, which `make test` leaves out because each one sets its target's wall clock on its own:
+# AudioAlign's two-hour alignment and MediaKit's streamed-analysis throughput. Release, because both are
+# measuring speed. Documented in docs/design/integration.md.
+bench:
+	AUDIOALIGN_BENCH=1 swift test -c release --filter "^AudioAlignTests\.LongRecordingTests"
+	MEDIAKIT_BENCH=1 swift test -c release --filter "^MediaKitTests\.BenchmarkTests"
 
 # swift-format ships with the Xcode 26 toolchain.
 lint:

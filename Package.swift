@@ -50,11 +50,14 @@ let package = Package(
             dependencies: ["TimelineCore"],
             swiftSettings: strict,
             linkerSettings: [.linkedFramework("AVFoundation"), .linkedFramework("CoreGraphics")]),
-        // In-memory fakes for every protocol plus the synthetic TestMedia generator.
+        // In-memory fakes for every protocol plus the synthetic TestMedia generator. Optimized even in debug:
+        // the fixture synthesis (minutes of audio, sample by sample) is nothing but scalar loops, and at -Onone
+        // it costs more than every test that consumes it. Nothing here is under test, so the flag changes only
+        // how fast the fixtures are built. See docs/design/integration.md.
         .target(
             name: "ContractsTestSupport",
             dependencies: ["TimelineCore", "Contracts"],
-            swiftSettings: strict,
+            swiftSettings: strict + [.unsafeFlags(["-O"], .when(configuration: .debug))],
             linkerSettings: [.linkedFramework("AVFoundation"), .linkedFramework("CoreImage")]),
         .testTarget(
             name: "ContractsTests",
