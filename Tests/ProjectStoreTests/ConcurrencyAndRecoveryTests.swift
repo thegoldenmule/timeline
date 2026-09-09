@@ -186,7 +186,7 @@ import TimelineCore
         let migrations: [String] = try await t.store.writer.read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations")
         }
-        #expect(migrations == ["v1"])
+        #expect(migrations == ["v1", "v2"])
         let strict = #expect(throws: DatabaseError.self) {
             try t.store.writer.write { db in
                 try db.execute(
