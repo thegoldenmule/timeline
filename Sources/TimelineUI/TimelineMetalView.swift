@@ -156,12 +156,10 @@ public final class TimelineMetalView: MTKView {
             as? [URL] ?? []
     }
 
-    /// The library rows on the drag's pasteboard, if it carries the library type.
+    /// The library rows the drag is carrying (`LibraryDragPayload.items(on:)`: the in-process handoff
+    /// first, the pasteboard second).
     private func libraryItems(_ sender: any NSDraggingInfo) -> [LibraryDragItem] {
-        guard let data = sender.draggingPasteboard.data(forType: LibraryDragPayload.pasteboardType),
-            let payload = try? LibraryDragPayload(data: data)
-        else { return [] }
-        return payload.items
+        LibraryDragPayload.items(on: sender.draggingPasteboard)
     }
 
     /// Library rows are checked before file URLs: a row may also offer a `.fileURL` representation so a
@@ -190,6 +188,7 @@ public final class TimelineMetalView: MTKView {
         // `data(forType:)` answers empty rather than nil, and taking the library branch on that alone
         // dropped nothing at all. The file URL the drag also carries is what lands then.
         let items = libraryItems(sender)
+        LibraryDragPayload.endInFlight()
         if !items.isEmpty {
             return viewModel.dropLibraryItems(items, at: point)
         }

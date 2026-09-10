@@ -281,6 +281,34 @@ struct LibraryDropTests {
         #expect(f.viewModel.dropTarget == nil)
     }
 
+    /// The in-process handoff: the pasteboard's copy of the rows is empty (promised, unresolved) and the
+    /// rows still land, because the panel handed them across directly. Without it the drop fell back to
+    /// the file URL — or to nothing at all when that had not resolved either, which is what made dropping
+    /// a library row flakey.
+    @Test func rowsHandedAcrossInProcessLandEvenWhenThePasteboardIsEmpty() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        let l = f.viewModel.layout
+        let point = CGPoint(x: l.x(forSeconds: 20), y: l.rows[0].midY)
+        var libraryDrops: [[LibraryDragItem]] = []
+        var fileDrops: [[URL]] = []
+        f.viewModel.onDropLibraryItems = { items, _ in libraryDrops.append(items) }
+        f.viewModel.onDropMedia = { urls, _ in fileDrops.append(urls) }
+
+        let board = try pasteboard(files: [URL(fileURLWithPath: "/tmp/one.mov")])
+        board.setData(Data(), forType: LibraryDragPayload.pasteboardType)
+        LibraryDragPayload.inFlight = LibraryDragPayload(items: [item("cam.mov")])
+        defer { LibraryDragPayload.endInFlight() }
+
+        let sender = FakeDraggingInfo(pasteboard: board, location: point)
+        #expect(view.draggingEntered(sender) == .copy)
+        #expect(view.performDragOperation(sender))
+        #expect(libraryDrops.map { $0.map(\.displayName) } == [["cam.mov"]])
+        #expect(fileDrops.isEmpty)
+        // The drop consumed them, so a later drag cannot pick up the same rows.
+        #expect(LibraryDragPayload.inFlight == nil)
+    }
+
     /// What a real drag out of the panel looks like: the library type is on the pasteboard but its bytes
     /// arrive empty (SwiftUI promises them through the provider bridge and resolves them asynchronously),
     /// so the file URL the drag also carries is what has to land. Taking the library branch on the type

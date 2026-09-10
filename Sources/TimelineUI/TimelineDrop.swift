@@ -103,6 +103,30 @@ public struct LibraryDragPayload: Codable, Hashable, Sendable, Transferable {
     public func data() throws -> Data { try ProjectCodec.encode(self) }
 
     public init(data: Data) throws { self = try ProjectCodec.decode(LibraryDragPayload.self, from: data) }
+
+    /// The rows the drag now in flight is carrying, handed straight across rather than through the
+    /// pasteboard.
+    ///
+    /// Everything registered on an `NSItemProvider` — the payload's bytes and the file URL alike — is
+    /// promised through SwiftUI's drag bridge and resolved asynchronously, so a drop reading the
+    /// pasteboard gets whatever has arrived by then: sometimes the rows, sometimes an empty `Data`,
+    /// sometimes nothing at all. That race is what made dropping a library row flakey. A drag out of the
+    /// panel never leaves the process, so `MediaLibraryModel.dragProvider` records the rows here and the
+    /// drop targets read them from here; the pasteboard's own copies remain for other applications.
+    @MainActor public static var inFlight: LibraryDragPayload?
+
+    /// The library rows a drag is carrying: the ones handed across in-process, else whatever the
+    /// pasteboard managed to resolve. Empty when this is not a library drag at all.
+    @MainActor public static func items(on pasteboard: NSPasteboard) -> [LibraryDragItem] {
+        guard pasteboard.availableType(from: [pasteboardType]) != nil else { return [] }
+        if let payload = inFlight, !payload.items.isEmpty { return payload.items }
+        guard let data = pasteboard.data(forType: pasteboardType), let payload = try? LibraryDragPayload(data: data)
+        else { return [] }
+        return payload.items
+    }
+
+    /// Called once a drop has taken the rows, so a later drag cannot see them.
+    @MainActor public static func endInFlight() { inFlight = nil }
 }
 
 extension TimelineViewModel {

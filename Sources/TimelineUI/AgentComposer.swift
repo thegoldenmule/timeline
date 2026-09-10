@@ -188,12 +188,10 @@ public final class AgentComposer {
     /// AppKit takes the raw type, which is what `TimelineMetalView` has always done.
     public static let dropTypes: [NSPasteboard.PasteboardType] = [LibraryDragPayload.pasteboardType, .fileURL]
 
-    /// The library rows on a drag's pasteboard, if it carries the library type.
+    /// The library rows a drag is carrying (`LibraryDragPayload.items(on:)`: the in-process handoff
+    /// first, the pasteboard second).
     public static func libraryItems(on pasteboard: NSPasteboard) -> [LibraryDragItem] {
-        guard let data = pasteboard.data(forType: LibraryDragPayload.pasteboardType),
-            let payload = try? LibraryDragPayload(data: data)
-        else { return [] }
-        return payload.items
+        LibraryDragPayload.items(on: pasteboard)
     }
 
     /// The file URLs on a drag's pasteboard.
@@ -212,6 +210,7 @@ public final class AgentComposer {
     @discardableResult
     public func stage(_ pasteboard: NSPasteboard) -> Bool {
         let items = AgentComposer.libraryItems(on: pasteboard)
+        LibraryDragPayload.endInFlight()
         if !items.isEmpty {
             add(libraryItems: items)
             return true

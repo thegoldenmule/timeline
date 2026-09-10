@@ -246,7 +246,10 @@ struct MediaLibraryTests {
         // therefore also carries the file itself, a type AppKit writes to the pasteboard directly, and
         // that is what both the timeline and the agent pane fall back to.
         let provider = model.dragProvider([row.id])
+        defer { LibraryDragPayload.endInFlight() }
         #expect(provider.registeredTypeIdentifiers.contains(LibraryDragPayload.typeIdentifier))
         #expect(provider.registeredTypeIdentifiers.contains(UTType.fileURL.identifier))
+        // ...and the rows go across in-process, which is what a drop actually reads.
+        #expect(LibraryDragPayload.inFlight?.items == [item])
     }
 }

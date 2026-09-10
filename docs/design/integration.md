@@ -179,11 +179,14 @@ carrying both types is treated as a library drag: a row may also offer a file UR
 Finder, and only the library branch knows which project the media came from. The drop calls
 `onDropMedia(urls, target)` or `onDropLibraryItems(items, target)`; the indicator is identical either way.
 
-A drag out of the library panel carries two things (`MediaLibraryModel.dragProvider`): the payload's
-bytes under the library type, and the file itself under `public.file-url`. The second is not a nicety.
-Everything registered on an `NSItemProvider` is promised through SwiftUI's drag bridge and resolved
-asynchronously, so a drop reading `pasteboard.data(forType:)` gets **zero bytes** — the type is there and
-the data is empty rather than nil. Both drop targets therefore branch on the *decoded* rows, never on the
+A drag out of the library panel hands its rows across in-process (`LibraryDragPayload.inFlight`, set by
+`MediaLibraryModel.dragProvider` and read by `LibraryDragPayload.items(on:)`), because the pasteboard
+cannot be relied on: everything registered on an `NSItemProvider` — the payload's bytes and the file URL
+alike — is promised through SwiftUI's drag bridge and resolved asynchronously, so a drop reading
+`pasteboard.data(forType:)` gets whatever has arrived by then. Often that is **zero bytes** (the type is
+present and the data empty rather than nil), and which of the two representations wins the race varies
+from drop to drop, which is what made dropping a library row flakey. The drag still registers both, for
+other applications and as a fallback. Both drop targets branch on the *decoded* rows, never on the
 presence of the type, and fall back to the file URL: the agent pane stages the path (and asks the panel
 to turn it back into a row, so the chip keeps its poster and duration), the timeline imports it, which
 for library media is a content-hash hit that inserts the asset the library already holds.

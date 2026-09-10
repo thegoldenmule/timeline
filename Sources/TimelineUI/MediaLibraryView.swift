@@ -238,8 +238,10 @@ public final class MediaLibraryModel {
     /// already has.
     public func dragProvider(_ ids: Set<String>) -> NSItemProvider {
         let items = dragItems(ids)
-        // `NSItemProvider(contentsOf:)` is the canonical file drag: AppKit writes the URL to the drag
-        // pasteboard itself rather than promising it back through the bridge.
+        // The rows go across in-process, because nothing registered here can be relied on to have
+        // resolved by the time a drop reads the pasteboard (`LibraryDragPayload.inFlight`).
+        LibraryDragPayload.inFlight = LibraryDragPayload(items: items)
+        // `NSItemProvider(contentsOf:)` is the canonical file drag; it is what another application gets.
         let provider = items.first?.url.flatMap { NSItemProvider(contentsOf: $0) } ?? NSItemProvider()
         if let data = try? LibraryDragPayload(items: items).data() {
             provider.registerDataRepresentation(
