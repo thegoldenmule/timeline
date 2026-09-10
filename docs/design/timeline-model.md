@@ -75,7 +75,7 @@ Version 1 implements `Animatable.constant` only and one sequence per project. Th
 
 **Transitions.** A transition is an object between two adjacent clips on one track (Final Cut style). `decide` rejects a transition whose handles do not exist and reports the largest duration that would fit, so the agent can retry. Removing or moving either clip removes the transition (recorded as an event in the same transaction). The compiler realizes a transition by extending both clips into the overlap on alternating composition tracks; the model keeps them adjacent.
 
-**Gestures.** The UI previews a drag, trim, or scrub locally and commits **one** command when the gesture ends. Agents batch operations into one `timeline_apply`. The event log records intent-sized steps, not frames; a store-side coalescer is a fallback, not the plan.
+**Gestures.** The UI previews a drag, trim, or scrub locally and commits **one** command when the gesture ends. A razor click is the same rule with no preview: it resolves which clips the point falls strictly inside — after the per-track frame snap `decide` will apply, so a cut on a clip's edge is filtered out rather than rejected — and commits one `splitClip`, or one batch of them when it cuts every track. Agents batch operations into one `timeline_apply`. The event log records intent-sized steps, not frames; a store-side coalescer is a fallback, not the plan.
 
 **Locked tracks.** Commands addressing a locked track's clips are rejected with `trackLocked`; unlocking is itself a command and event, so the agent can never bypass a lock silently. A locked track cannot be removed either.
 

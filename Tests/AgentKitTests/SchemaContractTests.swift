@@ -58,7 +58,7 @@ import TimelineCore
 
     @Test func everyToolHasAStrictSchemaAndValidExamples() {
         let tools = EditorTools.all
-        #expect(tools.count == 18)
+        #expect(tools.count == 19)
         #expect(Set(tools.map(\.name)).count == tools.count)
         for tool in tools {
             #expect(tool.inputSchema["type"] == "object", "\(tool.name) input is an object schema")

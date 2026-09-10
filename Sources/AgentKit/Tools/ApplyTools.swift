@@ -2,7 +2,7 @@ import Contracts
 import Foundation
 import TimelineCore
 
-/// `timeline_apply`, `transition_add`, `caption_add`, `undo`, `redo`: the write side. Every one goes
+/// `timeline_apply`, `timeline_cut`, `transition_add`, `caption_add`, `undo`, `redo`: the write side. Every one goes
 /// through `ProjectStore.apply` with the context's actor, an idempotency key, and the caller's
 /// `expectedVersion`; a stale version comes back as `{ error: "staleVersion", changedSince }`.
 enum ApplyTools {
@@ -306,6 +306,119 @@ enum ApplyTools {
         return items
     }
 
+    static let timelineCut = Tool(
+        name: "timeline_cut",
+        description: """
+            Cuts (splits) clips at one timeline time, the way the editor's razor does. Give the time and \
+            the tool works out which clips to split: by default every clip that the time falls strictly \
+            inside, on every unlocked track; narrow it with trackIds or clipIds. Clips whose edge already \
+            sits at that time are skipped rather than failing, so the same cut is safe to issue twice. \
+            Linked clips split together unless unlinked is true, and a clip whose link group reaches a \
+            locked track is skipped instead of failing the whole call. Caption items are cut too, with \
+            their words divided at the point. The time is snapped to the sequence frame on video and \
+            caption tracks and kept sample-exact on audio, and the response reports where each cut \
+            actually landed. Everything is one transaction, so one undo takes it all back. To cut and \
+            then remove in a single undo step, use timeline_apply instead: this tool issues its own \
+            command and cannot be part of a timeline_apply batch.
+            """,
+        inputSchema: Schema.withDefs(
+            Schema.object(
+                "Cut request.",
+                properties: ToolSupport.inputProperties(
+                    mutating: true,
+                    [
+                        "sequenceId": Schema.string("Sequence to cut in (default: the active one)."),
+                        "at": Schema.ref("time", "Timeline time of the cut (alternative to atFrames)."),
+                        "atFrames": Schema.integer(
+                            "Timeline time of the cut, in sequence frames (alternative to at).", minimum: 0),
+                        "trackIds": Schema.array(
+                            "Cut only on these tracks. Mutually exclusive with clipIds; omit both to cut every "
+                                + "unlocked track.", items: Schema.string("A track id.")),
+                        "clipIds": Schema.array(
+                            "Cut only these clips. Mutually exclusive with trackIds.",
+                            items: Schema.string("A clip id.")),
+                        "unlinked": Schema.bool(
+                            "Cut the addressed clips alone, leaving their linked partners whole (default false)."),
+                    ]), required: ["expectedVersion"]),
+            ["time": OperationSchemas.defs["time"]!]),
+        outputSchema: Schema.object(
+            "Result with one row per cut made.",
+            properties: ToolSupport.mutationOutputSchema.merging([
+                "cuts": Schema.array(
+                    "The cuts made, in timeline order.",
+                    items: Schema.object(
+                        "One cut.",
+                        properties: [
+                            "clipId": Schema.string("The clip that was cut; it keeps the left-hand part."),
+                            "newClipId": Schema.string("The right-hand part, which starts at the cut."),
+                            "trackId": Schema.string("The track the cut clip is on."),
+                            "at": Schema.ref("time", "Where the cut landed, after snapping."),
+                        ], required: ["clipId", "newClipId", "trackId", "at"])),
+                "cutCount": Schema.integer("How many clips were cut."),
+                "skipped": Schema.array(
+                    "Clips considered and passed over, with why.",
+                    items: Schema.object(
+                        "One skipped clip.",
+                        properties: [
+                            "clipId": Schema.string("The clip."),
+                            "trackId": Schema.string("Its track."),
+                            "reason": Schema.enum(
+                                "Why it was not cut: the time is on its edge or outside it, its link group "
+                                    + "reaches a locked track, or another member of its group is being cut instead.",
+                                ["notInside", "lockedPartner", "linkedDuplicate"]),
+                        ], required: ["clipId", "trackId", "reason"])),
+            ]) { a, _ in a },
+            required: ["version", "changedIds", "warnings", "status", "cuts", "cutCount"],
+            additionalProperties: true),
+        annotations: ToolAnnotations(title: "Cut clips at a time", idempotent: true),
+        examples: [
+            .object(["expectedVersion": 12, "atFrames": 96, "commandId": "cut-at-96"]),
+            .object([
+                "expectedVersion": 12, "at": .object(["v": 96096, "ts": 24000]),
+                "clipIds": .array([.string("00000000-0000-7000-8000-00000000001a")]), "unlinked": true,
+            ]),
+        ]
+    ) { input, context in
+        let resolved = try await ToolSupport.resolve(input, context)
+        let sequence = try ToolSupport.sequence(input, in: resolved.project)
+        let unlinked = input["unlinked"]?.boolValue ?? false
+
+        let at: RationalTime
+        switch (input["atFrames"]?.intValue, try ToolSupport.decode(input, "at", as: RationalTime.self)) {
+        case (let frames?, nil): at = RationalTime.frames(Int64(frames), of: sequence.frameDuration)
+        case (nil, let time?): at = time
+        case (nil, nil): throw ToolError.invalidInput("Give at or atFrames")
+        default: throw ToolError.invalidInput("Give at or atFrames, not both")
+        }
+
+        let trackIds = input["trackIds"]?.arrayValue?.compactMap(\.stringValue)
+        let clipIds = input["clipIds"]?.arrayValue?.compactMap(\.stringValue)
+        if trackIds != nil && clipIds != nil {
+            throw ToolError.invalidInput("Give trackIds or clipIds, not both")
+        }
+
+        let plan = CutPlan(in: sequence, at: at, trackIds: trackIds, clipIds: clipIds, unlinked: unlinked)
+        let extra: [String: JSONValue] = [
+            "cuts": .array(plan.cuts.map(\.json)), "cutCount": .number(Double(plan.cuts.count)),
+            "skipped": .array(plan.skipped.map(\.json)),
+        ]
+        let ops = plan.cuts.map { cut in
+            Command.Operation.splitClip(
+                .init(clipId: .id(cut.clipId), at: cut.at, newIds: [cut.newClipId], unlinked: unlinked))
+        }
+        // An empty plan still goes to the store as an empty batch, which decides to nothing and comes back
+        // `noop`. Short-circuiting here would look tidier and would quietly skip the `expectedVersion`
+        // check and the `commandId` replay, so a stale caller would be told "nothing to cut" instead of
+        // what changed underneath them.
+        let command = try ToolSupport.command(
+            ops.count == 1 ? ops[0] : .batch(ops), input: input, context: context, requireExpectedVersion: true)
+        var out = try await ToolSupport.apply(command, to: resolved.store, extra: extra)
+        if plan.cuts.isEmpty, !out.isError {
+            out.text = "Nothing to cut at \(ToolSupport.seconds(at)) s: no clip has that time strictly inside it."
+        }
+        return out
+    }
+
     static let undo = Tool(
         name: "undo",
         description:
@@ -331,5 +444,94 @@ enum ApplyTools {
     ) { input, context in
         let command = try ToolSupport.command(.redo, input: input, context: context)
         return try await ToolSupport.apply(command, to: try await context.store(for: input))
+    }
+}
+
+/// Which clips a cut at one time would split, and which it passes over. The same three rules the
+/// editor's razor applies, in one place: `decide` snaps the point to the sequence frame on video and
+/// caption tracks *before* it validates and then throws if the result is not strictly inside the clip,
+/// and a batch has no per-operation recovery — so one clip resolved wrong takes every other cut in the
+/// call down with it.
+struct CutPlan {
+    struct Cut {
+        var clipId: ClipID
+        var newClipId: ClipID
+        var trackId: TrackID
+        /// Where the cut lands after snapping, which is not always where it was asked for.
+        var at: RationalTime
+
+        var json: JSONValue {
+            .object([
+                "clipId": .string(clipId.rawValue), "newClipId": .string(newClipId.rawValue),
+                "trackId": .string(trackId.rawValue), "at": ToolSupport.timeJSON(at),
+            ])
+        }
+    }
+
+    struct Skip {
+        enum Reason: String {
+            /// The snapped point sits on the clip's edge or outside it entirely.
+            case notInside
+            /// Its link group reaches a locked track, which would reject the whole command.
+            case lockedPartner
+            /// Another member of its link group is being cut, which takes this one with it.
+            case linkedDuplicate
+        }
+
+        var clipId: ClipID
+        var trackId: TrackID
+        var reason: Reason
+
+        var json: JSONValue {
+            .object([
+                "clipId": .string(clipId.rawValue), "trackId": .string(trackId.rawValue),
+                "reason": .string(reason.rawValue),
+            ])
+        }
+    }
+
+    var cuts: [Cut] = []
+    var skipped: [Skip] = []
+
+    init(
+        in sequence: Sequence, at: RationalTime, trackIds: [String]?, clipIds: [String]?, unlinked: Bool,
+        ids: any IDGenerator = UUIDv7Generator()
+    ) {
+        let wantedTracks = trackIds.map { Set($0.map { TrackID($0) }) }
+        let wantedClips = clipIds.map { Set($0.map { ClipID($0) }) }
+        var candidates: [(clip: Clip, track: Track)] = []
+        for track in sequence.tracks where !track.locked {
+            if let wantedTracks, !wantedTracks.contains(track.id) { continue }
+            for clip in track.clips.values {
+                if let wantedClips, !wantedClips.contains(clip.id) { continue }
+                candidates.append((clip, track))
+            }
+        }
+        candidates.sort { ($0.clip.start, $0.clip.id) < ($1.clip.start, $1.clip.id) }
+
+        var seenGroups: Set<LinkGroupID> = []
+        for (clip, track) in candidates {
+            // `decide` snaps first and validates second, so this is the point it will actually test.
+            let t = track.kind.isFrameAligned ? at.snapped(to: sequence.frameDuration) : at
+            guard clip.start < t, t < sequence.end(of: clip) else {
+                skipped.append(Skip(clipId: clip.id, trackId: track.id, reason: .notInside))
+                continue
+            }
+            if !unlinked, let group = clip.linkGroupId {
+                let members = sequence.members(of: group)
+                if members.contains(where: { sequence.track($0.trackId)?.locked == true }) {
+                    skipped.append(Skip(clipId: clip.id, trackId: track.id, reason: .lockedPartner))
+                    continue
+                }
+                if seenGroups.contains(group) {
+                    skipped.append(Skip(clipId: clip.id, trackId: track.id, reason: .linkedDuplicate))
+                    continue
+                }
+                seenGroups.insert(group)
+            }
+            // One id, for the addressed clip's own right-hand part. `decide` mints the rest positionally
+            // for the other group members, in an order this side must not try to predict.
+            cuts.append(Cut(clipId: clip.id, newClipId: ClipID(minting: ids), trackId: track.id, at: t))
+        }
     }
 }

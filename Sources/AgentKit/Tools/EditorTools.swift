@@ -10,7 +10,7 @@ public enum EditorTools {
     public static var all: [Tool] {
         [
             ProjectTools.projectList, ProjectTools.projectDescribe, ProjectTools.timelineQuery,
-            ApplyTools.timelineApply, ApplyTools.transitionAdd, ApplyTools.captionAdd,
+            ApplyTools.timelineApply, ApplyTools.timelineCut, ApplyTools.transitionAdd, ApplyTools.captionAdd,
             AlignTools.alignAudio,
             MediaTools.mediaImport, MediaTools.mediaAnalyze, MediaTools.transcriptSearch, MediaTools.lookAt,
             RenderTools.renderPreview, RenderTools.renderExport,

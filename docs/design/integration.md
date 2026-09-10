@@ -20,7 +20,7 @@ without the window.
 | `aligner` | `AudioAlign.OnsetAligner` | reads every tunable from `AlignmentParameters` (see contracts-notes.md) |
 | `jobRunner` | `BudgetedJobRunner` (`Sources/TimelineApp/Services/`) | FIFO admission against `JobBudget.conservative`: bytes per memory class and `maxConcurrent` per class; cancellation before admission dequeues; `handle(for:)` re-opens a handle over a job a tool submitted |
 | `approvals` | `StandardApprovalGate` (`Sources/TimelineApp/Services/`) | random single-use tokens, `status(of:)` implemented, the six-argument `check` keeps the tool's presentation on the request; one gate shared by the tools, the MCP host, and the approval stack |
-| `registry` | `AgentKit.EditorTools.standard(context:)` | the 18 real tools when publishing is configured (15 editor tools plus `publish_youtube`, `publish_status`, `account_status`); without a Google client only `account_status` of the three is registered |
+| `registry` | `AgentKit.EditorTools.standard(context:)` | the 19 real tools when publishing is configured (16 editor tools plus `publish_youtube`, `publish_status`, `account_status`); without a Google client only `account_status` of the three is registered |
 | Fork | toolbar button | `ProjectDocument.fork(to:name:)`: `ProjectStoreCopying.saveAs` copies the whole stream and projections into a new package, the window switches to the copy, and a `renameProject` transaction labelled "Fork of <name>" is the fork's first divergence; the original is untouched and both share the library |
 | `mcpHost` | `AgentKit.MCPServerHost` | started at launch on 127.0.0.1 with a per-launch bearer token; `claude mcp add` line shown in Settings and the window's MCP section and logged; proxy config written |
 | `agentRuntime` | `AgentKit.ClaudeCodeRuntime`, else `ToolLoopRuntime` over `FakeAgentRuntime` | `availability()` is probed at boot; when `claude` is missing or logged out the scripted fallback runs its tool calls through the registry itself (the client-side loop a Messages-API runtime has); its cards carry the tool's `details` and `warnings` |
@@ -109,12 +109,17 @@ runs in `make test`.
 The window: the media library pane on the left (⌥⌘L, remembered in `showsLibrary`), the preview on top
 (Play in the status bar or the space bar), TimelineUI's Metal timeline
 below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd-Z / Shift-Cmd-Z,
-Cmd-scroll zooms, N toggles snapping, M and S mute and solo the selected clips' tracks; every track
+Cmd-scroll zooms, N toggles snapping, M and S mute and solo the selected clips' tracks; C arms the
+razor and V puts it away, and while it is armed the pointer is a blade over the lanes and a razor click
+cuts the clip under it, Shift-click every unlocked track, Option one member of a link group — the ruler
+and the track headers keep their ordinary behaviour throughout; every track
 header carries mute / solo / lock / remove buttons, one command per click), a status bar; the
 sidebar holds the inspector, the approval stack, the job list, the publishes, the history, the last
 window tool call (collapsed, and only once a control has called one — the agent's calls are in its own
 transcript), the MCP section, and the agent pane. Toolbar: New, Open, Fork, Import (library import as a job;
-the files land in the library and nowhere else, see below), Library (the pane), Split, Delete, Undo, Redo,
+the files land in the library and nowhere else, see below), Library (the pane), the tool picker
+(Select / Razor, which carries no key equivalent so that a bare letter cannot fire while the agent
+composer has focus), Split, Delete, Undo, Redo,
 Analyze (silence, onset envelope, shots on the selected clip's asset through `media_analyze`), Align (two
 selected clips: `align_audio` with the first as reference, then `moveClip` on the second), Export
 (`render_export`, gated by the approval stack, recorded in the render ledger), Publish (the sheet, then
@@ -228,16 +233,16 @@ The embedded agent uses the same endpoint through `ClaudeCodeRuntime` when `clau
 YouTube (`PublishingMode.fake`), then:
 
 ```
-ok   boot: root TimelineSkeleton-C15298A7, MCP http://127.0.0.1:56964/mcp, 18 tools, agent fallback, publishing fake
+ok   boot: root TimelineSkeleton-C15298A7, MCP http://127.0.0.1:56964/mcp, 19 tools, agent fallback, publishing fake
 ok   create: Skeleton v3 at Skeleton.tlproj; empty sequence, nothing to preview yet
 ok   import: 4 assets copied into Library/ with sidecars and cache rows; av 2.0s 1280x720, tone 3.0s @48000 Hz; drop at 3 s on V1 -> 2 linked clips at 3.0 s, notes.txt ignored
 ok   library: 2 packages scanned, 5 items; Second/second-project.caf duplicated into Skeleton with one importAsset (no second copy under Library/), inserted again with none; Import button left the tracks empty
-ok   edit: linked clips v21, split via TimelineViewModel v23, dissolve v24; scene draws 7 clips, 1 transition
+ok   edit: linked clips v21, split via TimelineViewModel v23, dissolve v24; scene draws 7 clips, 1 transition; razor cut the tone clip on A1 at 4.0s v25; solo on A1 v26 drew its accent and left V1 audible, off again v27
 ok   render: compiled 6.00s, item readyToPlay, frame at 0.5 s 320x180 not blank, h264_1080p export 6.00s in 0.5s to skeleton-1080p.mp4
 ok   analyze: silence + onset-8k on av-tone.mov: 122 envelope frames, 2 artifacts under Cache/, recorded at v26
 ok   align: offset 7.3447 s (truth 7.345, error 0.255 ms), drift 0.0 ppm (truth 23), confidence 0.81
 ok   tools: project_describe v27 with 5 assets; timeline_apply v27 instructions-only; stale expectedVersion rejected with changedSince
-ok   mcp: 401 without token; initialize -> timeline session D28B6128; tools/list 18 tools; project_list over HTTP sees 1 project
+ok   mcp: 401 without token; initialize -> timeline session D28B6128; tools/list 19 tools; project_list over HTTP sees 1 project
 ok   agent: 8 items, finished "Exported Reel 9:16."; export gated, approved on the stack, retried, wrote Reel 9x16.mp4
 ok   undo/redo: v27 -> v29 -> v31, 18 live transactions
 ok   fork: Skeleton fork.tlproj at v32 with 19 live transactions; original still v31

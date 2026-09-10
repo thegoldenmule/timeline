@@ -23,5 +23,10 @@ Use this when the user asks to "tighten", "remove pauses", "cut the dead air", o
 
 ## Notes
 
+- For a plain cut with no removal — "cut every track at 4 seconds" — `timeline_cut` takes the time and
+  works out which clips it falls inside, so you do not have to. It cannot be used here: the recipe above
+  needs its two splits and the removal in one `timeline_apply` batch to stay one undo step, and
+  `timeline_cut` issues its own command.
+
 - `timeline_query` with `kind: "history"` shows the undo stack; `undo` reverts one batch if the user dislikes a cut.
 - Do not export unless asked; `render_export` needs the user's approval.

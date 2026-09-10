@@ -497,3 +497,222 @@ import TimelineCore
         #expect(out.isError && out.text?.contains("renderer") == true)
     }
 }
+
+/// `timeline_cut` resolves which clips a time falls inside before it sends anything, because `decide`
+/// snaps the point per track and then throws on anything not strictly inside — and a batch has no
+/// per-operation recovery, so one clip resolved wrong takes the whole call with it.
+@Suite("timeline_cut") struct CutToolTests {
+    typealias Harness = ToolTests.Harness
+
+    func clips(_ h: Harness, _ kind: TrackKind) async -> [Clip] {
+        let p = await h.project
+        return p.activeSequence!.tracks.filter { $0.kind == kind }.flatMap { $0.clips.values }
+            .sorted { $0.start < $1.start }
+    }
+
+    @Test func cuttingAtATimeSplitsEveryUnlockedTrackInOneTransaction() async throws {
+        let h = try await Harness.make(fixture: "linked-transition-caption-undone")
+        let version = await h.project.version
+        // 3 s: inside the first V/A pair and inside the second caption item.
+        let out = try await h.call(
+            "timeline_cut", ["expectedVersion": .number(Double(version)), "at": ["v": 72000, "ts": 24000]])
+        #expect(!out.isError, "\(out)")
+        #expect(out.structured?["status"] == "applied")
+        // The linked pair is one operation and one cut row; the caption item is its own.
+        #expect(out.structured?["cutCount"] == 2)
+        #expect(await clips(h, .video).count == 3)
+        #expect(await clips(h, .audio).count == 3, "the linked audio came along")
+        #expect(await clips(h, .caption).count == 3)
+
+        let txns = await h.services.store.history().live.count
+        #expect(await h.project.version > version)
+        #expect(txns >= 1)
+    }
+
+    @Test func clipIdsCutsExactlyThoseClipsAndTrackIdsCutsThoseTracks() async throws {
+        let h = try await Harness.make()
+        let video = await clips(h, .video)
+        let long = video[2]
+        var version = await h.project.version
+
+        let byClip = try await h.call(
+            "timeline_cut",
+            [
+                "expectedVersion": .number(Double(version)),
+                "at": try JSONValue(encoding: long.start + RationalTime(seconds: 1)),
+                "clipIds": .array([.string(long.id.rawValue)]),
+            ])
+        #expect(!byClip.isError, "\(byClip)")
+        #expect(byClip.structured?["cutCount"] == 1)
+        #expect(await clips(h, .video).count == 4)
+        #expect(await clips(h, .audio).count == 1, "the audio track was never addressed")
+
+        version = await h.project.version
+        let audioTrack = try #require(await h.project.activeSequence?.tracks.first { $0.kind == .audio })
+        let byTrack = try await h.call(
+            "timeline_cut",
+            [
+                "expectedVersion": .number(Double(version)), "atFrames": 120,
+                "trackIds": .array([.string(audioTrack.id.rawValue)]),
+            ])
+        #expect(!byTrack.isError, "\(byTrack)")
+        #expect(byTrack.structured?["cutCount"] == 1)
+        #expect(await clips(h, .audio).count == 2)
+        #expect(await clips(h, .video).count == 4, "the video tracks were left alone")
+    }
+
+    @Test func passingBothClipIdsAndTrackIdsIsRejected() async throws {
+        let h = try await Harness.make()
+        let out = try await h.call(
+            "timeline_cut",
+            [
+                "expectedVersion": 1, "atFrames": 96, "clipIds": .array([.string("a")]),
+                "trackIds": .array([.string("b")]),
+            ])
+        #expect(out.isError)
+        #expect(out.structured?["message"]?.stringValue?.contains("not both") == true, "\(out)")
+    }
+
+    @Test func passingNeitherAtNorAtFramesIsRejectedAndPassingBothIsToo() async throws {
+        let h = try await Harness.make()
+        let neither = try await h.call("timeline_cut", ["expectedVersion": 1])
+        #expect(neither.isError)
+        #expect(neither.structured?["message"]?.stringValue?.contains("at or atFrames") == true, "\(neither)")
+
+        let both = try await h.call(
+            "timeline_cut", ["expectedVersion": 1, "atFrames": 96, "at": ["v": 96096, "ts": 24000]])
+        #expect(both.isError)
+        #expect(both.structured?["message"]?.stringValue?.contains("not both") == true, "\(both)")
+    }
+
+    @Test func aTimeOnAClipBoundaryIsSkippedWhileOtherTracksStillCut() async throws {
+        let h = try await Harness.make()
+        let version = await h.project.version
+        // Frame 96 is exactly the seam between the first two video clips, and partway through the music.
+        let out = try await h.call(
+            "timeline_cut", ["expectedVersion": .number(Double(version)), "atFrames": 96])
+        #expect(!out.isError, "\(out)")
+        #expect(out.structured?["cutCount"] == 1, "only the audio clip straddles that time")
+        #expect(await clips(h, .video).count == 3, "the seam is not a cut")
+        #expect(await clips(h, .audio).count == 2)
+
+        let skipped = try #require(out.structured?["skipped"]?.arrayValue)
+        #expect(skipped.count == 3)
+        #expect(skipped.allSatisfy { $0["reason"] == "notInside" })
+    }
+
+    @Test func nothingToCutIsANoopNotAnError() async throws {
+        let h = try await Harness.make()
+        let version = await h.project.version
+        let out = try await h.call(
+            "timeline_cut", ["expectedVersion": .number(Double(version)), "atFrames": 100_000])
+        #expect(!out.isError, "\(out)")
+        #expect(out.structured?["status"] == "noop")
+        #expect(out.structured?["cutCount"] == 0)
+        #expect(out.text?.contains("Nothing to cut") == true, "\(String(describing: out.text))")
+        #expect(await h.project.version == version, "a no-op bumps nothing")
+    }
+
+    @Test func theResponseNamesEachCutsNewClipAndReportsTheSnappedTime() async throws {
+        let h = try await Harness.make()
+        let long = await clips(h, .video)[2]
+        let version = await h.project.version
+        // A third of a frame past a frame boundary: `decide` rounds it, and the response must say where
+        // the cut actually went rather than where it was asked for.
+        let asked = long.start + RationalTime(seconds: 1) + RationalTime(300, 24000)
+        let out = try await h.call(
+            "timeline_cut",
+            [
+                "expectedVersion": .number(Double(version)), "at": try JSONValue(encoding: asked),
+                "clipIds": .array([.string(long.id.rawValue)]),
+            ])
+        #expect(!out.isError, "\(out)")
+        let cuts = try #require(out.structured?["cuts"]?.arrayValue)
+        #expect(cuts.count == 1)
+        #expect(cuts[0]["clipId"] == .string(long.id.rawValue))
+        let landed = try #require(cuts[0]["at"])
+        let v = try #require(landed["v"]?.intValue)
+        #expect(Int64(v) % 1001 == 0, "the reported time is on a frame boundary")
+        #expect(landed["v"] != .number(Double(asked.value)), "and it is not what was asked for")
+
+        // The named right-hand half exists and starts at the cut.
+        let newId = try #require(cuts[0]["newClipId"]?.stringValue)
+        let right = try #require(await h.project.activeSequence?.clip(ClipID(newId)))
+        #expect(right.start == RationalTime(Int64(v), 24000))
+        #expect(await h.project.activeSequence?.clip(long.id) != nil, "the left half kept the original id")
+    }
+
+    @Test func aStaleVersionIsStillRejectedWhenThereIsNothingToCut() async throws {
+        let h = try await Harness.make()
+        // The empty plan goes to the store anyway, so the caller learns it is behind rather than being
+        // told the far more misleading "nothing to cut".
+        let out = try await h.call("timeline_cut", ["expectedVersion": 1, "atFrames": 100_000])
+        #expect(out.isError)
+        #expect(out.structured?["error"] == "staleVersion")
+        #expect(out.structured?["changedSince"] != nil)
+    }
+
+    @Test func aStaleExpectedVersionIsRejectedWithChangedSince() async throws {
+        let h = try await Harness.make()
+        let out = try await h.call("timeline_cut", ["expectedVersion": 1, "atFrames": 120])
+        #expect(out.isError)
+        #expect(out.structured?["error"] == "staleVersion")
+        #expect(out.structured?["changedSince"] != nil)
+    }
+
+    @Test func replayingTheSameCommandIdIsIdempotent() async throws {
+        let h = try await Harness.make()
+        let version = await h.project.version
+        let input: JSONValue = [
+            "expectedVersion": .number(Double(version)), "atFrames": 120, "commandId": "cut-once",
+        ]
+        let first = try await h.call("timeline_cut", input)
+        #expect(first.structured?["status"] == "applied")
+        let after = await h.project.version
+
+        let again = try await h.call("timeline_cut", input)
+        #expect(again.structured?["status"] == "replayed")
+        #expect(await h.project.version == after, "the replay cut nothing a second time")
+        #expect(await clips(h, .video).count == 4)
+    }
+
+    @Test func unlinkedCutsOneMemberOfALinkGroup() async throws {
+        let h = try await Harness.make(fixture: "linked-transition-caption-undone")
+        let version = await h.project.version
+        let video = await clips(h, .video)[0]
+        let out = try await h.call(
+            "timeline_cut",
+            [
+                "expectedVersion": .number(Double(version)), "at": ["v": 72000, "ts": 24000],
+                "clipIds": .array([.string(video.id.rawValue)]), "unlinked": true,
+            ])
+        #expect(!out.isError, "\(out)")
+        #expect(out.structured?["cutCount"] == 1)
+        #expect(await clips(h, .video).count == 3)
+        #expect(await clips(h, .audio).count == 2, "the partner stayed whole")
+    }
+
+    @Test func aLinkGroupCrossingALockedTrackIsReportedInSkipped() async throws {
+        let h = try await Harness.make(fixture: "linked-transition-caption-undone")
+        let audio = try #require(await h.project.activeSequence?.tracks.first { $0.kind == .audio })
+        var version = await h.project.version
+        let locked = try await h.call(
+            "timeline_apply",
+            [
+                "expectedVersion": .number(Double(version)),
+                "ops": .array([["type": "setTrackLocked", "trackId": .string(audio.id.rawValue), "locked": true]]),
+            ])
+        #expect(!locked.isError, "\(locked)")
+
+        version = await h.project.version
+        let out = try await h.call(
+            "timeline_cut", ["expectedVersion": .number(Double(version)), "at": ["v": 72000, "ts": 24000]])
+        #expect(!out.isError, "a locked partner must never reach the store as a rejection")
+        // The caption item still cuts; the V/A pair is passed over because `group(of:)` would reject it.
+        #expect(out.structured?["cutCount"] == 1)
+        let skipped = try #require(out.structured?["skipped"]?.arrayValue)
+        #expect(skipped.contains { $0["reason"] == "lockedPartner" })
+        #expect(await clips(h, .video).count == 2, "the video clip was not cut")
+        #expect(await clips(h, .caption).count == 3)
+    }
+}

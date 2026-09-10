@@ -4,6 +4,6 @@ import Testing
 
 @Suite struct AgentKitSmoke {
     @Test func moduleCompiles() {
-        #expect(EditorTools.names.count == 18)
+        #expect(EditorTools.names.count == 19)
     }
 }
