@@ -245,11 +245,20 @@ extension Decider {
         }
         let at = snap(o.at, track, in: seq)
         let sourceIn = snap(o.sourceIn, track, in: seq)
-        let sourceOut = snap(o.sourceOut, track, in: seq)
+        var sourceOut = snap(o.sourceOut, track, in: seq)
         guard !at.isNegative else { throw .invalid(reason: "Clip cannot start before zero") }
         guard !sourceIn.isNegative, sourceIn < sourceOut else { throw .invalid(reason: "Source range is empty") }
-        if let a = assetValue, sourceOut > a.duration {
-            throw .invalid(reason: "Source range ends after the asset's duration \(a.duration)")
+        if let a = assetValue {
+            // Judge the range the caller actually asked for. Snapping is ours, and it must never turn a
+            // legal request into an error: the whole asset is the commonest range to ask for, and a
+            // camera's duration rarely lands on the sequence's frame grid, so rounding the out-point to
+            // the nearest frame pushes it past the media about half the time. Take the frame before
+            // instead of refusing a range that was in bounds when it arrived.
+            guard o.sourceOut <= a.duration else {
+                throw .invalid(reason: "Source range ends after the asset's duration \(a.duration)")
+            }
+            if sourceOut > a.duration { sourceOut = a.duration.floored(to: seq.frameDuration) }
+            guard sourceIn < sourceOut else { throw .invalid(reason: "Source range is empty") }
         }
         let id = o.id ?? mint()
         guard state.locate(clip: id) == nil else { throw .invalid(reason: "Clip \(id) already exists") }

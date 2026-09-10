@@ -84,6 +84,30 @@ import TimelineCore
         #expect(s.b.sequence.duration(of: aclip) == RationalTime(9000, 48000))
     }
 
+    /// A camera's duration rarely lands on the sequence's frame grid, and asking for the whole asset is
+    /// the commonest range there is. Snapping the out-point to the nearest frame used to round it past
+    /// the media and reject the clip, so the duration the app itself reported was not a legal sourceOut.
+    @Test func addClipTakesAWholeAssetWhoseDurationIsOffTheFrameGrid() throws {
+        let s = try Scene()
+        let duration = RationalTime(80953, 600)  // 134.9217s, between frames at 23.976
+        #expect(duration.snapped(to: fd24) > duration, "the duration must actually round up")
+        let offGrid = try s.b.importAsset(name: "IMG.MOV", duration: duration)
+
+        let id = try s.b.addClip(track: s.v, asset: offGrid, at: .zero, sourceIn: .zero, sourceOut: duration)
+        let clip = try #require(s.b.clip(id))
+        #expect(clip.sourceOut <= duration)
+        #expect(clip.sourceOut == duration.floored(to: fd24))
+        #expect(clip.sourceIn == .zero)
+
+        // Genuinely asking past the end is still an error, judged on what the caller sent.
+        #expect(
+            s.b.rejection(
+                .addClip(
+                    .init(
+                        sequenceId: .id(s.b.sequenceId), trackId: .id(s.v), assetId: .id(offGrid), at: frames(4000),
+                        sourceIn: .zero, sourceOut: duration + fd24))) != nil)
+    }
+
     @Test func addClipRejectsBadSourceRangeAndWrongTrackKind() throws {
         let s = try Scene(assetFrames: 100)
         #expect(
