@@ -7,7 +7,7 @@ import TimelineUI
 /// goes through the library as a job (visible in the job list) and its asset is recorded with
 /// `importAsset` unless the project already has that content hash. **Importing stops there.** Only a
 /// drop on the timeline asks for a clip, and then the files land back to back from the drop time, in the
-/// order dropped, as ripple inserts (docs/design/integration.md, "Drag and drop").
+/// order dropped, each in free space or not at all (docs/design/integration.md, "Drag and drop").
 @MainActor
 struct MediaImporter {
     let services: AppServices

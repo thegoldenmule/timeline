@@ -165,11 +165,19 @@ public final class TimelineMetalView: MTKView {
     /// Library rows are checked before file URLs: a row may also offer a `.fileURL` representation so a
     /// drag to Finder works, and only the library branch knows where the media came from.
     private func dragOperation(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard !libraryItems(sender).isEmpty || !MediaFileTypes.mediaURLs(fileURLs(sender)).isEmpty else {
+        let rows = libraryItems(sender)
+        guard !rows.isEmpty || !MediaFileTypes.mediaURLs(fileURLs(sender)).isEmpty else {
             viewModel.endDrop()
             return []
         }
-        viewModel.updateDrop(at: convert(sender.draggingLocation, from: nil))
+        let point = convert(sender.draggingLocation, from: nil)
+        // A row with nowhere to go is refused while the drag is still in the air, so the pointer says no
+        // rather than the drop failing after the fact.
+        guard rows.isEmpty || viewModel.accepts(rows, at: viewModel.dropTarget(at: point)) else {
+            viewModel.endDrop()
+            return []
+        }
+        viewModel.updateDrop(at: point)
         return .copy
     }
 

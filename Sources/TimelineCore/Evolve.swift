@@ -32,6 +32,38 @@ extension Sequence {
     /// Exclusive end of `clip` on the timeline.
     public func end(of clip: Clip) -> RationalTime { clip.start + duration(of: clip) }
 
+    /// The track a linked partner lands on for a clip added to `track`: the same ordinal among the other
+    /// kind's tracks, else the first unlocked one. What `addClip` does with `link: .auto`.
+    public func partnerTrack(for track: Track) -> Track? {
+        let wanted: TrackKind = track.kind == .video ? .audio : .video
+        let same = tracks.filter { $0.kind == track.kind }
+        let others = tracks.filter { $0.kind == wanted }
+        guard let ordinal = same.firstIndex(where: { $0.id == track.id }) else { return nil }
+        if ordinal < others.count, !others[ordinal].locked { return others[ordinal] }
+        return others.first { !$0.locked }
+    }
+
+    /// The clips on `trackId` that overlap `from ..< to`, in start order.
+    public func clips(on trackId: TrackID, overlapping from: RationalTime, to: RationalTime) -> [Clip] {
+        guard let track = track(trackId) else { return [] }
+        return track.clips.values
+            .filter { clip in clip.start < to && from < end(of: clip) }
+            .sorted { ($0.start, $0.id) < ($1.start, $1.id) }
+    }
+
+    /// Whether `from ..< to` on `trackId` is empty, so a clip can be placed there without displacing or
+    /// overwriting anything. False for a track that does not exist or is locked.
+    public func isRangeFree(on trackId: TrackID, from: RationalTime, to: RationalTime) -> Bool {
+        guard let track = track(trackId), !track.locked else { return false }
+        return clips(on: trackId, overlapping: from, to: to).isEmpty
+    }
+
+    /// Where a clip of `duration` placed at `at` on `track` would end, rounded to the frame where the
+    /// track is frame aligned (`Clip.duration(frameDuration:)`).
+    public func placedEnd(duration: RationalTime, at: RationalTime, on track: Track) -> RationalTime {
+        at + (track.kind.isFrameAligned ? duration.snapped(to: frameDuration) : duration)
+    }
+
     /// Every clip in `linkGroupId`, across tracks.
     public func members(of linkGroupId: LinkGroupID) -> [Clip] {
         tracks.flatMap { $0.clips.values.filter { $0.linkGroupId == linkGroupId } }

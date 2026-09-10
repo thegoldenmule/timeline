@@ -219,14 +219,7 @@ extension Decider {
     // MARK: addClip
 
     /// The audio track that pairs with a video track (same ordinal), or vice versa.
-    func partnerTrack(for track: Track, in seq: Sequence) -> Track? {
-        let wanted: TrackKind = track.kind == .video ? .audio : .video
-        let same = seq.tracks.filter { $0.kind == track.kind }
-        let others = seq.tracks.filter { $0.kind == wanted }
-        guard let ordinal = same.firstIndex(where: { $0.id == track.id }) else { return nil }
-        if ordinal < others.count, !others[ordinal].locked { return others[ordinal] }
-        return others.first { !$0.locked }
-    }
+    func partnerTrack(for track: Track, in seq: Sequence) -> Track? { seq.partnerTrack(for: track) }
 
     mutating func addClip(_ o: Command.Operation.AddClip) throws(EditorError) {
         let seq = try sequence(try resolve(o.sequenceId))

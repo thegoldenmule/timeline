@@ -274,7 +274,7 @@ Resulting surface behaviour:
 | Import toolbar button / `presentImportPanel` | library only; the panel scrolls the new items into view and selects them |
 | Timeline drop | **unchanged**: import + ripple insert at the drop target, back to back |
 | Window-wide drop (preview, sidebar, status bar) | library only |
-| Library panel drag onto the timeline | duplicate-if-needed + insert at the drop target |
+| Library panel drag onto the timeline | duplicate-if-needed + place at the drop target, refused when the range is not free on the track (and on the linked audio's track) |
 | Library panel Return / "Insert at playhead" | duplicate-if-needed + insert at the playhead (no double-click: a row tap gesture breaks selection and dragging) |
 | `media_import` tool | unchanged (already library-only) |
 

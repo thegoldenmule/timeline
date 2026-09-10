@@ -130,6 +130,39 @@ public struct LibraryDragPayload: Codable, Hashable, Sendable, Transferable {
 }
 
 extension TimelineViewModel {
+    // MARK: What a drop is allowed to land on
+
+    /// The track a row would land on: the one under the pointer when it exists, matches the row's kind,
+    /// and is unlocked, else the first unlocked track of that kind. Nil when the sequence has none — the
+    /// drop creates one, and an empty track always has room.
+    func dropTrack(for item: LibraryDragItem, at target: TimelineDropTarget, in sequence: Sequence) -> Track? {
+        let kind: TrackKind = item.hasVideo || item.kind == .image ? .video : .audio
+        if let id = target.trackId, let named = sequence.track(id), named.kind == kind, !named.locked { return named }
+        return sequence.tracks.first { $0.kind == kind && !$0.locked }
+    }
+
+    /// Whether `items` would land in free space at `target`, each after the last as the importer places
+    /// them, on the row's track and on the track its linked audio would land on. A drop displaces
+    /// nothing: with no room it is refused outright rather than pushing the sequence along
+    /// (docs/design/integration.md, "Drag and drop").
+    ///
+    /// Rows only. A file dragged in from the Finder has no duration until it has been probed, so its
+    /// room is checked when it lands, and the drag itself cannot say no in advance.
+    public func accepts(_ items: [LibraryDragItem], at target: TimelineDropTarget) -> Bool {
+        guard let sequence else { return true }
+        var at = target.at
+        for item in items {
+            guard let track = dropTrack(for: item, at: target, in: sequence) else { continue }
+            let end = sequence.placedEnd(duration: item.duration, at: at, on: track)
+            guard sequence.isRangeFree(on: track.id, from: at, to: end) else { return false }
+            if item.hasVideo, item.hasAudio, let partner = sequence.partnerTrack(for: track) {
+                guard sequence.isRangeFree(on: partner.id, from: at, to: end) else { return false }
+            }
+            at = end
+        }
+        return true
+    }
+
     // MARK: Drop targets (the state machine; NSDraggingInfo-free)
 
     /// The drop target for a view point: the row under `y` (nil on the ruler or below the tracks) and the
@@ -170,7 +203,7 @@ extension TimelineViewModel {
     public func dropLibraryItems(_ items: [LibraryDragItem], at point: CGPoint) -> Bool {
         let target = dropTarget(at: point)
         dropTarget = nil
-        guard !items.isEmpty, let onDropLibraryItems else { return false }
+        guard !items.isEmpty, accepts(items, at: target), let onDropLibraryItems else { return false }
         onDropLibraryItems(items, target)
         return true
     }

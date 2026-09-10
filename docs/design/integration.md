@@ -195,13 +195,17 @@ Files dropped on the timeline go through `MediaImporter.importFiles(_:at:)` — 
 then `ProjectDocument.insertClip(for:at:)` with `link: .auto`, so a file with video and audio lands as a
 linked pair. Library rows go through `MediaImporter.insert(_:at:)`, which duplicates a foreign asset
 first (see above) and then inserts the same way; Return and "Insert at playhead" take the same path with
-the playhead as the target. There is deliberately no double-click: a `TapGesture` on a `List` row
+the playhead as the target, and are refused just the same when the playhead is over occupied track. There is deliberately no double-click: a `TapGesture` on a `List` row
 consumes its mouse-down, and the row then neither selects nor starts its drag — the panel looks dead and
-nothing can be dragged out of it. Placement rules are unchanged: the clip goes on the target
+nothing can be dragged out of it. Placement rules: the clip goes on the target
 track when that track exists, is unlocked, and matches the asset (video for video and images, audio for
-audio), else on the first matching track (created when there is none); the mode is `ripple` (default
-`addClip`), so a drop between clips pushes what follows along, a drop inside a clip splits it around the
-insert, and a drop past the end simply appends. Several files land back to back from the drop time, each
+audio), else on the first matching track (created when there is none). **A drop places a clip; it never
+displaces one.** The range it would occupy has to be free on that track and on the track its linked audio
+would land on, or the drop is refused — `TimelineViewModel.accepts(_:at:)` refuses it while the drag is
+still in the air, so the pointer says no, and `ProjectDocument.insertClip` refuses it again on the way in
+(a file from the Finder has no duration until it is probed, so that one can only be caught as it lands).
+The mode is therefore `overwrite` over a range already known to be empty: nothing is split, displaced, or
+replaced. Ripple inserts remain available to the tools, which ask for `mode: ripple` explicitly. Several files land back to back from the drop time, each
 starting where the previous one ended. The headless check drops the av file at 3 s on V1 and asserts the
 linked clips land at 3 s.
 

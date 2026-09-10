@@ -216,7 +216,11 @@ final class ProjectDocument {
     /// default, so a drop between clips pushes what follows along and a drop past the end appends; video
     /// auto-links its audio. Returns the result and the id of the clip it created.
     @discardableResult
-    func insertClip(for asset: Asset, at target: TimelineDropTarget, mode: EditMode = .ripple) async throws(EditorError)
+    /// A drop places the clip where it was dropped: `overwrite` over a range this has already checked is
+    /// empty, so nothing is split, displaced, or replaced. Ripple stays available to the tools, which ask
+    /// for it explicitly.
+    func insertClip(for asset: Asset, at target: TimelineDropTarget, mode: EditMode = .overwrite)
+        async throws(EditorError)
         -> (result: CommandResult, clipId: ClipID)
     {
         let kind = ProjectDocument.trackKind(for: asset)
@@ -226,7 +230,28 @@ final class ProjectDocument {
         } else {
             track = try await self.track(of: kind)
         }
+        try requireRoom(for: asset, on: track, at: target.at)
         return try await addClip(for: asset, on: track, at: target.at, mode: mode)
+    }
+
+    /// A drop places a clip; it never displaces one. The range the clip would occupy has to be empty on
+    /// its track and on the track its linked partner would land on, otherwise the drop is rejected
+    /// (docs/design/integration.md, "Drag and drop"). Without this the drop was a ripple insert: it split
+    /// whatever spanned the drop point — a linked video, when the audio was what you dropped — and pushed
+    /// the rest of the sequence along.
+    private func requireRoom(for asset: Asset, on track: Track, at: RationalTime) throws(EditorError) {
+        guard let sequence else { throw .notFound(id: "activeSequence") }
+        var wanted: [Track] = [track]
+        if asset.hasVideo, asset.hasAudio, let partner = sequence.partnerTrack(for: track) { wanted.append(partner) }
+        for t in wanted {
+            let end = sequence.placedEnd(duration: asset.duration, at: at, on: t)
+            guard sequence.isRangeFree(on: t.id, from: at, to: end) else {
+                throw .invalid(
+                    reason:
+                        "No room for \(asset.displayName) on \(t.name) at "
+                        + Timecode.label(seconds: at.seconds, interval: 1, frameDuration: sequence.frameDuration))
+            }
+        }
     }
 
     private func addClip(for asset: Asset, on track: Track, at: RationalTime, mode: EditMode) async throws(EditorError)

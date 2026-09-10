@@ -196,12 +196,13 @@ final class FakeDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
 @MainActor
 @Suite("Library drags land like file drags")
 struct LibraryDropTests {
-    private func item(_ name: String = "cam.mov", hash: String = "sha256-cam", project: ProjectID? = "project-2")
-        -> LibraryDragItem
-    {
+    private func item(
+        _ name: String = "cam.mov", hash: String = "sha256-cam", project: ProjectID? = "project-2",
+        hasAudio: Bool = true
+    ) -> LibraryDragItem {
         LibraryDragItem(
             contentHash: hash, displayName: name, kind: .video, duration: Fixtures.frames(240), hasVideo: true,
-            hasAudio: true, assetId: "asset-cam", projectId: project,
+            hasAudio: hasAudio, assetId: "asset-cam", projectId: project,
             url: URL(fileURLWithPath: "/tmp/Library/\(name)"))
     }
 
@@ -227,7 +228,9 @@ struct LibraryDropTests {
 
     @Test func droppingLibraryItemsHandsThemToTheCallbackAtTheSnappedTarget() async throws {
         let f = try await UIFixture.make("three-clips")
-        let clip = f.clips(.video)[1]
+        // The end of the last clip: the drop has to land where the track is free, and these rows are
+        // video-only so no linked audio has to fit as well (aDropWithNoRoomIsRefused).
+        let clip = f.clips(.video)[2]
         let edge = f.sequence.end(of: clip)
         let l = f.viewModel.layout
         let row = l.rows[0]
@@ -235,17 +238,21 @@ struct LibraryDropTests {
         f.viewModel.onDropLibraryItems = { items, target in received.append((items, target)) }
 
         let point = CGPoint(x: l.x(for: edge) + 5, y: row.midY)
+        let snapped = f.viewModel.dropTarget(at: point)
         f.viewModel.updateDrop(at: point)
-        #expect(f.viewModel.dropLibraryItems([item(), item("band.wav")], at: point))
+        #expect(f.viewModel.dropLibraryItems([item(hasAudio: false), item("band.wav", hasAudio: false)], at: point))
         #expect(f.viewModel.dropTarget == nil)
         #expect(received.count == 1)
         #expect(received[0].items.map(\.displayName) == ["cam.mov", "band.wav"])
         #expect(received[0].items[0].projectId == "project-2")
         #expect(received[0].items[0].contentHash == "sha256-cam")
-        // Snapped exactly like a file drag, on the row under the pointer.
+        // Snapped exactly like a file drag, on the row under the pointer. (Which edge wins is the snapper's
+        // business — here the audio clip's end is nearer than the video clip's — so this compares against
+        // the target a file drag at the same point computes rather than naming one.)
         #expect(received[0].target.trackId == row.trackId)
-        #expect(received[0].target.at == edge)
-        #expect(received[0].target.snappedTo == edge)
+        #expect(received[0].target.at == snapped.at)
+        #expect(received[0].target.snappedTo == snapped.snappedTo)
+        #expect(snapped.snappedTo != nil)
         // A library drop is not an edit by itself: the app decides what to apply.
         #expect(await f.receivedCommands.isEmpty)
     }
@@ -279,6 +286,41 @@ struct LibraryDropTests {
             pasteboard: try pasteboard(files: [URL(fileURLWithPath: "/tmp/notes.txt")]), location: point)
         #expect(view.draggingUpdated(text) == [])
         #expect(f.viewModel.dropTarget == nil)
+    }
+
+    /// A drop places a clip, it never displaces one: with no room on the track it is refused outright —
+    /// while the drag is still in the air, so the pointer says no — rather than splitting what is there
+    /// and pushing the rest of the sequence along.
+    @Test func aDropWithNoRoomIsRefused() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        let l = f.viewModel.layout
+        var received: [[LibraryDragItem]] = []
+        f.viewModel.onDropLibraryItems = { items, _ in received.append(items) }
+
+        // Over the middle of the second video clip: occupied.
+        let occupied = CGPoint(x: l.x(for: Fixtures.frames(120)), y: l.rows[0].midY)
+        #expect(!f.viewModel.accepts([item()], at: f.viewModel.dropTarget(at: occupied)))
+        let sender = FakeDraggingInfo(pasteboard: try pasteboard(library: [item()]), location: occupied)
+        #expect(view.draggingEntered(sender) == [])
+        #expect(f.viewModel.dropTarget == nil, "a refused drag draws no indicator")
+        #expect(!f.viewModel.dropLibraryItems([item()], at: occupied))
+        #expect(received.isEmpty)
+
+        // Past everything, where both the video track and the audio its partner needs are free.
+        let free = CGPoint(x: l.x(forSeconds: 20), y: l.rows[0].midY)
+        #expect(f.viewModel.accepts([item()], at: f.viewModel.dropTarget(at: free)))
+        #expect(
+            view.draggingEntered(FakeDraggingInfo(pasteboard: try pasteboard(library: [item()]), location: free))
+                == .copy)
+        #expect(f.viewModel.dropLibraryItems([item()], at: free))
+        #expect(received.count == 1)
+
+        // The audio track is busy until 11.25s even where the video track is clear, and a row carrying
+        // both has to fit on both.
+        let videoClear = CGPoint(x: l.x(forSeconds: 11.1), y: l.rows[0].midY)
+        #expect(!f.viewModel.accepts([item()], at: f.viewModel.dropTarget(at: videoClear)))
+        #expect(f.viewModel.accepts([item(hasAudio: false)], at: f.viewModel.dropTarget(at: videoClear)))
     }
 
     /// The in-process handoff: the pasteboard's copy of the rows is empty (promised, unresolved) and the
