@@ -236,3 +236,31 @@ before and after.
   `secondsPerPoint` is one of six values is now reachable. The whole module was grepped for
   `secondsPerPoint`; the only consumers are the layout's own arithmetic, the two media call sites, the
   snap tolerance, and the trim handle width, all of which are already continuous functions of it.
+
+## 7. What the implementation did differently
+
+Three departures, all found while building against the real sources.
+
+1. **`setZoom(index:)` changed its anchor as well as its plumbing.** It used to fall back to the left
+   edge of the track area when no `anchorX` was given; it now goes through `zoomAnchorX(pointerX:)` like
+   every other entry point, so a keyboard zoom holds the playhead. That is the point of decision 3, but
+   it does mean an existing caller with no pointer sees a different `scrollSeconds` than it used to.
+   Every test in the module still passes, because they either park the playhead at zero with the view
+   already at the start or set `scrollSeconds` after the zoom.
+
+2. **The anchor loses to the start of the sequence, and that is now asserted rather than described.**
+   `scrollSeconds` clamps at zero, so zooming out far enough that holding the playhead would put
+   negative time on screen lets the playhead drift instead. `zoomKeepsTheVisiblePlayheadUnderTheSamePixel`
+   ends by proving that, so the limit of "does its best" is written down in a test and not only in a
+   comment.
+
+3. **`setPlayhead` frame-snaps, so the no-command test captures the snapped time.** A minor thing, but
+   it is why the assertion reads `vm.setPlayhead(...)` then `let playhead = vm.playhead` rather than
+   comparing against the `RationalTime` that went in: the check is that *zoom* leaves the playhead
+   alone, not that `setPlayhead` is lossless.
+
+**Not verified by any test, and still owed a human:** everything about how the gesture feels.
+`pinchGain`, `scrollZoomRatePerPoint`, and `scrollZoomRatePerLine` are three guesses that can only be
+judged with fingers on a trackpad and a hand on a wheel; so is whether pivoting on the playhead rather
+than the fingers reads as "the timeline zoomed" or as "the timeline slid away". The tests prove the
+arithmetic, the anchoring, the clamps, and that nothing reaches the video; they cannot prove any of that.

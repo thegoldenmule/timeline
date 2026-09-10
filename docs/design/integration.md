@@ -109,7 +109,9 @@ runs in `make test`.
 The window: the media library pane on the left (⌥⌘L, remembered in `showsLibrary`), the preview on top
 (Play in the status bar or the space bar), TimelineUI's Metal timeline
 below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd-Z / Shift-Cmd-Z,
-Cmd-scroll zooms, N toggles snapping, M and S mute and solo the selected clips' tracks; C arms the
+pinch or scroll up and down to zoom — continuously, holding the playhead where it
+is when it is on screen and the pointer when it is not — scroll sideways (or Shift-scroll) to pan,
+`+` and `-` step the six named zoom levels, N toggles snapping, M and S mute and solo the selected clips' tracks; C arms the
 razor and V puts it away, and while it is armed the pointer is a blade over the lanes and a razor click
 cuts the clip under it, Shift-click every unlocked track, Option one member of a link group — the ruler
 and the track headers keep their ordinary behaviour throughout; every track
