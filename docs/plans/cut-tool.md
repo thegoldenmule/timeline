@@ -541,3 +541,34 @@ construction. `Tests/AgentKitTests/AgentKitTests.swift:7` likewise.
   15. Section 2.10 is the argument that it pays for itself.
 - **The blade cursor's hot spot and the symbol's offset are guesses** until they are on screen. Two
   constants.
+
+## 7. What the implementation did differently
+
+Four departures, all found while building against the real sources.
+
+1. **`canCut` is its own predicate, not logic inside `split(at:clips:unlinked:)`.** The frame snap of 2.2
+   and the two locked filters of 2.4 turned out to be needed in three places — the razor's hover (to
+   decide whether the blade draws live or inert), the razor's cut, and `splitAtPlayhead` — so they live
+   in `TimelineViewModel.canCut(_:at:unlinked:)` with `cutTime(_:on:)` beside it, and the tests assert
+   them directly rather than through a command.
+2. **`timeline_cut` sends an empty batch rather than short-circuiting a no-op.** Section 2.10 said to
+   build a `.noop` result by hand when nothing straddles the time. That skips the store, and with it the
+   `expectedVersion` check and the `commandId` replay — so a caller who was behind would be told
+   "nothing to cut" instead of what had changed underneath them. Both stores already decide an empty
+   batch to zero events and return `noop` (`WritePath.swift:54`, `FakeProjectStore.swift:73`), so the
+   command goes through unconditionally and only the human-readable text is specialized.
+   `aStaleVersionIsStillRejectedWhenThereIsNothingToCut` pins it.
+3. **The resolution is a `CutPlan` struct, not inline handler code**, so the three rules and their
+   `skipped` reasons are one readable unit next to the tool rather than a long closure.
+4. **`Tests/TimelineUITests/RazorTests.swift` is a new file** holding the target, scene, and cursor
+   tests; only the command-shaped ones went into `GestureTests`. The cursor test went there too rather
+   than into `LayoutTests`, since it is razor vocabulary and not geometry.
+
+Two things the plan predicted correctly and are worth keeping visible: the `splitAtPlayhead` locked-track
+bug of decision 6 was real and had no test, and a link group crossing a locked track really does take a
+whole batch down — `aLinkGroupCrossingALockedTrackIsSkippedInsteadOfFailingTheBatch` and
+`aLinkGroupCrossingALockedTrackIsReportedInSkipped` cover the two sides of it.
+
+**Not verified by any test, and still owed a human:** whether the blade cursor reads well on screen, whether
+its hot spot lands where the eye expects, and whether the tool picker's segmented control looks right in
+the toolbar. The app launches and the window comes up; nothing beyond that has been seen.
