@@ -168,35 +168,46 @@ public final class AgentComposer {
 
     // MARK: Dropping
 
-    /// The types the agent pane accepts: a library row's own payload, and any file. These are `UTType`
-    /// *values*, never their identifiers: `LibraryDragPayload.contentType` is exported by the process but
-    /// declared in no Info.plist (the app is an SPM executable), so the system cannot resolve it —
-    /// `UTType(LibraryDragPayload.typeIdentifier)` is nil and it reports no conformance to `.data`. Hand
-    /// SwiftUI the identifier and it resolves nothing, silently accepts only the file URL, and a library
-    /// row dragged onto the pane does nothing at all.
-    public static let dropTypes: [UTType] = [LibraryDragPayload.contentType, .fileURL]
+    /// The types the agent pane accepts, as raw pasteboard types. Not `UTType`, and not SwiftUI's
+    /// `onDrop`: `LibraryDragPayload.contentType` is exported by the process but declared in no
+    /// Info.plist (an SPM executable has none), so the system resolves neither its identifier nor any
+    /// conformance — `UTType(LibraryDragPayload.typeIdentifier)` is nil and it reports no conformance to
+    /// `.data`. SwiftUI's drop machinery then quietly registers nothing and the pane never highlights.
+    /// AppKit takes the raw type, which is what `TimelineMetalView` has always done.
+    public static let dropTypes: [NSPasteboard.PasteboardType] = [LibraryDragPayload.pasteboardType, .fileURL]
 
-    /// Reads a drop: library rows carry their own payload, everything else arrives as a file URL. Returns
-    /// false when the drop held neither, so the pane refuses it rather than swallowing it.
+    /// The library rows on a drag's pasteboard, if it carries the library type.
+    public static func libraryItems(on pasteboard: NSPasteboard) -> [LibraryDragItem] {
+        guard let data = pasteboard.data(forType: LibraryDragPayload.pasteboardType),
+            let payload = try? LibraryDragPayload(data: data)
+        else { return [] }
+        return payload.items
+    }
+
+    /// The file URLs on a drag's pasteboard.
+    public static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    /// Whether a drag carrying this pasteboard has anything the pane would stage.
+    public static func accepts(_ pasteboard: NSPasteboard) -> Bool {
+        !libraryItems(on: pasteboard).isEmpty || !fileURLs(on: pasteboard).isEmpty
+    }
+
+    /// Stages everything on a dropped pasteboard. Library rows are read before file URLs: a row also
+    /// offers a `.fileURL` representation so a drag to the Finder works, and only the library branch
+    /// knows the duration, the kind, and which project the media came from. False when it held neither.
     @discardableResult
-    public func stage(_ providers: [NSItemProvider]) -> Bool {
-        var handled = false
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(LibraryDragPayload.typeIdentifier) {
-                handled = true
-                provider.loadDataRepresentation(forTypeIdentifier: LibraryDragPayload.typeIdentifier) { data, _ in
-                    guard let data, let payload = try? LibraryDragPayload(data: data) else { return }
-                    Task { @MainActor [weak self] in self?.add(libraryItems: payload.items) }
-                }
-            } else if provider.canLoadObject(ofClass: URL.self) {
-                handled = true
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url, url.isFileURL else { return }
-                    Task { @MainActor [weak self] in self?.add(urls: [url]) }
-                }
-            }
+    public func stage(_ pasteboard: NSPasteboard) -> Bool {
+        let items = AgentComposer.libraryItems(on: pasteboard)
+        if !items.isEmpty {
+            add(libraryItems: items)
+            return true
         }
-        return handled
+        let urls = AgentComposer.fileURLs(on: pasteboard)
+        guard !urls.isEmpty else { return false }
+        add(urls: urls)
+        return true
     }
 
     // MARK: Drawing
@@ -364,21 +375,41 @@ struct AgentAttachmentChip: View {
     }
 }
 
-/// Makes a whole view the agent's attachment target: anything dropped on it — a library row, a file from
-/// the Finder — is staged on `composer` and nothing is imported. Put it on the pane, not on the message
-/// box: a clip dragged at the transcript is aimed at the agent just as squarely as one dragged at the
-/// field.
-public struct AgentAttachmentTarget: ViewModifier {
+/// Hosts the agent pane inside an AppKit view registered for the attachment types, so anything dropped
+/// anywhere on the pane — a library row, a file from the Finder — is staged on `composer` and nothing is
+/// imported.
+///
+/// Why an `NSHostingView` and not `onDrop` or a background view. `LibraryDragPayload.contentType` is
+/// exported by the process but declared in no Info.plist (an SPM executable has none), so the system
+/// resolves neither its identifier nor any conformance — `UTType(LibraryDragPayload.typeIdentifier)` is
+/// nil and it reports no conformance to `.data` — and SwiftUI's drop machinery quietly registers nothing.
+/// AppKit takes the raw pasteboard type, which is what `TimelineMetalView` has always done. But AppKit
+/// finds a drag's destination by hit-testing the pointer and walking *up* the superview chain, so a
+/// registered view merely sitting behind the content is never reached: it has to be the content's
+/// ancestor, which is what this is.
+public struct AgentDropHost<Content: View>: NSViewRepresentable {
     public let composer: AgentComposer
+    public let content: Content
 
-    public init(composer: AgentComposer) { self.composer = composer }
+    public init(composer: AgentComposer, @ViewBuilder content: () -> Content) {
+        self.composer = composer
+        self.content = content()
+    }
 
-    public func body(content: Content) -> some View {
-        @Bindable var composer = composer
+    public func makeNSView(context: Context) -> AgentDropTargetView {
+        let view = AgentDropTargetView(composer: composer)
+        view.install(NSHostingView(rootView: AnyView(decorated)))
+        return view
+    }
+
+    public func updateNSView(_ view: AgentDropTargetView, context: Context) {
+        view.composer = composer
+        view.hosting?.rootView = AnyView(decorated)
+    }
+
+    /// The pane with its drag highlight, drawn inside the hosting view so it tracks `isDropTargeted`.
+    private var decorated: some View {
         content
-            .onDrop(of: AgentComposer.dropTypes, isTargeted: $composer.isDropTargeted) { providers in
-                composer.stage(providers)
-            }
             .overlay {
                 if composer.isDropTargeted {
                     ZStack {
@@ -394,8 +425,63 @@ public struct AgentAttachmentTarget: ViewModifier {
 }
 
 extension View {
-    /// See `AgentAttachmentTarget`.
+    /// See `AgentDropHost`.
     public func agentAttachmentTarget(_ composer: AgentComposer) -> some View {
-        modifier(AgentAttachmentTarget(composer: composer))
+        AgentDropHost(composer: composer) { self }
+    }
+}
+
+/// The pane's drop target: an `NSView` registered for the attachment types that hosts the pane's own
+/// content, so AppKit's hit-test-then-walk-up search for a drag destination reaches it from anywhere in
+/// the pane. See `AgentDropHost`.
+public final class AgentDropTargetView: NSView {
+    public weak var composer: AgentComposer?
+    var hosting: NSHostingView<AnyView>?
+
+    public init(composer: AgentComposer?) {
+        self.composer = composer
+        super.init(frame: .zero)
+        registerForDraggedTypes(AgentComposer.dropTypes)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func install(_ view: NSHostingView<AnyView>) {
+        hosting = view
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.topAnchor.constraint(equalTo: topAnchor),
+            view.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    public override var intrinsicContentSize: NSSize {
+        hosting?.intrinsicContentSize ?? super.intrinsicContentSize
+    }
+
+    private func operation(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard AgentComposer.accepts(sender.draggingPasteboard) else {
+            composer?.isDropTargeted = false
+            return []
+        }
+        composer?.isDropTargeted = true
+        return .copy
+    }
+
+    public override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { operation(sender) }
+
+    public override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation { operation(sender) }
+
+    public override func draggingExited(_ sender: (any NSDraggingInfo)?) { composer?.isDropTargeted = false }
+
+    public override func draggingEnded(_ sender: any NSDraggingInfo) { composer?.isDropTargeted = false }
+
+    public override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        composer?.isDropTargeted = false
+        return composer?.stage(sender.draggingPasteboard) ?? false
     }
 }

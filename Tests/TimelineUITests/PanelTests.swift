@@ -377,30 +377,59 @@ struct AgentComposerTests {
         #expect(c.poster(for: attachment) == nil)
     }
 
-    /// The drop itself, on the providers a real drag hands over: the library row registered through the
-    /// same `Transferable` bridge `.draggable` uses, and a file URL. This is what catches the pane and the
-    /// library disagreeing about the payload's type identifier.
-    @Test func aDropStagesLibraryRowsAndFileURLs() async throws {
-        let c = composer()
-        let payload = LibraryDragPayload(items: [item("cam.mov")])
-        let library = NSItemProvider()
-        library.register(payload)
-        #expect(library.registeredTypeIdentifiers == [LibraryDragPayload.typeIdentifier])
-        // The pane must accept the `UTType` value, not its identifier. The payload's type is exported by
-        // the process but declared in no Info.plist, so the system resolves neither the identifier nor any
-        // conformance — hand SwiftUI the string and the library type vanishes from the accepted list, and
-        // the drag does nothing. This pair is the regression.
+    /// A pasteboard carrying the given types, named so the test never touches the general pasteboard.
+    private func pasteboard(library: [LibraryDragItem]? = nil, files: [URL] = []) throws -> NSPasteboard {
+        let board = NSPasteboard(name: NSPasteboard.Name("agent-drop-tests-\(UUID().uuidString)"))
+        board.clearContents()
+        if let library {
+            board.setData(try LibraryDragPayload(items: library).data(), forType: LibraryDragPayload.pasteboardType)
+        }
+        if !files.isEmpty { board.writeObjects(files.map { $0 as NSURL }) }
+        return board
+    }
+
+    /// The drop itself, driven through the pane's `NSDraggingDestination` on a real pasteboard — the same
+    /// shape of test the timeline's drop has. SwiftUI's `onDrop` cannot serve this pane: the payload's
+    /// type is exported by the process but declared in no Info.plist, so the system resolves neither its
+    /// identifier nor any conformance and SwiftUI registers nothing. That is why the target is AppKit's.
+    @Test func aDropStagesLibraryRowsAndFileURLs() throws {
         #expect(UTType(LibraryDragPayload.typeIdentifier) == nil)
         #expect(!LibraryDragPayload.contentType.conforms(to: .data))
-        #expect(AgentComposer.dropTypes.contains(LibraryDragPayload.contentType))
-        #expect(AgentComposer.dropTypes.contains { library.hasItemConformingToTypeIdentifier($0.identifier) })
-        let file = NSItemProvider(object: URL(fileURLWithPath: "/tmp/notes.txt") as NSURL)
-        #expect(AgentComposer.dropTypes.contains { file.hasItemConformingToTypeIdentifier($0.identifier) })
-        #expect(c.stage([library, file]))
-        #expect(await eventually { c.attachments.count == 2 })
-        #expect(Set(c.attachments.map(\.displayName)) == ["cam.mov", "notes.txt"])
-        // Nothing else is offered anything: a drop of an unknown type is refused.
-        #expect(!c.stage([NSItemProvider(object: "hello" as NSString)]))
+        #expect(AgentComposer.dropTypes == [LibraryDragPayload.pasteboardType, .fileURL])
+
+        let c = composer()
+        // The pane's own drop target, driven exactly as AppKit drives it during a drag.
+        let view = AgentDropTargetView(composer: c)
+        // AppKit keeps its own order; what matters is that both types are registered.
+        #expect(Set(view.registeredDraggedTypes) == Set(AgentComposer.dropTypes))
+
+        // A library row: the pane highlights while the drag is over it and stages the row on the drop.
+        let rows = try FakeDraggingInfo(
+            pasteboard: pasteboard(library: [item("cam.mov")]), location: .init(x: 10, y: 10))
+        #expect(view.draggingEntered(rows) == .copy)
+        #expect(c.isDropTargeted)
+        #expect(view.performDragOperation(rows))
+        #expect(!c.isDropTargeted)
+        #expect(c.attachments.map(\.displayName) == ["cam.mov"])
+
+        // A file from the Finder.
+        let files = try FakeDraggingInfo(
+            pasteboard: pasteboard(files: [URL(fileURLWithPath: "/tmp/notes.txt")]), location: .init(x: 10, y: 10))
+        #expect(view.draggingUpdated(files) == .copy)
+        #expect(view.performDragOperation(files))
+        #expect(c.attachments.map(\.displayName) == ["cam.mov", "notes.txt"])
+
+        // Nothing the pane wants: no highlight, no drop, and the drag falls through to whatever is behind.
+        let junk = try FakeDraggingInfo(pasteboard: pasteboard(), location: .init(x: 10, y: 10))
+        #expect(view.draggingEntered(junk) == [])
+        #expect(!c.isDropTargeted)
+        #expect(!view.performDragOperation(junk))
+        #expect(c.attachments.count == 2)
+
+        // The drag leaving clears the highlight rather than stranding it on.
+        _ = view.draggingEntered(rows)
+        view.draggingExited(nil)
+        #expect(!c.isDropTargeted)
     }
 
     @Test func theComposerAndTheTranscriptRender() async throws {
