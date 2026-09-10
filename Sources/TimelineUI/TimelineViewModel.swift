@@ -105,6 +105,10 @@ public final class TimelineViewModel {
     public private(set) var commandCount = 0
     /// Where a file drag over the view would land; the scene draws it until the drag leaves or drops.
     public internal(set) var dropTarget: TimelineDropTarget?
+    /// Which pointer tool the timeline is in. View state: not persisted, not undoable, never an event.
+    public internal(set) var activeTool: TimelineTool = .selection
+    /// Where a razor cut would land; the scene draws the blade until the pointer leaves or cuts.
+    public internal(set) var razorTarget: RazorTarget?
     /// Receives the media files dropped on the timeline and where they landed (`TimelineDrop.swift`).
     public var onDropMedia: (([URL], TimelineDropTarget) -> Void)?
     /// Receives rows dragged out of the library panel; the app duplicates a foreign asset first.
@@ -658,5 +662,7 @@ public final class TimelineViewModel {
         _ = preview?.isValid
         _ = pending?.current
         _ = dropTarget
+        _ = activeTool
+        _ = razorTarget
     }
 }

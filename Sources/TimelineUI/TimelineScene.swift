@@ -77,6 +77,11 @@ public enum TimelineTheme {
     /// The row a file drag would land on, and the line at its drop time.
     public static let dropHighlight = SceneColor(0.40, 0.90, 1.0, 0.18)
     public static let dropIndicator = SceneColor(0.40, 0.90, 1.0)
+    /// The razor's blade. Pink because every other meaning is taken: red is the playhead, cyan the drop,
+    /// yellow the selection, blue solo, orange the lock badge.
+    public static let razorIndicator = SceneColor(1.0, 0.35, 0.75)
+    /// What the blade fades to when the click under it would cut nothing.
+    public static let razorInertAlpha: Float = 0.35
 
     public static let clipCornerRadius: CGFloat = 4
     public static let controlCornerRadius: CGFloat = 3
@@ -247,12 +252,14 @@ public enum TimelineSceneBuilder {
         public var showMedia: Bool
         /// A file drag in progress: the scene highlights its row and draws a line at its time.
         public var dropTarget: TimelineDropTarget?
+        /// The razor hovering: the scene draws a blade at its time, over one row or all of them.
+        public var razorTarget: RazorTarget?
 
         public init(
             project: Project, sequence: Sequence?, layout: TimelineLayout, selection: Set<ClipID>,
             playhead: RationalTime,
             preview: GesturePreview? = nil, pendingClipIds: Set<ClipID> = [], libraryLayout: LibraryLayout = .default,
-            showMedia: Bool = true, dropTarget: TimelineDropTarget? = nil
+            showMedia: Bool = true, dropTarget: TimelineDropTarget? = nil, razorTarget: RazorTarget? = nil
         ) {
             self.project = project
             self.sequence = sequence
@@ -264,6 +271,7 @@ public enum TimelineSceneBuilder {
             self.libraryLayout = libraryLayout
             self.showMedia = showMedia
             self.dropTarget = dropTarget
+            self.razorTarget = razorTarget
         }
     }
 
@@ -279,7 +287,8 @@ public enum TimelineSceneBuilder {
         return Input(
             project: vm.project, sequence: vm.displaySequence, layout: vm.layout, selection: vm.selection,
             playhead: vm.playhead, preview: vm.preview, pendingClipIds: pendingIds, libraryLayout: vm.libraryLayout,
-            showMedia: showMedia && (vm.thumbnails != nil || vm.waveforms != nil), dropTarget: vm.dropTarget)
+            showMedia: showMedia && (vm.thumbnails != nil || vm.waveforms != nil), dropTarget: vm.dropTarget,
+            razorTarget: vm.razorTarget)
     }
 
     @MainActor
@@ -350,6 +359,7 @@ public enum TimelineSceneBuilder {
         }
         addPlayhead(&scene, at: input.playhead, layout: layout)
         if let drop = input.dropTarget { addDropIndicator(&scene, drop: drop, layout: layout) }
+        if let razor = input.razorTarget { addRazorIndicator(&scene, razor: razor, layout: layout) }
         if let message = input.preview?.message {
             scene.labels.append(
                 SceneLabel(
@@ -715,6 +725,42 @@ public enum TimelineSceneBuilder {
             SceneTriangle(
                 CGPoint(x: x - 6, y: layout.rulerHeight), CGPoint(x: x + 6, y: layout.rulerHeight),
                 CGPoint(x: x, y: layout.rulerHeight + 8), color: TimelineTheme.dropIndicator))
+    }
+
+    /// The razor hovering: a blade at the cut time, over the hovered row alone or the whole track area
+    /// when Shift would cut every track, plus the snap band when the time snapped. A target that would
+    /// cut nothing draws dimmed and drops the triangle, so an inert click looks inert before you make it.
+    private static func addRazorIndicator(
+        _ scene: inout TimelineScene, razor: RazorTarget, layout: TimelineLayout
+    ) {
+        let x = layout.x(for: razor.at)
+        guard x >= layout.trackAreaMinX - 1 && x <= layout.size.width + 1 else { return }
+        let top: CGFloat
+        let height: CGFloat
+        if !razor.allTracks, let trackId = razor.trackId, let row = layout.row(for: trackId) {
+            top = row.y
+            height = row.height
+        } else {
+            top = layout.rulerHeight
+            height = layout.size.height - layout.rulerHeight
+        }
+        let alpha: Float = razor.isCuttable ? 1 : TimelineTheme.razorInertAlpha
+        if razor.snappedTo != nil {
+            scene.overlayQuads.append(
+                SceneQuad(
+                    rect: CGRect(
+                        x: x - 3, y: layout.rulerHeight, width: 6, height: layout.size.height - layout.rulerHeight),
+                    color: TimelineTheme.snapGuide.with(alpha: 0.25 * alpha)))
+        }
+        scene.overlayQuads.append(
+            SceneQuad(
+                rect: CGRect(x: x - 1, y: top, width: 2, height: height),
+                color: TimelineTheme.razorIndicator.with(alpha: alpha)))
+        guard razor.isCuttable else { return }
+        scene.triangles.append(
+            SceneTriangle(
+                CGPoint(x: x - 6, y: top), CGPoint(x: x + 6, y: top), CGPoint(x: x, y: top + 8),
+                color: TimelineTheme.razorIndicator))
     }
 
     private static func addPlayhead(_ scene: inout TimelineScene, at time: RationalTime, layout: TimelineLayout) {

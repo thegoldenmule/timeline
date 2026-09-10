@@ -230,6 +230,29 @@ struct RenderTests {
         f.viewModel.layout.width(for: clip.duration(frameDuration: f.sequence.frameDuration))
     }
 
+    @Test func theRazorIndicatorRasterizesInItsOwnColour() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.snappingEnabled = false
+        let renderer = try TimelineRenderer()
+        let clip = f.clips(.video)[1]
+        let l = f.viewModel.layout
+        let row = try #require(l.row(for: clip.trackId))
+        let hover = CGPoint(x: l.x(forSeconds: clip.start.seconds + 1), y: row.midY)
+        f.viewModel.selectTool(.razor)
+        f.viewModel.updateRazor(at: hover, modifiers: [])
+
+        let x = Int(l.x(for: try #require(f.viewModel.razorTarget).at))
+        let single = try renderer.render(scene: TimelineSceneBuilder.build(from: f.viewModel))
+        #expect(single.pixel(x: x, y: Int(row.midY)).matches(TimelineTheme.razorIndicator, tolerance: 0.05))
+        // One row only: the row below is untouched.
+        let other = try #require(l.rows.first { $0.trackId != clip.trackId })
+        #expect(!single.pixel(x: x, y: Int(other.midY)).matches(TimelineTheme.razorIndicator, tolerance: 0.05))
+
+        f.viewModel.updateRazor(at: hover, modifiers: [.shift])
+        let all = try renderer.render(scene: TimelineSceneBuilder.build(from: f.viewModel))
+        #expect(all.pixel(x: x, y: Int(other.midY)).matches(TimelineTheme.razorIndicator, tolerance: 0.05))
+    }
+
     @Test func cullsClipsOutsideTheVisibleRange() async throws {
         var gen = ProjectGenerator(seed: 7)
         gen.videoTracks = 2...2
