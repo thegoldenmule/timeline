@@ -13,15 +13,20 @@ extension Decider {
 
     /// Shifts every clip that starts at or after `point` on `tracks` by `delta`, and every marker at
     /// or after `point`. Emits one `ClipMoved`/`MarkerMoved` per shifted item.
+    ///
+    /// `including` shifts named clips whatever their start. It carries the tails `splitSpanningClips`
+    /// just made: a tail begins at its own track's *snapped* cut, which on a frame-aligned track can be
+    /// a fraction of a frame before `point`, and a tail left behind by the shift is the whole insert
+    /// gone wrong — the clip is cut for no reason and everything after it loses sync.
     mutating func ripple(
         in sequenceId: SequenceID, from point: RationalTime, by delta: RationalTime, scope: RippleScope,
-        addressed: Set<TrackID>, excluding: Set<ClipID> = []
+        addressed: Set<TrackID>, excluding: Set<ClipID> = [], including: Set<ClipID> = []
     ) {
         guard !delta.isZero, let seq = state.sequences[sequenceId] else { return }
         let tracks = rippleTracks(scope, addressed: addressed, in: seq)
         for track in seq.tracks where tracks.contains(track.id) {
             let clips = track.clips.values
-                .filter { $0.start >= point && !excluding.contains($0.id) }
+                .filter { ($0.start >= point || including.contains($0.id)) && !excluding.contains($0.id) }
                 .sorted { ($0.start, $0.id) < ($1.start, $1.id) }
             for clip in delta.isNegative ? clips : clips.reversed() {
                 emit(
@@ -41,22 +46,29 @@ extension Decider {
     }
 
     /// Insert semantics: splits any clip that spans `point` on `tracks`, so the right part can shift.
+    /// Returns the tails, which the caller's `ripple` must shift as a set — each one starts at its own
+    /// track's snapped cut, not at `point`.
+    @discardableResult
     mutating func splitSpanningClips(
         in sequenceId: SequenceID, at point: RationalTime, tracks: Set<TrackID>,
         excluding: Set<ClipID> = []
-    ) throws(EditorError) {
-        guard let seq = state.sequences[sequenceId] else { return }
+    ) throws(EditorError) -> Set<ClipID> {
+        guard let seq = state.sequences[sequenceId] else { return [] }
+        var tails: Set<ClipID> = []
         for track in seq.tracks where tracks.contains(track.id) {
             for clip in track.clips.values.sorted(by: { $0.id < $1.id }) where !excluding.contains(clip.id) {
                 let end = seq.end(of: clip)
                 if clip.start < point && point < end {
                     let cut = snap(point, track, in: seq)
                     if clip.start < cut && cut < end {
-                        try splitSingle(clip, at: cut, newId: mint(), in: seq, track: track, newGroup: clip.linkGroupId)
+                        let tail: ClipID = mint()
+                        try splitSingle(clip, at: cut, newId: tail, in: seq, track: track, newGroup: clip.linkGroupId)
+                        tails.insert(tail)
                     }
                 }
             }
         }
+        return tails
     }
 
     /// Overwrite semantics: makes `[from, to)` on `trackId` free of other clips by trimming, splitting,
@@ -272,8 +284,9 @@ extension Decider {
         switch o.mode {
         case .ripple:
             let tracks = rippleTracks(o.rippleScope, addressed: addressed, in: seq)
-            try splitSpanningClips(in: seq.id, at: at, tracks: tracks)
-            ripple(in: seq.id, from: at, by: duration, scope: o.rippleScope, addressed: addressed)
+            let tails = try splitSpanningClips(in: seq.id, at: at, tracks: tracks)
+            ripple(
+                in: seq.id, from: at, by: duration, scope: o.rippleScope, addressed: addressed, including: tails)
         case .overwrite:
             for c in clips {
                 let end =
@@ -321,10 +334,10 @@ extension Decider {
         case .ripple:
             let addressed = Set(placements.map(\.1))
             let tracks = rippleTracks(o.rippleScope, addressed: addressed, in: seq)
-            try splitSpanningClips(in: seq.id, at: newStart, tracks: tracks, excluding: moving)
+            let tails = try splitSpanningClips(in: seq.id, at: newStart, tracks: tracks, excluding: moving)
             ripple(
                 in: seq.id, from: newStart, by: l.duration, scope: o.rippleScope, addressed: addressed,
-                excluding: moving)
+                excluding: moving, including: tails)
         case .overwrite:
             for (m, trackId, start) in placements {
                 try clearRange(on: trackId, in: seq.id, from: start, to: start + m.duration, excluding: moving)

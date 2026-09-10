@@ -163,6 +163,36 @@ import TimelineCore
         #expect(clips[2].sourceIn == frames(24) && clips[2].start == frames(48))
     }
 
+    /// The insert falls between two frames, so each track cuts where it is allowed to: the video track
+    /// floors to the frame, the audio track cuts where asked. The tail the video cut therefore begins a
+    /// fraction of a frame *before* the insert point, and shifting only what starts at or after that point
+    /// left it behind — the video was cut for nothing and everything after it lost sync with the audio,
+    /// which did move. Both tails travel with the insert.
+    @Test func aRippleInsertShiftsEveryTailItSplitEvenOneCutBeforeThePoint() throws {
+        let s = try Scene()
+        let video = try s.linked(at: 0, length: 96)
+        let audio = try #require(s.partner(of: video)).id
+        let later = try s.video(at: 120, length: 24)
+        let delta = frames(24)
+
+        // Between frames 48 and 49, which is what dropping on an audio track gives you.
+        let at = frames(48) + RationalTime(1, 48000)
+        try s.b.addClip(track: s.a, asset: s.asset, at: at, sourceIn: .zero, sourceOut: delta, mode: .ripple)
+
+        // Each half of the pair was cut where its own track allows.
+        #expect(s.b.end(video) == frames(48))
+        #expect(s.b.end(audio) == at)
+        let videoTail = try #require(
+            s.b.videoTracks[0].clips.values.first { $0.start > frames(48) && $0.id != later })
+        let audioTail = try #require(s.b.audioTracks[0].clips.values.first { $0.start > at })
+        // ...and both tails moved by the inserted duration, so the pair still lines up and nothing that
+        // followed it slipped.
+        #expect(videoTail.start == frames(48) + delta)
+        #expect(audioTail.start == at + delta)
+        #expect(s.b.start(later) == frames(120) + delta)
+        #expect(s.b.clip(videoTail.id)?.linkGroupId == s.b.clip(audioTail.id)?.linkGroupId)
+    }
+
     // MARK: trim
 
     @Test func rippleTailTrimShiftsEveryUnlockedTrackAndMarkers() throws {
