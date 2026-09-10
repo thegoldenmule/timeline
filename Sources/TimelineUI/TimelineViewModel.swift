@@ -82,12 +82,13 @@ public final class TimelineViewModel {
     public private(set) var history = History()
     public var selection: Set<ClipID> = []
     public var playhead: RationalTime = .zero
-    private var zoomStorage: Int = ZoomLevel.defaultIndex
+    private var zoomStorage: Double = ZoomLevel.secondsPerPoint[ZoomLevel.defaultIndex]
     private var scrollStorage: Double = 0
-    /// Index into `ZoomLevel.secondsPerPoint`, clamped.
+    /// The ladder rung nearest the current zoom (`ZoomLevel.secondsPerPoint`). Setting it lands exactly
+    /// on that rung; the zoom itself is continuous and usually sits between two of them.
     public var zoomIndex: Int {
-        get { zoomStorage }
-        set { zoomStorage = min(max(newValue, 0), ZoomLevel.count - 1) }
+        get { ZoomLevel.nearestIndex(to: zoomStorage) }
+        set { zoomStorage = ZoomLevel.secondsPerPoint[min(max(newValue, 0), ZoomLevel.count - 1)] }
     }
     /// Sequence time at the left edge of the track area, never negative.
     public var scrollSeconds: Double {
@@ -188,7 +189,12 @@ public final class TimelineViewModel {
 
     // MARK: Layout and zoom
 
-    public var secondsPerPoint: Double { ZoomLevel.secondsPerPoint[zoomIndex] }
+    /// How much sequence time one point of the track area covers. Continuous — a pinch sets it to
+    /// anything between the ladder's ends — and clamped to `ZoomLevel.widest ... ZoomLevel.finest`.
+    public var secondsPerPoint: Double {
+        get { zoomStorage }
+        set { zoomStorage = ZoomLevel.clamp(newValue) }
+    }
 
     public var layout: TimelineLayout {
         TimelineLayout(
@@ -196,18 +202,56 @@ public final class TimelineViewModel {
             tracks: displaySequence?.tracks ?? [])
     }
 
-    /// Changes the zoom level keeping the time under `anchorX` (view x) where it is.
-    public func setZoom(index: Int, anchorX: CGFloat? = nil) {
-        let clamped = min(max(index, 0), ZoomLevel.count - 1)
+    /// The view x a zoom pivots about, and the one rule every zoom obeys.
+    ///
+    /// **The playhead when it is on screen, the pointer when it is not, the left edge when there is
+    /// neither.** The pointer and the playhead disagree whenever the pointer is not on the playhead and
+    /// one of them has to win: the playhead wins, because it is what the eye is tracking, it is what
+    /// stays still when a magnifying glass moves, and it is the only anchor a zoom from the keyboard or
+    /// from outside the view could ever have. Off screen there is nothing to hold still, so the pointer
+    /// takes over — which is also what a pinch feels like it should do when the playhead is elsewhere.
+    /// `scrollSeconds` still clamps at zero, so near the start of the sequence the anchor drifts rather
+    /// than the view scrolling before the sequence begins.
+    func zoomAnchorX(pointerX: CGFloat?) -> CGFloat {
         let l = layout
-        let anchor = anchorX ?? l.trackAreaMinX
+        let playheadX = l.x(for: playhead)
+        if playheadX >= l.trackAreaMinX, playheadX <= l.size.width { return playheadX }
+        if let pointerX, pointerX >= l.trackAreaMinX, pointerX <= l.size.width { return pointerX }
+        return l.trackAreaMinX
+    }
+
+    /// Zooms to `value` seconds per point (clamped), keeping the time under the anchor where it is.
+    /// `anchorX` is the gesture's pointer position, if it has one; see `zoomAnchorX(pointerX:)`.
+    public func setZoom(secondsPerPoint value: Double, anchorX: CGFloat? = nil) {
+        let l = layout
+        let anchor = zoomAnchorX(pointerX: anchorX)
         let anchoredSeconds = l.seconds(atX: anchor)
-        zoomIndex = clamped
+        secondsPerPoint = value
         scrollSeconds = anchoredSeconds - Double(anchor - l.headerWidth) * secondsPerPoint
     }
 
-    public func zoomIn(anchorX: CGFloat? = nil) { setZoom(index: zoomIndex + 1, anchorX: anchorX) }
-    public func zoomOut(anchorX: CGFloat? = nil) { setZoom(index: zoomIndex - 1, anchorX: anchorX) }
+    /// Multiplies the zoom by `factor`; greater than one zooms in. What a pinch or a scroll-zoom event
+    /// applies, one event at a time.
+    public func zoom(by factor: Double, anchorX: CGFloat? = nil) {
+        guard factor.isFinite, factor > 0 else { return }
+        setZoom(secondsPerPoint: secondsPerPoint / factor, anchorX: anchorX)
+    }
+
+    /// Zooms to a ladder rung exactly, keeping the time under the anchor where it is.
+    public func setZoom(index: Int, anchorX: CGFloat? = nil) {
+        let clamped = min(max(index, 0), ZoomLevel.count - 1)
+        setZoom(secondsPerPoint: ZoomLevel.secondsPerPoint[clamped], anchorX: anchorX)
+    }
+
+    /// `+`: the next ladder rung finer than wherever a gesture left the zoom.
+    public func zoomIn(anchorX: CGFloat? = nil) {
+        setZoom(secondsPerPoint: ZoomLevel.zoomedIn(from: secondsPerPoint), anchorX: anchorX)
+    }
+
+    /// `-`: the next ladder rung coarser.
+    public func zoomOut(anchorX: CGFloat? = nil) {
+        setZoom(secondsPerPoint: ZoomLevel.zoomedOut(from: secondsPerPoint), anchorX: anchorX)
+    }
 
     /// Scrolls so the playhead is visible.
     public func revealPlayhead() {
@@ -654,7 +698,7 @@ public final class TimelineViewModel {
         _ = project.version
         _ = selection.count
         _ = playhead
-        _ = zoomIndex
+        _ = secondsPerPoint
         _ = scrollSeconds
         _ = snappingEnabled
         _ = modifiers
