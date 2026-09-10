@@ -511,7 +511,7 @@ public enum TimelineSceneBuilder {
                         x: fullRect.minX + 1, y: fullRect.minY + 4, width: fullRect.width - 2,
                         height: fullRect.height - 10)
                     let sampleRate = asset.sampleRate ?? 48000
-                    let spp = max(1, Int(layout.secondsPerPoint * Double(sampleRate)))
+                    let spp = max(1, Int(layout.mediaSecondsPerPoint * Double(sampleRate)))
                     addMediaChunks(
                         clip: clip, startSeconds: start, endSeconds: end, band: band, area: area, layout: layout,
                         tileWidth: waveformChunkWidth, tilesPerChunk: 1
@@ -567,10 +567,14 @@ public enum TimelineSceneBuilder {
     /// wide. Tiles are aligned to the clip's start, so panning brings one new chunk in at the leading edge
     /// and leaves the rest keyed — and drawn — where they were, instead of restretching a single request
     /// spanning the whole clip into whatever part of it happens to be on screen.
+    ///
+    /// Tiles are sized from `layout.mediaSecondsPerPoint`, not the live zoom: zoom is continuous, every
+    /// distinct key is a decode, and a pinch that minted a fresh key per event would never hit the cache.
+    /// Between two quantized rungs a tile is drawn slightly wider or narrower than the frame it holds.
     private static func mediaChunks(
         startSeconds: Double, endSeconds: Double, layout: TimelineLayout, tileWidth: CGFloat, tilesPerChunk: Int
     ) -> [MediaChunk] {
-        let tileSeconds = Double(tileWidth) * layout.secondsPerPoint
+        let tileSeconds = Double(tileWidth) * layout.mediaSecondsPerPoint
         guard tileSeconds > 0, endSeconds > startSeconds, tilesPerChunk > 0 else { return [] }
         let totalTiles = max(1, Int(((endSeconds - startSeconds) / tileSeconds).rounded(.up)))
         let first = max(0, Int(((layout.visibleStartSeconds - startSeconds) / tileSeconds).rounded(.down)))
@@ -599,7 +603,7 @@ public enum TimelineSceneBuilder {
     ) {
         let bounds = band.intersection(area)
         guard !bounds.isNull, bounds.width >= 1, bounds.height >= 1 else { return }
-        let sourcePerTile = Double(tileWidth) * layout.secondsPerPoint * clip.speed.doubleValue
+        let sourcePerTile = Double(tileWidth) * layout.mediaSecondsPerPoint * clip.speed.doubleValue
         let scale = TimelineLayout.pointerTimescale
         for chunk in mediaChunks(
             startSeconds: startSeconds, endSeconds: endSeconds, layout: layout, tileWidth: tileWidth,
