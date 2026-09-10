@@ -418,6 +418,7 @@ struct AgentComposerTests {
         #expect(view.draggingUpdated(files) == .copy)
         #expect(view.performDragOperation(files))
         #expect(c.attachments.map(\.displayName) == ["cam.mov", "notes.txt"])
+        #expect(c.attachments[1].kind == nil && c.attachments[1].duration == nil)
 
         // Nothing the pane wants: no highlight, no drop, and the drag falls through to whatever is behind.
         let junk = try FakeDraggingInfo(pasteboard: pasteboard(), location: .init(x: 10, y: 10))
@@ -430,6 +431,30 @@ struct AgentComposerTests {
         _ = view.draggingEntered(rows)
         view.draggingExited(nil)
         #expect(!c.isDropTargeted)
+    }
+
+    /// What a real library drag looks like by the time it lands: the payload is on the pasteboard but its
+    /// bytes arrive empty, so only the file URL is readable. The pane stages it anyway, and the panel
+    /// turns the path back into a row so the chip keeps its kind, duration, and poster.
+    @Test func aLibraryDragWhoseRowsArriveEmptyIsStagedFromItsPath() throws {
+        let c = composer()
+        let row = item("cam.mov")
+        c.resolve = { url in url.lastPathComponent == "cam.mov" ? row : nil }
+        let view = AgentDropTargetView(composer: c)
+
+        let board = try pasteboard(files: [try #require(row.url)])
+        board.setData(Data(), forType: LibraryDragPayload.pasteboardType)
+        #expect(board.data(forType: LibraryDragPayload.pasteboardType)?.isEmpty == true)
+        let sender = FakeDraggingInfo(pasteboard: board, location: .init(x: 10, y: 10))
+
+        #expect(view.draggingEntered(sender) == .copy)
+        #expect(view.performDragOperation(sender))
+        let staged = try #require(c.attachments.first)
+        #expect(staged.displayName == "cam.mov")
+        #expect(staged.kind == .video)
+        #expect(staged.duration == row.duration)
+        #expect(staged.contentHash == row.contentHash)
+        #expect(c.message.contains("2.00s"))
     }
 
     @Test func theComposerAndTheTranscriptRender() async throws {

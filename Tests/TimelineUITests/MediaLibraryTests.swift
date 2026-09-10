@@ -4,6 +4,7 @@ import ContractsTestSupport
 import Foundation
 import Testing
 import TimelineCore
+import UniformTypeIdentifiers
 
 @testable import TimelineUI
 
@@ -238,5 +239,14 @@ struct MediaLibraryTests {
         board.setData(try model.payload([row.id]).data(), forType: LibraryDragPayload.pasteboardType)
         let data = try #require(board.data(forType: LibraryDragPayload.pasteboardType))
         #expect(try LibraryDragPayload(data: data).items == [item])
+
+        // ...and through the provider a real drag carries, which is not the same thing. Everything
+        // registered on a provider is promised through SwiftUI's bridge and resolved asynchronously, so a
+        // drop reading `data(forType:)` gets zero bytes however the payload was registered. The drag
+        // therefore also carries the file itself, a type AppKit writes to the pasteboard directly, and
+        // that is what both the timeline and the agent pane fall back to.
+        let provider = model.dragProvider([row.id])
+        #expect(provider.registeredTypeIdentifiers.contains(LibraryDragPayload.typeIdentifier))
+        #expect(provider.registeredTypeIdentifiers.contains(UTType.fileURL.identifier))
     }
 }

@@ -281,6 +281,30 @@ struct LibraryDropTests {
         #expect(f.viewModel.dropTarget == nil)
     }
 
+    /// What a real drag out of the panel looks like: the library type is on the pasteboard but its bytes
+    /// arrive empty (SwiftUI promises them through the provider bridge and resolves them asynchronously),
+    /// so the file URL the drag also carries is what has to land. Taking the library branch on the type
+    /// alone inserted nothing — the indicator lit up and the clip never appeared.
+    @Test func aDragWhoseRowsArriveEmptyLandsAsAFileDrop() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let view = TimelineMetalView(viewModel: f.viewModel)
+        let l = f.viewModel.layout
+        let point = CGPoint(x: l.x(forSeconds: 20), y: l.rows[0].midY)
+        var libraryDrops: [[LibraryDragItem]] = []
+        var fileDrops: [[URL]] = []
+        f.viewModel.onDropLibraryItems = { items, _ in libraryDrops.append(items) }
+        f.viewModel.onDropMedia = { urls, _ in fileDrops.append(urls) }
+
+        let board = try pasteboard(files: [URL(fileURLWithPath: "/tmp/one.mov")])
+        board.setData(Data(), forType: LibraryDragPayload.pasteboardType)
+        #expect(board.data(forType: LibraryDragPayload.pasteboardType)?.isEmpty == true)
+        let sender = FakeDraggingInfo(pasteboard: board, location: point)
+        #expect(view.draggingEntered(sender) == .copy)
+        #expect(view.performDragOperation(sender))
+        #expect(libraryDrops.isEmpty)
+        #expect(fileDrops.map { $0.map(\.lastPathComponent) } == [["one.mov"]])
+    }
+
     @Test func aDragCarryingBothTypesIsTreatedAsALibraryDrag() async throws {
         let f = try await UIFixture.make("three-clips")
         let view = TimelineMetalView(viewModel: f.viewModel)

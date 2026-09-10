@@ -81,6 +81,11 @@ public final class AgentComposer {
     /// Bumped when a poster lands, so a chip that drew a placeholder redraws with the picture.
     public private(set) var posterGeneration = 0
 
+    /// Looks a dropped path up in the media library. A library drag reaches the pane as a bare file URL
+    /// (its payload arrives empty, see `dropTypes`), and this is what gives the chip back its kind,
+    /// duration, and poster rather than staging a nameless path.
+    public var resolve: ((URL) -> LibraryDragItem?)?
+
     private let fileExists: @Sendable (URL) -> Bool
 
     public init(
@@ -117,10 +122,17 @@ public final class AgentComposer {
     /// reads scripts and notes as happily as it imports media.
     @discardableResult
     public func add(urls: [URL]) -> Int {
-        add(
-            urls.map { url in
-                AgentAttachment(url: url, kind: MediaFileTypes.kind(of: url), isMissing: !fileExists(url))
-            })
+        var staged: [AgentAttachment] = []
+        var rows: [LibraryDragItem] = []
+        for url in urls {
+            if let row = resolve?(url) {
+                rows.append(row)
+            } else {
+                staged.append(
+                    AgentAttachment(url: url, kind: MediaFileTypes.kind(of: url), isMissing: !fileExists(url)))
+            }
+        }
+        return add(libraryItems: rows) + add(staged)
     }
 
     @discardableResult

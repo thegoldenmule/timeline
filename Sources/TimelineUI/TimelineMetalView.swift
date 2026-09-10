@@ -185,8 +185,12 @@ public final class TimelineMetalView: MTKView {
 
     public override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         let point = convert(sender.draggingLocation, from: nil)
+        // The decoded rows decide the branch, not the presence of the type. A drag's payload is promised
+        // through SwiftUI's provider bridge and can arrive as zero bytes — the type is on the pasteboard,
+        // `data(forType:)` answers empty rather than nil, and taking the library branch on that alone
+        // dropped nothing at all. The file URL the drag also carries is what lands then.
         let items = libraryItems(sender)
-        if sender.draggingPasteboard.data(forType: LibraryDragPayload.pasteboardType) != nil {
+        if !items.isEmpty {
             return viewModel.dropLibraryItems(items, at: point)
         }
         return viewModel.dropMedia(fileURLs(sender), at: point)

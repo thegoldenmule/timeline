@@ -210,12 +210,47 @@ public final class MediaLibraryModel {
         return LibraryDragItem(row.asset, projectId: row.item.projectId, url: row.url)
     }
 
+    /// The row for a path, if the library knows one. A drag that arrives as a bare file URL — which is
+    /// what a library drag looks like once its promised payload comes back empty — is still a library row,
+    /// and this is what recovers its duration, kind, and poster.
+    public func dragItem(forPath path: String) -> LibraryDragItem? {
+        let wanted = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard let row = rows.first(where: { $0.url.standardizedFileURL.path == wanted }) else { return nil }
+        return dragItem(for: row)
+    }
+
     /// The rows named by `ids` (a selection), in list order, skipping any that cannot be dragged.
     public func dragItems(_ ids: Set<String>) -> [LibraryDragItem] {
         rows.filter { ids.contains($0.id) }.compactMap { dragItem(for: $0) }
     }
 
     public func payload(_ ids: Set<String>) -> LibraryDragPayload { LibraryDragPayload(items: dragItems(ids)) }
+
+    /// The item provider a row's drag carries. It registers two things: the payload's bytes under the
+    /// library type, and the file itself under `public.file-url`.
+    ///
+    /// The file URL is not a nicety. Everything a drag hands over goes through SwiftUI's provider
+    /// bridge, which promises the bytes and resolves them asynchronously — by the time a drop asks
+    /// `pasteboard.data(forType:)` it gets **zero bytes**, whatever the payload was, so both the timeline
+    /// and the agent pane refused every drop. The file URL is a type AppKit carries itself, so a drop
+    /// always has at least the path to work with: the agent pane stages it (a path is all it wanted) and
+    /// the timeline imports it, which for library media is a content-hash hit and inserts the asset it
+    /// already has.
+    public func dragProvider(_ ids: Set<String>) -> NSItemProvider {
+        let items = dragItems(ids)
+        // `NSItemProvider(contentsOf:)` is the canonical file drag: AppKit writes the URL to the drag
+        // pasteboard itself rather than promising it back through the bridge.
+        let provider = items.first?.url.flatMap { NSItemProvider(contentsOf: $0) } ?? NSItemProvider()
+        if let data = try? LibraryDragPayload(items: items).data() {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: LibraryDragPayload.typeIdentifier, visibility: .all
+            ) { completion in
+                completion(data, nil)
+                return nil
+            }
+        }
+        return provider
+    }
 
     /// The poster frame for a row, or nil while it is being fetched (the row draws a placeholder).
     public func poster(for row: Row, height: Int = 36) -> CGImage? {
@@ -298,7 +333,9 @@ public struct MediaLibraryView: View {
                         // simultaneous or not — consumes the row's mouse-down, and the row then neither
                         // selects nor starts its drag: the panel looks dead and nothing can be dragged out
                         // of it. Return and the context menu insert instead.
-                        .draggable(self.model.payload(dragged(row))) {
+                        .onDrag {
+                            self.model.dragProvider(dragged(row))
+                        } preview: {
                             Label(row.asset.displayName, systemImage: "film")
                         }
                         .contextMenu {

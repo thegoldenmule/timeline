@@ -81,6 +81,9 @@ final class AppModel {
             viewModel: document.viewModel, catalog: services.catalog, layout: services.layout,
             thumbnails: services.thumbnails)
         self.library = library
+        // A library drag reaches the agent pane as a bare file URL; the panel is what turns it back into
+        // a row, so the chip keeps its poster and duration.
+        agent?.composer.resolve = { [weak library] url in library?.dragItem(forPath: url.path) }
         Task { @MainActor in await library.load() }
     }
 
