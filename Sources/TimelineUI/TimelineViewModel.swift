@@ -481,20 +481,38 @@ public final class TimelineViewModel {
         }
     }
 
-    /// Splits the selected clips (or, with nothing selected, every clip under the playhead) at the playhead.
-    @discardableResult
-    public func splitAtPlayhead(modifiers: EditModifiers? = nil) async -> CommandResult? {
-        guard let seq = sequence else { return nil }
-        let unlinked = (modifiers ?? self.modifiers).contains(.option)
-        let at = playhead
-        var candidates = selectedClips
-        if candidates.isEmpty {
-            candidates = seq.tracks.filter { !$0.locked }.flatMap { $0.clips.values }
-                .sorted { ($0.start, $0.id) < ($1.start, $1.id) }
+    /// The cut time as `decide` will see it on `track`: `splitClip` snaps to the sequence frame on video
+    /// and caption tracks before it validates (`DecideClips.swift`), so a time half a frame from an edge
+    /// passes a naive containment test and is still rejected. Every candidate filter uses this.
+    public func cutTime(_ at: RationalTime, on track: Track) -> RationalTime {
+        track.kind.isFrameAligned ? at.snapped(to: frameDuration) : at
+    }
+
+    /// True when splitting `clip` at `at` is something `decide` will accept: the frame-snapped point
+    /// falls strictly inside it, its track is unlocked, and — unless `unlinked` — no member of its link
+    /// group sits on a locked track. That last one is not politeness: `group(of:)` rejects the whole
+    /// command when any member's track is locked, and a batch has no per-operation recovery, so one such
+    /// clip would take every other cut in the gesture down with it.
+    public func canCut(_ clip: Clip, at: RationalTime, unlinked: Bool) -> Bool {
+        guard let seq = sequence, let track = seq.track(clip.trackId), !track.locked else { return false }
+        let t = cutTime(at, on: track)
+        guard clip.start < t, t < seq.end(of: clip) else { return false }
+        if !unlinked, let g = clip.linkGroupId {
+            if seq.members(of: g).contains(where: { seq.track($0.trackId)?.locked == true }) { return false }
         }
+        return true
+    }
+
+    /// Splits `clips` at `at` as exactly one command: uncuttable clips dropped (`canCut`), one operation
+    /// per link group unless `unlinked`, ordered by (start, id) so two runs cut identically. Nil when
+    /// nothing is cuttable — a gesture that can do nothing sends nothing rather than collecting a
+    /// rejection.
+    @discardableResult
+    public func split(at: RationalTime, clips: [Clip], unlinked: Bool) async -> CommandResult? {
         var seenGroups: Set<LinkGroupID> = []
         var ops: [Command.Operation] = []
-        for clip in candidates where clip.start < at && at < seq.end(of: clip) {
+        for clip in clips.sorted(by: { ($0.start, $0.id) < ($1.start, $1.id) })
+        where canCut(clip, at: at, unlinked: unlinked) {
             if !unlinked, let g = clip.linkGroupId {
                 if seenGroups.contains(g) { continue }
                 seenGroups.insert(g)
@@ -503,6 +521,15 @@ public final class TimelineViewModel {
         }
         guard !ops.isEmpty else { return nil }
         return await apply(ops.count == 1 ? ops[0] : .batch(ops), label: "Split clip")
+    }
+
+    /// Splits the selected clips (or, with nothing selected, every clip under the playhead) at the playhead.
+    @discardableResult
+    public func splitAtPlayhead(modifiers: EditModifiers? = nil) async -> CommandResult? {
+        guard let seq = sequence else { return nil }
+        let candidates = selectedClips.isEmpty ? seq.tracks.flatMap { $0.clips.values } : selectedClips
+        return await split(
+            at: playhead, clips: candidates, unlinked: (modifiers ?? self.modifiers).contains(.option))
     }
 
     /// Removes the selection as one command (ripple by default, Command flips, Option unlinks).

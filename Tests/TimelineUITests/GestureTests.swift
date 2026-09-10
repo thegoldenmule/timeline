@@ -209,6 +209,48 @@ struct GestureTests {
         #expect(f.clips(.audio).count == 3)
     }
 
+    @Test func splittingASelectedClipOnALockedTrackEmitsNothing() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let clip = f.clips(.video)[2]
+        await f.viewModel.setTrackLocked(clip.trackId, true)
+        let count = await f.receivedCommands.count
+        f.viewModel.select(clip.id)
+        f.viewModel.setPlayhead(clip.start + RationalTime(seconds: 2))
+
+        // Selecting the clip used to bypass the locked filter, which only ran on the unselected branch.
+        #expect(await g.key(.split) == nil)
+        #expect(await f.receivedCommands.count == count)
+        #expect(f.viewModel.lastError == nil, "nothing was sent, so nothing was rejected")
+    }
+
+    @Test func aLinkGroupCrossingALockedTrackIsSkippedInsteadOfFailingTheBatch() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let linked = try #require(f.clips(.video).first { $0.linkGroupId != nil })
+        let partner = try #require(
+            f.clips(.audio).first { $0.linkGroupId == linked.linkGroupId })
+        // The video track is unlocked, so the clip looks cuttable on its own; `group(of:)` would still
+        // reject the whole command because its partner's track is locked.
+        await f.viewModel.setTrackLocked(partner.trackId, true)
+        let count = await f.receivedCommands.count
+        let videoBefore = f.clips(.video).count
+        f.viewModel.select(linked.id)
+        f.viewModel.setPlayhead(linked.start + RationalTime(1, 2))
+        #expect(f.viewModel.canCut(linked, at: f.viewModel.playhead, unlinked: false) == false)
+
+        #expect(await g.key(.split) == nil)
+        #expect(await f.receivedCommands.count == count, "nothing reached the store")
+        #expect(f.viewModel.lastError == nil, "so nothing was rejected")
+        #expect(f.clips(.video).count == videoBefore)
+
+        // Option cuts the addressed clip alone, which never consults the locked partner's track.
+        let unlinkedCut = await g.key(.split, modifiers: [.option])
+        #expect(unlinkedCut?.status == .applied)
+        #expect(f.clips(.video).count == videoBefore + 1)
+        #expect(f.clips(.audio).count == 2, "the partner on the locked track is intact")
+    }
+
     @Test func deleteIsRippleByDefaultAndFlipsWithCommand() async throws {
         let f = try await UIFixture.make("three-clips")
         let g = TimelineGestureController(viewModel: f.viewModel)
