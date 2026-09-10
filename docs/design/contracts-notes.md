@@ -100,3 +100,10 @@ Notes from wiring publish-plan.md 4.5 (`Sources/TimelineApp`), including the one
 - `CatalogItem.id` is `"<projectId or library>/<assetId>"`: the same file in two projects is two browsable rows, which is what lets the panel attribute a row to its owner.
 - Fakes: `FakeMediaCatalog` (actor) seeded with projects and items; `items(excluding:)` also drops the items of projects marked unreadable, and `failure` makes both readers throw for the panel's error state. `Fixtures.catalogItem(_:projectId:projectName:libraryRoot:addedAt:)` and `Fixtures.catalogProject(_:name:url:modifiedAt:)`.
 - Tests: `MediaCatalogTests` (4).
+
+## Embedded agent policy (2026-09-10)
+
+Two limits found by a real session in the app (a "karaoke captions" request on a 135 s clip).
+
+- **The bundled skills were installed but unusable.** `ClaudeCodeRuntime` materialises `Skills/` into `<cwd>/.claude/skills/` and launches with `--permission-mode dontAsk --allowedTools mcp__timeline__*`, so `Skill` was not on the allowlist and every invocation came back "Permission to use Skill has been denied because Claude Code is running in don't ask mode". The agent fell back to driving the tools by hand. `allowedTools(_:)` now appends `Skill` in both branches (the wildcard and the per-tool scoping). Nothing else opens: each `SKILL.md` declares `allowed-tools: mcp__timeline__*`, and the same run's `Bash` denial is the policy working as intended.
+- **`maxTurns: 12` was a work budget, not a runaway guard.** The session spent a turn per tool call — read the project, look at the source, transcribe, place the clip, preview, two caption attempts, query, lift the camera audio — and hit `max_turns_reached` at turn 13 with the A1 clip removed and no captions added, i.e. the timeline left mid-edit. Raised to 200 so `maxBudgetUSD` is the limit that binds; that run had spent $1.01 of $2 by turn 13, so the dollar cap is now the one to tune.
