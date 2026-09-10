@@ -207,10 +207,12 @@ struct AppServices: Sendable {
         try await registry.call(name, input: input, context: toolContext(actor: actor, sessionId: sessionId))
     }
 
-    /// The policy an embedded session runs under.
+    /// The policy an embedded session runs under. `maxTurns` is a runaway-loop stop, not a work
+    /// budget: a real edit spends a turn per tool call, and at 12 a captioning pass died halfway
+    /// through, leaving the timeline mid-edit. The dollar budget is the limit that should bind.
     var runtimePolicy: RuntimePolicy {
         RuntimePolicy(
-            maxBudgetUSD: 2, maxTurns: 12,
+            maxBudgetUSD: 2, maxTurns: 200,
             systemPromptAppend:
                 "You are editing inside the Timeline app. Read the project with project_describe before changing it.",
             workingDirectory: layout.root.appendingPathComponent("Agent", isDirectory: true))
