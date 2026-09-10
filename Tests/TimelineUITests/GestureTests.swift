@@ -483,6 +483,62 @@ struct GestureTests {
         #expect(f.clips(.video).count == 1)
     }
 
+    @Test func aGestureDoesNotLeaveItsModifiersBehindForTheToolbarButtons() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let linked = f.clips(.video)[0]
+        let start = f.center(of: linked)
+
+        // An Option-Command drag: unlink this one clip and flip the mode. Both are gesture-scoped.
+        g.mouseDown(at: start, modifiers: [.option, .command])
+        g.mouseDragged(to: CGPoint(x: start.x + 40, y: start.y), modifiers: [.option, .command])
+        _ = await g.mouseUp(at: CGPoint(x: start.x + 40, y: start.y), modifiers: [.option, .command])
+        #expect(f.viewModel.modifiers == [], "the gesture is over")
+
+        // Now the toolbar's Delete, which names no modifiers of its own. It must get the documented
+        // defaults — ripple, and the whole link group — not whatever the last drag happened to hold.
+        let target = f.clips(.video)[0]
+        let partner = try #require(f.clips(.audio).first { $0.linkGroupId == target.linkGroupId })
+        f.viewModel.select(target.id)
+        let result = await f.viewModel.deleteSelection()
+        #expect(result?.status == .applied, "\(String(describing: f.viewModel.lastError))")
+
+        let commands = await f.receivedCommands
+        guard case .removeClip(let op) = try #require(commands.last).operation else {
+            Issue.record("expected removeClip, got \(commands.last!.operation.typeName)")
+            return
+        }
+        #expect(op.mode == .ripple)
+        #expect(op.unlinked == false)
+        #expect(f.viewModel.clip(target.id) == nil)
+        #expect(f.viewModel.clip(partner.id) == nil, "the linked audio went with it")
+    }
+
+    @Test func theRazorCutsExactlyWhatTheBladeWasDrawnFor() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let video = f.clips(.video)[0]
+        let at = razorPoint(f, video, seconds: 3)
+        f.viewModel.selectTool(.razor)
+
+        // Option is held for the press but the view model's own `modifiers` are cleared behind it. The
+        // target carries what it was resolved with, so the cut cannot disagree with the blade.
+        g.mouseDown(at: at, modifiers: [.option])
+        let target = try #require(f.viewModel.razorTarget)
+        #expect(target.unlinked)
+        f.viewModel.modifiers = []
+        _ = await g.mouseUp(at: at, modifiers: [.option])
+
+        let commands = await f.receivedCommands
+        guard case .splitClip(let op) = try #require(commands.last).operation else {
+            Issue.record("expected splitClip")
+            return
+        }
+        #expect(op.unlinked, "the blade said unlinked, so the cut is unlinked")
+        #expect(f.clips(.audio).count == 2, "the partner stayed whole")
+    }
+
     @Test func escapeCancelsADragWithoutACommand() async throws {
         let f = try await UIFixture.make("three-clips")
         let g = TimelineGestureController(viewModel: f.viewModel)

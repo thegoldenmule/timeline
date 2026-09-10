@@ -34,17 +34,21 @@ public struct RazorTarget: Hashable, Sendable {
     public var trackId: TrackID?
     /// True when Shift was held: every unlocked track, not just `trackId`.
     public var allTracks: Bool
+    /// True when Option was held: cut the addressed clips alone, not their link groups. Carried here
+    /// rather than re-read at commit time so the cut is exactly the one the blade was drawn for.
+    public var unlinked: Bool
     /// The clips that would be split, ordered by (start, id) so two runs cut identically.
     public var clipIds: [ClipID]
 
     public init(
         at: RationalTime, snappedTo: RationalTime? = nil, trackId: TrackID? = nil, allTracks: Bool = false,
-        clipIds: [ClipID] = []
+        unlinked: Bool = false, clipIds: [ClipID] = []
     ) {
         self.at = at
         self.snappedTo = snappedTo
         self.trackId = trackId
         self.allTracks = allTracks
+        self.unlinked = unlinked
         self.clipIds = clipIds
     }
 
@@ -139,7 +143,9 @@ extension TimelineViewModel {
         let raw = l.time(atX: point.x)
         let allTracks = modifiers.contains(.shift)
         let unlinked = modifiers.contains(.option)
-        guard let seq = sequence else { return RazorTarget(at: raw, allTracks: allTracks) }
+        guard let seq = sequence else {
+            return RazorTarget(at: raw, allTracks: allTracks, unlinked: modifiers.contains(.option))
+        }
         let trackId = l.isInRuler(point) ? nil : l.row(atY: point.y)?.trackId
 
         // The clip under the pointer, on an unlocked track. In single mode it is the only candidate.
@@ -168,7 +174,9 @@ extension TimelineViewModel {
             }
             clipIds.append(clip.id)
         }
-        return RazorTarget(at: at, snappedTo: snappedTo, trackId: trackId, allTracks: allTracks, clipIds: clipIds)
+        return RazorTarget(
+            at: at, snappedTo: snappedTo, trackId: trackId, allTracks: allTracks, unlinked: unlinked,
+            clipIds: clipIds)
     }
 
     /// The pointer moved over the view with the razor armed; the scene draws the blade until `endRazor`.
@@ -190,6 +198,6 @@ extension TimelineViewModel {
         guard let target = razorTarget, let seq = sequence else { return nil }
         let clips = target.clipIds.compactMap { seq.clip($0) }
         guard !clips.isEmpty else { return nil }
-        return await split(at: target.at, clips: clips, unlinked: modifiers.contains(.option))
+        return await split(at: target.at, clips: clips, unlinked: target.unlinked)
     }
 }

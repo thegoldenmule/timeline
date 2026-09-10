@@ -174,6 +174,11 @@ public final class TimelineGestureController {
             state = .idle
             armed = nil
             armedControl = nil
+            // `modifiers` means "held during the gesture in progress", and there is no longer one. Leaving
+            // them set let an Option-Command drag change what the *toolbar's* Delete button did minutes
+            // later, because `deleteSelection()` and `splitAtPlayhead()` fall back to this when a caller
+            // names no modifiers of its own.
+            viewModel.modifiers = []
         }
         switch state {
         case .razor:
