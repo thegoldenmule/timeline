@@ -238,6 +238,7 @@ enum ApplyTools {
                 }
                 items += captions(from: transcript, clips: clips, in: sequence, maxWords: maxWords)
             }
+            items = ApplyTools.deoverlapped(items, frameDuration: sequence.frameDuration)
             extra["transcriptCacheKey"] = .string(keys.joined(separator: ","))
         default:
             throw ToolError.invalidInput("source must be transcript or text")
@@ -304,6 +305,43 @@ enum ApplyTools {
             }
         }
         return items
+    }
+
+    /// Makes `items` satisfy the caption invariant that `DecideOther` enforces: sorted, and each item
+    /// ending at or before the next one starts. Transcript word times abut, and `captions(from:...)`
+    /// rounds a start to the nearest frame while rounding an end up, so adjacent captions overlap by a
+    /// frame more often than not - which rejected the whole call whatever `maxWordsPerCaption` said.
+    /// An item with less than a frame to live is merged into its predecessor rather than dropped, so
+    /// no words are lost.
+    static func deoverlapped(_ items: [Command.Operation.CaptionInput], frameDuration: RationalTime)
+        -> [Command.Operation.CaptionInput]
+    {
+        var result: [Command.Operation.CaptionInput] = []
+        for item in items.sorted(by: { $0.start < $1.start }) {
+            guard var previous = result.last else {
+                result.append(item)
+                continue
+            }
+            // Room for the previous caption to end before this one begins, or none at all.
+            let room = item.start - previous.start
+            if room < frameDuration {
+                // Same frame: one caption carrying both chunks' words, rebased on the earlier start.
+                let shift = item.start - previous.start
+                previous.text = previous.text.isEmpty ? item.text : previous.text + " " + item.text
+                previous.words += item.words.map {
+                    CaptionWord(text: $0.text, t0: $0.t0 + shift, t1: $0.t1 + shift)
+                }
+                previous.duration = RationalTime.max(previous.duration, shift + item.duration)
+                result[result.count - 1] = previous
+                continue
+            }
+            if previous.duration > room {
+                previous.duration = room
+                result[result.count - 1] = previous
+            }
+            result.append(item)
+        }
+        return result
     }
 
     static let timelineCut = Tool(

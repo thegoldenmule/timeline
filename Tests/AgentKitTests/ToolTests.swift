@@ -295,6 +295,50 @@ import TimelineCore
         #expect(captionTracks == 2)
     }
 
+    /// The overlap the real app hit: transcript word times abut, `captions(from:)` snaps a start to the
+    /// nearest frame and ceils an end, so caption N+1 began before caption N ended and `replaceCaptions`
+    /// rejected the whole call - at every `maxWordsPerCaption`, including 1.
+    @Test func captionsFromATranscriptNeverOverlap() {
+        let frame = RationalTime(value: 1001, timescale: 30000)  // 29.97
+        func time(_ seconds: Double) -> RationalTime {
+            RationalTime(value: Int64((seconds * 30000).rounded()), timescale: 30000)
+        }
+        // Two chunks whose word times touch at 1.01s: the first ceils up to frame 31, the second snaps
+        // down to frame 30.
+        let items = [
+            Command.Operation.CaptionInput(
+                start: time(0.5).snapped(to: frame),
+                duration: time(1.01).ceiled(to: frame) - time(0.5).snapped(to: frame),
+                text: "hello there", words: []),
+            Command.Operation.CaptionInput(
+                start: time(1.01).snapped(to: frame), duration: time(0.6), text: "friend",
+                words: [CaptionWord(text: "friend", t0: .zero, t1: time(0.6))]),
+        ]
+        #expect(items[1].start < items[0].start + items[0].duration, "the input must actually overlap")
+
+        let fixed = ApplyTools.deoverlapped(items, frameDuration: frame)
+        #expect(fixed.count == 2)
+        for i in fixed.indices.dropFirst() {
+            #expect(fixed[i].start >= fixed[i - 1].start + fixed[i - 1].duration)
+        }
+        #expect(fixed.allSatisfy { $0.duration.isPositive })
+        #expect(fixed.map(\.text) == ["hello there", "friend"])
+
+        // Two chunks inside one frame merge instead of becoming a zero-length caption, keeping the words.
+        let sameFrame = [
+            Command.Operation.CaptionInput(
+                start: .zero, duration: time(0.2), text: "a", words: [CaptionWord(text: "a", t0: .zero, t1: time(0.01))]
+            ),
+            Command.Operation.CaptionInput(
+                start: RationalTime(value: 10, timescale: 30000), duration: time(0.2), text: "b",
+                words: [CaptionWord(text: "b", t0: .zero, t1: time(0.01))]),
+        ]
+        let merged = ApplyTools.deoverlapped(sameFrame, frameDuration: frame)
+        #expect(merged.count == 1)
+        #expect(merged[0].text == "a b" && merged[0].words.count == 2)
+        #expect(merged[0].duration.isPositive)
+    }
+
     @Test func renderExportIsGatedByApproval() async throws {
         let h = try await Harness.make()
         let first = try await h.call("render_export", ["preset": "reel9x16"])
