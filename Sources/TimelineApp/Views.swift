@@ -366,6 +366,14 @@ struct EditorView: View {
         }
     }
 
+    /// Built by hand because `EditorView` holds a plain `let document` and `toolbarContent` is a
+    /// `@ToolbarContentBuilder` property, which cannot declare one — the same reason
+    /// `publishSheetPresented` below is written this way.
+    private var activeTool: Binding<TimelineTool> {
+        Binding(
+            get: { document.viewModel.activeTool }, set: { document.viewModel.selectTool($0) })
+    }
+
     private var publishSheetPresented: Binding<Bool> {
         Binding(get: { publish.sheet != nil }, set: { if !$0 { publish.dismissSheet() } })
     }
@@ -413,6 +421,16 @@ struct EditorView: View {
                 .help("Show or hide the media library")
         }
         ToolbarItemGroup {
+            // No `.keyboardShortcut`: SwiftUI installs those as key equivalents, which AppKit dispatches
+            // before `keyDown` reaches the first responder, so a bare "c" would arm the razor while the
+            // user was typing in the agent composer. Every timeline key lives in `TimelineMetalView`.
+            Picker("Tool", selection: activeTool) {
+                ForEach(TimelineTool.allCases, id: \.self) { tool in
+                    Label(tool == .razor ? "Razor" : "Select", systemImage: tool.symbolName).tag(tool)
+                }
+            }
+            .pickerStyle(.segmented)
+            .help("Select (V) or Razor (C) — the keys work when the timeline has focus")
             Button("Split", systemImage: "scissors") {
                 model.perform { _ = await document.viewModel.splitAtPlayhead() }
             }

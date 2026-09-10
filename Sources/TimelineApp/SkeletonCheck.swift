@@ -272,6 +272,36 @@ enum SkeletonCheck {
             try require(scene.stats.clipsDrawn == 7, "scene", "TimelineUI drew \(scene.stats.clipsDrawn) clips")
             try require(scene.stats.transitionsDrawn == 1, "scene", "TimelineUI drew no transition")
 
+            // The razor through the calls a click makes: arm it, hover inside the tone clip, cut. One
+            // command, into the store and back out into the scene, with the blade drawn before it lands.
+            let beforeRazor = try unwrap(document.sequence, "razor", "no sequence")
+            let toneOnA1 = try unwrap(
+                beforeRazor.track(a1.id)?.clips.values.first { $0.assetId == tone.id }, "razor", "no tone clip")
+            let a1Count = beforeRazor.track(a1.id)?.clips.count ?? 0
+            viewModel.selectTool(.razor)
+            let toneRow = try unwrap(viewModel.layout.row(for: a1.id), "razor", "A1 is not laid out")
+            let cutAt = toneClipCutPoint(viewModel: viewModel, clip: toneOnA1, row: toneRow)
+            viewModel.updateRazor(at: cutAt, modifiers: [])
+            let razorTarget = try unwrap(viewModel.razorTarget, "razor", "the hover resolved nothing")
+            try require(razorTarget.clipIds == [toneOnA1.id], "razor", "the blade named the wrong clips")
+            let razorScene = TimelineSceneBuilder.build(from: viewModel)
+            try require(
+                razorScene.overlayQuads.contains { $0.color.matches(TimelineTheme.razorIndicator) }, "razor",
+                "the scene drew no blade")
+            let cut = try unwrap(
+                await viewModel.commitRazor(), "razor", "\(String(describing: viewModel.lastError))")
+            try await document.waitForVersion(cut.version)
+            let afterRazor = try unwrap(document.sequence, "razor", "no sequence")
+            try require(
+                afterRazor.track(a1.id)?.clips.count == a1Count + 1, "razor",
+                "A1 has \(afterRazor.track(a1.id)?.clips.count ?? 0) clips, expected \(a1Count + 1)")
+            try require(
+                afterRazor.clip(toneOnA1.id) != nil
+                    && afterRazor.track(a1.id)?.clips.values.contains { $0.start == razorTarget.at } == true,
+                "razor", "no right half at the cut")
+            viewModel.selectTool(.selection)
+            try require(viewModel.razorTarget == nil, "razor", "putting the tool away left the blade drawn")
+
             // Track controls through the header-button path: one command each, into the store and back out
             // into the scene, and an audio solo leaves the video alone.
             let soloed = try unwrap(await viewModel.toggle(.solo, on: a1.id), "tracks", "solo emitted no command")
@@ -291,6 +321,7 @@ enum SkeletonCheck {
                 "edit",
                 "linked clips v\(added.version), split via TimelineViewModel v\(split.version), "
                     + "dissolve v\(transition.version); scene draws \(scene.stats.clipsDrawn) clips, 1 transition; "
+                    + "razor cut the tone clip on A1 at \(razorTarget.at.seconds)s v\(cut.version); "
                     + "solo on A1 v\(soloed.version) drew its accent and left V1 audible, off again v\(unsoloed.version)"
             )
 
@@ -826,4 +857,10 @@ extension SkeletonCheck {
         }
         return count
     }
+}
+
+/// A view point one second into `clip` on its row: what the pointer would be over.
+@MainActor
+private func toneClipCutPoint(viewModel: TimelineViewModel, clip: Clip, row: TrackRow) -> CGPoint {
+    CGPoint(x: viewModel.layout.x(forSeconds: clip.start.seconds + 1), y: row.midY)
 }
