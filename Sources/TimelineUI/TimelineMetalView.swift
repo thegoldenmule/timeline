@@ -179,20 +179,24 @@ public final class TimelineMetalView: MTKView {
         TimelineCursor.nsCursor(TimelineCursor.kind(for: viewModel.activeTool, at: p, layout: viewModel.layout)).set()
     }
 
+    /// Vertical scrolling zooms and horizontal scrolling pans; `ZoomLevel.scrollAction` owns the rule and
+    /// the rates, so this is only the shell that reads the event and applies the answer.
     public override func scrollWheel(with event: NSEvent) {
-        if event.modifierFlags.contains(.command) {
-            if event.scrollingDeltaY > 0 { viewModel.zoomIn(anchorX: point(event).x) }
-            if event.scrollingDeltaY < 0 { viewModel.zoomOut(anchorX: point(event).x) }
-            return
+        let action = ZoomLevel.scrollAction(
+            deltaX: Double(event.scrollingDeltaX), deltaY: Double(event.scrollingDeltaY),
+            precise: event.hasPreciseScrollingDeltas, modifiers: EditModifiers(event.modifierFlags))
+        switch action {
+        case .zoom(let factor): viewModel.zoom(by: factor, anchorX: point(event).x)
+        case .pan(let points): viewModel.scrollSeconds -= points * viewModel.secondsPerPoint
         }
-        let dx = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
-        viewModel.scrollSeconds -= Double(dx) * viewModel.secondsPerPoint
         rehover(event)
     }
 
+    /// Pinch to zoom. Continuous: every event's magnification is applied, however small, so the timeline
+    /// tracks the fingers instead of snapping a whole zoom level once past a threshold.
     public override func magnify(with event: NSEvent) {
-        if event.magnification > 0.1 { viewModel.zoomIn(anchorX: point(event).x) }
-        if event.magnification < -0.1 { viewModel.zoomOut(anchorX: point(event).x) }
+        viewModel.zoom(
+            by: ZoomLevel.pinchFactor(magnification: Double(event.magnification)), anchorX: point(event).x)
         rehover(event)
     }
 
