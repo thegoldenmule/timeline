@@ -7,7 +7,8 @@ public struct ToolAccess: Hashable, Sendable, Codable {
     public var serverName: String
     public var endpoint: URL
     public var bearerToken: String
-    /// Tool names the session may call (nil: every tool the server lists). Becomes `--allowedTools`.
+    /// Tool names the session may call (nil: every tool the server lists). Becomes `--allowedTools`,
+    /// which always also carries `Skill` so the bundled skills are invocable.
     public var toolNames: [String]?
 
     public init(serverName: String = "timeline", endpoint: URL, bearerToken: String, toolNames: [String]? = nil) {

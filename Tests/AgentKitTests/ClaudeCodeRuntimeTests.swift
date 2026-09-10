@@ -29,7 +29,9 @@ import TimelineCore
         #expect(server?["type"] as? String == "http" && server?["url"] as? String == "http://127.0.0.1:4321/mcp")
         #expect((server?["headers"] as? [String: String])?["Authorization"] == "Bearer secret-token")
         #expect(args[args.firstIndex(of: "--permission-mode")! + 1] == "dontAsk")
+        // Skill rides along, or `dontAsk` denies the skills the runtime installed in the cwd.
         #expect(args[args.firstIndex(of: "--allowedTools")! + 1] == "mcp__timeline__*")
+        #expect(args[args.firstIndex(of: "--allowedTools")! + 2] == "Skill")
         #expect(args[args.firstIndex(of: "--max-budget-usd")! + 1] == "0.5")
         #expect(args[args.firstIndex(of: "--max-turns")! + 1] == "6")
         #expect(args[args.firstIndex(of: "--model")! + 1] == "claude-sonnet-4-5")
@@ -49,7 +51,8 @@ import TimelineCore
 
         var scoped = Self.access
         scoped.toolNames = ["project_list", "undo"]
-        #expect(ClaudeCodeRuntime.allowedTools(scoped) == ["mcp__timeline__project_list", "mcp__timeline__undo"])
+        #expect(
+            ClaudeCodeRuntime.allowedTools(scoped) == ["mcp__timeline__project_list", "mcp__timeline__undo", "Skill"])
     }
 
     @Test func childEnvironmentDropsClaudeCodeAndCarriesTheHookTarget() {

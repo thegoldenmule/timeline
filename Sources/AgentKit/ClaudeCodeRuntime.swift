@@ -5,7 +5,7 @@ import TimelineCore
 
 /// The Claude Code CLI as a sidecar `AgentRuntime`: `claude -p <goal> --output-format stream-json
 /// --verbose --strict-mcp-config --mcp-config <inline JSON with the bearer header> --permission-mode
-/// dontAsk --allowedTools mcp__<server>__* --max-budget-usd --model --append-system-prompt --settings
+/// dontAsk --allowedTools mcp__<server>__* Skill --max-budget-usd --model --append-system-prompt --settings
 /// <inline JSON with a PreToolUse hook>`, cwd set to an app-owned directory holding the Skills folder,
 /// `CLAUDECODE` unset in the child environment. `send` continues the conversation with `--resume`.
 ///
@@ -166,10 +166,12 @@ public struct ClaudeCodeRuntime: AgentRuntime, Sendable {
         return args
     }
 
-    /// `mcp__<server>__*`, or one entry per allowed tool.
+    /// `mcp__<server>__*`, or one entry per allowed tool, plus `Skill`: without it `dontAsk` denies
+    /// the bundled skills the runtime just installed. The skills themselves declare
+    /// `allowed-tools: mcp__<server>__*`, so nothing else needs to open.
     public static func allowedTools(_ tools: ToolAccess) -> [String] {
-        guard let names = tools.toolNames, !names.isEmpty else { return ["mcp__\(tools.serverName)__*"] }
-        return names.map { "mcp__\(tools.serverName)__\($0)" }
+        guard let names = tools.toolNames, !names.isEmpty else { return ["mcp__\(tools.serverName)__*", "Skill"] }
+        return names.map { "mcp__\(tools.serverName)__\($0)" } + ["Skill"]
     }
 
     /// The inline `--mcp-config`: one HTTP server with the bearer header.
