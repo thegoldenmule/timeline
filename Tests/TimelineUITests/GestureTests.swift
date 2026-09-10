@@ -209,6 +209,207 @@ struct GestureTests {
         #expect(f.clips(.audio).count == 3)
     }
 
+    // MARK: The razor
+
+    /// A point inside `clip`, `seconds` in from its start.
+    func razorPoint(_ f: UIFixture, _ clip: Clip, seconds: Double) -> CGPoint {
+        let l = f.viewModel.layout
+        return CGPoint(x: l.x(forSeconds: clip.start.seconds + seconds), y: l.row(for: clip.trackId)!.midY)
+    }
+
+    @Test func theRazorCutsTheClipUnderThePointerInOneCommand() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let clip = f.clips(.video)[1]
+        let at = razorPoint(f, clip, seconds: 1)
+        f.viewModel.selectTool(.razor)
+
+        g.mouseDown(at: at)
+        #expect(await f.receivedCommands.isEmpty, "the cut goes on release, like every other gesture")
+        let result = await g.mouseUp(at: at)
+        #expect(result?.status == .applied)
+
+        let commands = await f.receivedCommands
+        #expect(commands.count == 1)
+        guard case .splitClip(let op) = commands[0].operation else {
+            Issue.record("expected splitClip, got \(commands[0].operation.typeName)")
+            return
+        }
+        #expect(op.clipId == .id(clip.id))
+        #expect(op.unlinked == false)
+        #expect(abs(op.at.seconds - (clip.start.seconds + 1)) < 0.05)
+        #expect(f.clips(.video).count == 4)
+    }
+
+    @Test func aRazorClickNeitherScrubsNorChangesTheSelection() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let clips = f.clips(.video)
+        f.viewModel.select(clips[0].id)
+        f.viewModel.setPlayhead(.zero)
+        f.viewModel.selectTool(.razor)
+
+        _ = await g.mouseUp(at: razorPoint(f, clips[1], seconds: 1), modifiers: [])
+        g.mouseDown(at: razorPoint(f, clips[1], seconds: 1))
+        _ = await g.mouseUp(at: razorPoint(f, clips[1], seconds: 1))
+
+        #expect(f.viewModel.playhead == .zero, "the razor never scrubs")
+        #expect(f.viewModel.selection == [clips[0].id], "you pick which half you wanted afterwards")
+    }
+
+    @Test func shiftClickWithTheRazorCutsEveryUnlockedTrackAtThatTime() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let video = f.clips(.video)[0]
+        let at = razorPoint(f, video, seconds: 3)
+        f.viewModel.selectTool(.razor)
+
+        g.mouseDown(at: at, modifiers: [.shift])
+        let result = await g.mouseUp(at: at, modifiers: [.shift])
+        #expect(result?.status == .applied)
+
+        let commands = await f.receivedCommands
+        #expect(commands.count == 1, "one command, so one undo step")
+        guard case .batch(let ops) = commands[0].operation else {
+            Issue.record("expected a batch, got \(commands[0].operation.typeName)")
+            return
+        }
+        // The linked V/A pair cuts once as a group; the caption clip is its own.
+        #expect(ops.count == 2)
+        #expect(ops.allSatisfy { $0.typeName == "splitClip" })
+        #expect(f.clips(.video).count == 3)
+        #expect(f.clips(.audio).count == 3, "the linked audio came along")
+        #expect(f.clips(.caption).count == 3)
+    }
+
+    @Test func optionWithTheRazorCutsOneMemberOfALinkGroup() async throws {
+        let f = try await UIFixture.make("linked-transition-caption-undone")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let video = f.clips(.video)[0]
+        let at = razorPoint(f, video, seconds: 3)
+        f.viewModel.selectTool(.razor)
+
+        g.mouseDown(at: at, modifiers: [.option])
+        _ = await g.mouseUp(at: at, modifiers: [.option])
+
+        let commands = await f.receivedCommands
+        #expect(commands.count == 1)
+        guard case .splitClip(let op) = commands[0].operation else {
+            Issue.record("expected splitClip")
+            return
+        }
+        #expect(op.unlinked)
+        #expect(f.clips(.video).count == 3)
+        #expect(f.clips(.audio).count == 2, "the partner stayed whole")
+    }
+
+    @Test func aRazorClickOnEmptyTrackAreaEmitsNothing() async throws {
+        let f = try await UIFixture.make("three-clips")
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let l = f.viewModel.layout
+        let past = CGPoint(x: l.x(forSeconds: f.sequence.end(of: f.clips(.video).last!).seconds + 5), y: l.rows[0].midY)
+        f.viewModel.selectTool(.razor)
+
+        g.mouseDown(at: past)
+        #expect(await g.mouseUp(at: past) == nil)
+        #expect(await f.receivedCommands.isEmpty)
+        #expect(f.viewModel.lastError == nil)
+    }
+
+    @Test func aRazorClickOnTheRulerStillScrubsAndOnAHeaderButtonStillTogglesIt() async throws {
+        let (f, g, audio) = try await headerFixture()
+        f.viewModel.selectTool(.razor)
+        let l = f.viewModel.layout
+
+        // The ruler keeps the transport.
+        let before = await f.receivedCommands.count
+        let x = l.x(forSeconds: 4)
+        g.mouseDown(at: CGPoint(x: x, y: 6))
+        #expect(abs(f.viewModel.playhead.seconds - 4) < 0.05)
+        _ = await g.mouseUp(at: CGPoint(x: x, y: 6))
+        #expect(await f.receivedCommands.count == before, "scrubbing is not an edit")
+
+        // And the header buttons keep working, which is how a track gets locked out of being cut.
+        let a1 = audio[0].id
+        let toggled = await tap(g, at: try button(f, a1, .lock))
+        #expect(toggled?.status == .applied)
+        #expect(f.sequence.track(a1)?.locked == true)
+    }
+
+    @Test func cAndVSwitchToolsAndTheRazorStaysArmedAfterACut() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        #expect(f.viewModel.activeTool == .selection)
+
+        await g.key(.tool(.razor))
+        #expect(f.viewModel.activeTool == .razor)
+
+        let clip = f.clips(.video)[1]
+        let at = razorPoint(f, clip, seconds: 1)
+        g.mouseDown(at: at)
+        _ = await g.mouseUp(at: at)
+        #expect(f.viewModel.activeTool == .razor, "the blade stays in your hand for the next cut")
+
+        // And a second cut lands without re-arming.
+        let again = razorPoint(f, f.clips(.video)[1], seconds: 0.5)
+        g.mouseDown(at: again)
+        #expect(await g.mouseUp(at: again) != nil)
+        #expect(f.clips(.video).count == 5)
+
+        await g.key(.tool(.selection))
+        #expect(f.viewModel.activeTool == .selection)
+        #expect(f.viewModel.razorTarget == nil)
+    }
+
+    @Test func escapeCancelsARazorPressBeforeItDisarmsTheTool() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        f.viewModel.selectTool(.razor)
+        let at = razorPoint(f, f.clips(.video)[1], seconds: 1)
+
+        g.mouseDown(at: at)
+        #expect(f.viewModel.razorTarget != nil)
+        await g.key(.escape)
+        #expect(f.viewModel.razorTarget == nil)
+        #expect(f.viewModel.activeTool == .razor, "one Escape cancels the cut, not the tool")
+        #expect(await g.mouseUp(at: at) == nil, "and the release that follows cuts nothing")
+        #expect(await f.receivedCommands.isEmpty)
+
+        await g.key(.escape)
+        #expect(f.viewModel.activeTool == .selection, "the next one puts the tool away")
+    }
+
+    @Test func draggingTheRazorBeforeReleaseMovesTheCutAndStillEmitsOneCommand() async throws {
+        let f = try await UIFixture.make("three-clips")
+        f.viewModel.snappingEnabled = false
+        let g = TimelineGestureController(viewModel: f.viewModel)
+        let clip = f.clips(.video)[1]
+        f.viewModel.selectTool(.razor)
+        let start = razorPoint(f, clip, seconds: 0.5)
+        let end = razorPoint(f, clip, seconds: 1.5)
+
+        g.mouseDown(at: start)
+        for dx in stride(from: 10, through: 100, by: 10) {
+            g.mouseDragged(to: CGPoint(x: start.x + CGFloat(dx), y: start.y))
+        }
+        #expect(await f.receivedCommands.isEmpty)
+        _ = await g.mouseUp(at: end)
+
+        let commands = await f.receivedCommands
+        #expect(commands.count == 1)
+        guard case .splitClip(let op) = commands[0].operation else {
+            Issue.record("expected splitClip")
+            return
+        }
+        #expect(abs(op.at.seconds - (clip.start.seconds + 1.5)) < 0.05, "the cut went where you let go")
+    }
+
     @Test func splittingASelectedClipOnALockedTrackEmitsNothing() async throws {
         let f = try await UIFixture.make("three-clips")
         let g = TimelineGestureController(viewModel: f.viewModel)

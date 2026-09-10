@@ -14,6 +14,8 @@ public enum TimelineKey: Hashable, Sendable {
     case right
     /// `N` toggles snapping.
     case toggleSnapping
+    /// `V` and `C` put the selection tool and the razor in the pointer's hand.
+    case tool(TimelineTool)
     /// `M` and `S` mute and solo the tracks of the selected clips.
     case toggleMute
     case toggleSolo
@@ -43,6 +45,8 @@ public final class TimelineGestureController {
         case idle
         case scrubbing
         case dragging
+        /// The razor is pressed; the blade follows the pointer and the cut goes on release.
+        case razor
     }
 
     public let viewModel: TimelineViewModel
@@ -52,6 +56,9 @@ public final class TimelineGestureController {
     /// Set on mouse down over a header button; the command goes on release, and only if the pointer is still
     /// over the same button, so dragging off cancels the click the way a button should.
     private var armedControl: (track: TrackID, control: TrackControl)?
+    /// Where the pointer was last seen, so `flagsChanged` can redraw the blade — Shift widens a cut from
+    /// one track to all of them — without waiting for the mouse to move.
+    private var lastPoint: CGPoint?
     public var dragThreshold: CGFloat = 3
 
     public init(viewModel: TimelineViewModel) {
@@ -95,6 +102,15 @@ public final class TimelineGestureController {
     public func mouseDown(at point: CGPoint, modifiers: EditModifiers = []) {
         viewModel.modifiers = modifiers
         armedControl = nil
+        lastPoint = point
+        // The razor owns the lanes and nothing else: the ruler still scrubs and the header buttons still
+        // click, so locking a track — which is how you opt it out of being cut — stays reachable while
+        // the blade is armed.
+        if viewModel.activeTool == .razor, isInLanes(point) {
+            state = .razor
+            viewModel.updateRazor(at: point, modifiers: modifiers)
+            return
+        }
         switch hitTest(point) {
         case .ruler:
             state = .scrubbing
@@ -126,7 +142,10 @@ public final class TimelineGestureController {
 
     public func mouseDragged(to point: CGPoint, modifiers: EditModifiers = []) {
         let layout = viewModel.layout
+        lastPoint = point
         switch state {
+        case .razor:
+            viewModel.updateRazor(at: point, modifiers: modifiers)
         case .scrubbing:
             viewModel.setPlayhead(layout.time(atX: point.x))
         case .dragging:
@@ -150,12 +169,16 @@ public final class TimelineGestureController {
     @discardableResult
     public func mouseUp(at point: CGPoint, modifiers: EditModifiers = []) async -> CommandResult? {
         let pressed = armedControl
+        lastPoint = point
         defer {
             state = .idle
             armed = nil
             armedControl = nil
         }
         switch state {
+        case .razor:
+            viewModel.updateRazor(at: point, modifiers: modifiers)
+            return await viewModel.commitRazor()
         case .dragging:
             viewModel.updateGesture(
                 to: viewModel.layout.time(atX: point.x), track: viewModel.layout.row(atY: point.y)?.trackId,
@@ -171,6 +194,28 @@ public final class TimelineGestureController {
 
     public func flagsChanged(_ modifiers: EditModifiers) {
         viewModel.updateModifiers(modifiers)
+        // Shift widens the cut from one track to all of them, so the blade must redraw where it stands.
+        if viewModel.razorTarget != nil, let lastPoint {
+            viewModel.updateRazor(at: lastPoint, modifiers: modifiers)
+        }
+    }
+
+    /// The pointer moved with no button down. Only the razor cares.
+    public func mouseMoved(to point: CGPoint, modifiers: EditModifiers = []) {
+        lastPoint = point
+        guard viewModel.activeTool == .razor else { return }
+        if isInLanes(point) {
+            viewModel.updateRazor(at: point, modifiers: modifiers)
+        } else {
+            viewModel.endRazor()
+        }
+    }
+
+    /// True over the track lanes — not the ruler, not the header column, not below the last track.
+    private func isInLanes(_ point: CGPoint) -> Bool {
+        let layout = viewModel.layout
+        guard !layout.isInRuler(point), !layout.isInHeader(point) else { return false }
+        return layout.row(atY: point.y) != nil
     }
 
     // MARK: Keys
@@ -183,6 +228,7 @@ public final class TimelineGestureController {
         case .left: viewModel.nudgePlayhead(frames: modifiers.contains(.shift) ? -10 : -1)
         case .right: viewModel.nudgePlayhead(frames: modifiers.contains(.shift) ? 10 : 1)
         case .toggleSnapping: viewModel.snappingEnabled.toggle()
+        case .tool(let tool): viewModel.selectTool(tool)
         case .toggleMute: return await viewModel.toggleTracksOfSelection(.mute)
         case .toggleSolo: return await viewModel.toggleTracksOfSelection(.solo)
         case .undo: return await viewModel.undo()
@@ -190,11 +236,19 @@ public final class TimelineGestureController {
         case .zoomIn: viewModel.zoomIn()
         case .zoomOut: viewModel.zoomOut()
         case .escape:
-            if viewModel.pending != nil {
+            // A ladder, because "Escape cancels" and "Escape puts the tool away" are different wishes and
+            // one keystroke should not grant both: abandon the cut in flight, else the drag in flight,
+            // else the tool, else the selection.
+            if state == .razor {
+                state = .idle
+                viewModel.endRazor()
+            } else if viewModel.pending != nil {
                 viewModel.cancelGesture()
                 state = .idle
                 armed = nil
                 armedControl = nil
+            } else if viewModel.activeTool != .selection {
+                viewModel.selectTool(.selection)
             } else {
                 viewModel.select(nil)
             }

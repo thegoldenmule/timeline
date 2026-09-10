@@ -26,6 +26,7 @@ public final class TimelineMetalView: MTKView {
     public private(set) var mediaCache: TimelineMediaCache?
     public private(set) var lastScene: TimelineScene?
     public private(set) var renderError: (any Error)?
+    private var trackingArea: NSTrackingArea?
     public private(set) var frameCount = 0
     /// Redraws requested by model changes and media fetches (`needsDisplay` is inert without a window).
     public private(set) var redrawRequests = 0
@@ -69,6 +70,9 @@ public final class TimelineMetalView: MTKView {
     private func requestRedraw() {
         redrawRequests += 1
         needsDisplay = true
+        // `cursorUpdate` only fires when the pointer moves, so a tool change from the keyboard or the
+        // toolbar would otherwise leave the old cursor on screen until the mouse was jiggled.
+        applyCursor()
     }
 
     /// Re-registers observation on every change so any tracked property triggers a redraw.
@@ -87,6 +91,19 @@ public final class TimelineMetalView: MTKView {
     public override func layout() {
         super.layout()
         if viewModel.viewSize != bounds.size { viewModel.viewSize = bounds.size }
+    }
+
+    /// One area serves both jobs: `.mouseMoved` feeds the razor's hover, `.cursorUpdate` lets the cursor
+    /// be a pure function of where the pointer is rather than a set of rects rebuilt on every zoom.
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
     }
 
     public override func draw(_ dirtyRect: NSRect) {
@@ -133,6 +150,35 @@ public final class TimelineMetalView: MTKView {
         gestures.flagsChanged(EditModifiers(event.modifierFlags))
     }
 
+    public override func mouseMoved(with event: NSEvent) {
+        gestures.mouseMoved(to: point(event), modifiers: EditModifiers(event.modifierFlags))
+        applyCursor(at: point(event))
+    }
+
+    public override func mouseEntered(with event: NSEvent) {
+        applyCursor(at: point(event))
+    }
+
+    public override func mouseExited(with event: NSEvent) {
+        viewModel.endRazor()
+        NSCursor.arrow.set()
+    }
+
+    /// Deliberately does not call `super`, whose implementation applies cursor *rects* and would fight
+    /// the answer computed here.
+    public override func cursorUpdate(with event: NSEvent) {
+        applyCursor(at: point(event))
+    }
+
+    /// Sets the cursor for the tool and the pointer's position. Safe to call at any time: it does nothing
+    /// unless the pointer is actually over this view in the key window.
+    private func applyCursor(at point: CGPoint? = nil) {
+        guard let window, window.isKeyWindow else { return }
+        let p = point ?? convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard bounds.contains(p) else { return }
+        TimelineCursor.nsCursor(TimelineCursor.kind(for: viewModel.activeTool, at: p, layout: viewModel.layout)).set()
+    }
+
     public override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {
             if event.scrollingDeltaY > 0 { viewModel.zoomIn(anchorX: point(event).x) }
@@ -141,11 +187,20 @@ public final class TimelineMetalView: MTKView {
         }
         let dx = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
         viewModel.scrollSeconds -= Double(dx) * viewModel.secondsPerPoint
+        rehover(event)
     }
 
     public override func magnify(with event: NSEvent) {
         if event.magnification > 0.1 { viewModel.zoomIn(anchorX: point(event).x) }
         if event.magnification < -0.1 { viewModel.zoomOut(anchorX: point(event).x) }
+        rehover(event)
+    }
+
+    /// Zoom and scroll move the timeline under a stationary pointer, and neither generates a
+    /// `mouseMoved`, so the blade would sit at a time it no longer points at.
+    private func rehover(_ event: NSEvent) {
+        guard viewModel.razorTarget != nil else { return }
+        gestures.mouseMoved(to: point(event), modifiers: EditModifiers(event.modifierFlags))
     }
 
     // MARK: Drop (NSDraggingDestination; the view model owns the state and the scene draws it)
@@ -215,6 +270,9 @@ public final class TimelineMetalView: MTKView {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "b": key = .split
             case "n": key = .toggleSnapping
+            // Bare C and V only, so Copy and Paste keep their meaning.
+            case "c": key = m.contains(.command) ? nil : .tool(.razor)
+            case "v": key = m.contains(.command) ? nil : .tool(.selection)
             // Bare M and S only: the command versions belong to the app's menus.
             case "m": key = m.contains(.command) ? nil : .toggleMute
             case "s": key = m.contains(.command) ? nil : .toggleSolo
