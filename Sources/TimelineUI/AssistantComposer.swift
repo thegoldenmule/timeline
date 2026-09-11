@@ -333,6 +333,8 @@ public struct AssistantComposerView: View {
 
 /// One staged file: its poster or kind, its name, and the button that unstages it.
 struct AssistantAttachmentChip: View {
+    /// See `MediaLibraryRow`: the poster is asked for in pixels, not points.
+    @Environment(\.displayScale) private var displayScale
     let composer: AssistantComposer
     let attachment: AssistantAttachment
     let onRemove: () -> Void
@@ -367,15 +369,25 @@ struct AssistantAttachmentChip: View {
     private var poster: some View {
         ZStack {
             RoundedRectangle(cornerRadius: PanelTheme.posterRadius).fill(PanelTheme.bubbleFill)
-            if let image = composer.poster(for: attachment) {
-                Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
+            if let image = composer.poster(for: attachment, height: posterPixelHeight) {
+                Image(decorative: image, scale: displayScale)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
             } else {
                 Image(systemName: symbol).font(PanelTheme.caption).foregroundStyle(
                     attachment.isMissing ? .orange : .secondary)
             }
         }
-        .frame(width: 40, height: 26)
+        .frame(width: PanelTheme.chipPosterSize.width, height: PanelTheme.chipPosterSize.height)
         .clipShape(RoundedRectangle(cornerRadius: PanelTheme.posterRadius))
+    }
+
+    private var posterPixelHeight: Int { AssistantAttachmentChip.posterPixelHeight(displayScale) }
+
+    /// See `MediaLibraryRow.posterPixelHeight(_:)`.
+    static func posterPixelHeight(_ displayScale: CGFloat) -> Int {
+        Int((PanelTheme.chipPosterSize.height * max(1, displayScale)).rounded())
     }
 
     private var symbol: String {

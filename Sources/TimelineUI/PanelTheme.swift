@@ -56,6 +56,12 @@ public enum PanelTheme {
     public static let dividerThickness: CGFloat = 8
     /// What the preview-and-timeline column is never squeezed below, whatever the side panels want.
     public static let centreMinimum: CGFloat = 480
+    /// A library row's poster, in points. The picture behind it is asked for in *pixels* — see
+    /// `MediaLibraryRow` — because a 36 pt box is 72 px of screen on every Mac made this decade.
+    public static let posterSize = CGSize(width: 64, height: 36)
+    /// An attachment chip's poster, in points.
+    public static let chipPosterSize = CGSize(width: 40, height: 26)
+
     /// The reserved run for a rail's rotated title. Rotated text reports its *unrotated* bounds, so
     /// the length has to be named rather than measured.
     public static let railTitleRun: CGFloat = 84

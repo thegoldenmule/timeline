@@ -320,6 +320,13 @@ launch with `defaults write TimelineApp panel.<id>.collapsed -bool true`.
   row was on screen: `LibraryThumbnailCache` stored images and in-flight tasks but had nowhere to put
   "there is nothing here". It remembers failures now, and `clear()` forgets them so a rescan retries.
 
+**Every thumbnail was drawn at half resolution.** A poster was asked for at its *point* height — 36 —
+and drawn into a 36 pt box, which is 72 px on a Retina screen. So the picture was stretched to twice its
+size, in the library rows and the composer's attachment chips alike. The height now comes from
+`@Environment(\.displayScale)`, which also picks a 128 px tile off `AVThumbnailProvider`'s ladder
+instead of a 64 px one. Worth knowing: this machine's main display is a 1x ultrawide and the built-in is
+2x, so the bug is invisible on the ultrawide and obvious on the laptop screen.
+
 **Still to check by hand** (§7): every item there is real. `SkeletonCheck` touches no SwiftUI, so nothing
 automated has drawn the four-column window; the layout arithmetic is covered by `PanelLayoutTests` and
 the chrome only by `ImageRenderer` smoke checks.

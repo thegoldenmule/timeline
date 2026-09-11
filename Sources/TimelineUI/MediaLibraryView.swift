@@ -467,6 +467,9 @@ public struct MediaLibraryControls: View {
 struct MediaLibraryRow: View {
     let model: MediaLibraryModel
     let row: MediaLibraryModel.Row
+    /// 2 on every Retina Mac. The poster is asked for in pixels, so this is what turns the row's point
+    /// height into the height the picture actually has to be.
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         HStack(spacing: PanelTheme.sectionGap) {
@@ -493,6 +496,14 @@ struct MediaLibraryRow: View {
 
     private var second: RationalTime { RationalTime(1, 1) }
 
+    private var posterPixelHeight: Int { MediaLibraryRow.posterPixelHeight(displayScale) }
+
+    /// How tall the picture behind a row has to be, in pixels. A poster asked for at its *point*
+    /// height is half the resolution a Retina screen draws it at, which is what made every row soft.
+    static func posterPixelHeight(_ displayScale: CGFloat) -> Int {
+        Int((PanelTheme.posterSize.height * max(1, displayScale)).rounded())
+    }
+
     /// What a row draws where its poster will go.
     static func placeholderSymbol(_ kind: AssetKind) -> String {
         switch kind {
@@ -505,14 +516,17 @@ struct MediaLibraryRow: View {
     @ViewBuilder private var poster: some View {
         ZStack {
             RoundedRectangle(cornerRadius: PanelTheme.posterRadius).fill(PanelTheme.chipFill)
-            if let image = model.poster(for: row) {
-                Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
+            if let image = model.poster(for: row, height: posterPixelHeight) {
+                Image(decorative: image, scale: displayScale)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
             } else {
                 // Audio never has a poster; everything else draws its own kind until the fetch lands.
                 Image(systemName: MediaLibraryRow.placeholderSymbol(row.asset.kind)).foregroundStyle(.secondary)
             }
         }
-        .frame(width: 64, height: 36)
+        .frame(width: PanelTheme.posterSize.width, height: PanelTheme.posterSize.height)
         .clipShape(RoundedRectangle(cornerRadius: PanelTheme.posterRadius))
     }
 }

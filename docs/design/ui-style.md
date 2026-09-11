@@ -178,6 +178,15 @@ rule a reviewer can grep rather than argue symbol by symbol.
 `TimelineCore.Actor.agent` stays too — `Actor.description` is the wire format (`"agent:<sessionId>"`) and
 `Actor.init(_:)` parses that prefix back. `ActorLabel` is what the window shows.
 
+## Pictures
+
+A thumbnail is asked for in **pixels**, never in points. A 36 pt poster row is 72 px of screen on a
+Retina Mac, and an image fetched at 36 px and drawn into it is stretched to twice its size — which is
+what made every row in the library look soft. Take the height from `@Environment(\.displayScale)`
+(`MediaLibraryRow.posterPixelHeight(_:)`), and pass that same scale to `Image(decorative:scale:)`.
+`AVThumbnailProvider`'s tile ladder is in pixels too, so asking for 72 picks a 128 px tile where asking
+for 36 picked a 64 px one.
+
 ## Filter controls
 
 A filter that changes *what is listed* belongs in the panel body. A filter that changes *where the panel

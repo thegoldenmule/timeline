@@ -59,6 +59,25 @@ struct LibraryThumbnailCacheTests {
         #expect(cache.fetchCount == 2)
     }
 
+    /// A poster asked for at its point height is half the resolution the screen draws it at, so every
+    /// row came out soft on a Retina display. The request is in pixels.
+    @Test func aPosterIsAskedForInPixelsNotPoints() async throws {
+        #expect(MediaLibraryRow.posterPixelHeight(1) == Int(PanelTheme.posterSize.height))
+        #expect(MediaLibraryRow.posterPixelHeight(2) == Int(PanelTheme.posterSize.height) * 2)
+        #expect(MediaLibraryRow.posterPixelHeight(3) == Int(PanelTheme.posterSize.height) * 3)
+        #expect(AssistantAttachmentChip.posterPixelHeight(2) == Int(PanelTheme.chipPosterSize.height) * 2)
+
+        // And the request reaches the provider at that height, so the cache keys two screens apart.
+        let provider = FakeThumbnailProvider()
+        let cache = LibraryThumbnailCache(thumbnails: provider)
+        let retina = MediaLibraryRow.posterPixelHeight(2)
+        _ = cache.poster(for: media(), kind: .video, duration: duration, height: retina)
+        await cache.drain()
+        #expect(provider.calls.first?.height == retina)
+        let image = try #require(cache.poster(for: media(), kind: .video, duration: duration, height: retina))
+        #expect(image.height == retina, "72 px of picture for a 36 pt row")
+    }
+
     @Test func twoRequestsForTheSameItemShareOneFetch() async throws {
         let provider = FakeThumbnailProvider(delayPerFrame: .milliseconds(20))
         let cache = LibraryThumbnailCache(thumbnails: provider)
