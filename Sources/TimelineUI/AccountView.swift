@@ -129,10 +129,11 @@ public struct AccountView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: PanelTheme.cardInset) {
             if !model.isConfigured {
-                Label(AccountText.setup, systemImage: "key").font(.headline)
-                Text(AccountText.setupPaths).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Label(AccountText.setup, systemImage: "key").font(PanelTheme.sectionTitle)
+                Text(AccountText.setupPaths).font(PanelTheme.caption).foregroundStyle(.secondary).textSelection(
+                    .enabled)
             } else {
                 ForEach(model.accounts) { account in
                     AccountRowView(
@@ -141,38 +142,40 @@ public struct AccountView: View {
                         onDisconnect: { Task { await model.disconnect(account.id) } })
                 }
                 if model.accounts.isEmpty {
-                    Text("No YouTube channel is connected").font(.subheadline).foregroundStyle(.secondary)
+                    Text("No YouTube channel is connected").font(PanelTheme.rowTitle).foregroundStyle(.secondary)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: PanelTheme.sectionGap) {
                     Button(AccountText.connectButton) { Task { await model.connect() } }
                         .disabled(model.isConnecting)
                     if model.isConnecting {
                         ProgressView().controlSize(.small)
-                        Text(AccountText.waiting).font(.caption).foregroundStyle(.secondary)
+                        Text(AccountText.waiting).font(PanelTheme.caption).foregroundStyle(.secondary)
                     }
                 }
                 consentText
                 ForEach(model.notices, id: \.self) { notice in
-                    Label(notice, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    Label(notice, systemImage: "exclamationmark.triangle").font(PanelTheme.caption).foregroundStyle(
+                        PanelTheme.warning)
                 }
-                Text(AccountText.brandChannels).font(.caption).foregroundStyle(.secondary)
+                Text(AccountText.brandChannels).font(PanelTheme.caption).foregroundStyle(.secondary)
             }
             if let error = model.error {
-                Text(error).font(.caption).foregroundStyle(.red).accessibilityIdentifier("account-error")
+                Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).accessibilityIdentifier(
+                    "account-error")
             }
         }
-        .padding(12)
+        .padding(PanelTheme.cardInset)
         .task { await model.start() }
     }
 
     private var consentText: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(AccountText.consent).font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
+            Text(AccountText.consent).font(PanelTheme.caption).foregroundStyle(.secondary)
+            HStack(spacing: PanelTheme.cardInset) {
                 Link("YouTube Terms of Service", destination: AccountText.youtubeTermsURL)
                 Link("Google Privacy Policy", destination: AccountText.googlePrivacyURL)
             }
-            .font(.caption)
+            .font(PanelTheme.caption)
         }
     }
 }
@@ -211,26 +214,26 @@ public struct AccountRowView: View {
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: PanelTheme.barInsetH) {
             avatar
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Connected as \(AccountRowView.connectedAs(account))").font(.subheadline)
-                if let email = account.email { Text(email).font(.caption).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
+                Text("Connected as \(AccountRowView.connectedAs(account))").font(PanelTheme.rowTitle)
+                if let email = account.email { Text(email).font(PanelTheme.caption).foregroundStyle(.secondary) }
                 Text(AccountRowView.statusText(account.tokenStatus))
-                    .font(.caption)
+                    .font(PanelTheme.caption)
                     .foregroundStyle(account.tokenStatus.needsReauthorization ? .orange : .secondary)
-                Link(AccountText.manageAccess, destination: AccountText.manageAccessURL).font(.caption)
+                Link(AccountText.manageAccess, destination: AccountText.manageAccessURL).font(PanelTheme.caption)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: .trailing, spacing: PanelTheme.controlGap) {
                 if account.tokenStatus.needsReauthorization {
                     Button("Reconnect", action: onReconnect).disabled(isConnecting)
                 }
                 Button("Disconnect", role: .destructive, action: onDisconnect)
             }
         }
-        .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(PanelTheme.panelInset)
+        .background(PanelTheme.cardMaterial, in: RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius))
         .accessibilityIdentifier("account-\(account.id)")
     }
 

@@ -529,7 +529,7 @@ struct EditorView: View {
     }
 
     private var statusBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: PanelTheme.cardInset) {
             Button(document.isPlaying ? "Pause" : "Play", systemImage: document.isPlaying ? "pause.fill" : "play.fill")
             {
                 document.togglePlayback()
@@ -542,14 +542,15 @@ struct EditorView: View {
             if let note = model.lastStatusNote { Text(note).foregroundStyle(.secondary).lineLimit(1) }
             if let error = model.lastCommandError ?? document.lastError ?? document.viewModel.lastError.map({ "\($0)" })
             {
-                Text(error).foregroundStyle(.red).lineLimit(1)
+                Text(error).foregroundStyle(PanelTheme.danger).lineLimit(1)
             }
             Spacer()
         }
-        .font(.caption.monospaced())
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.bar)
+        .font(PanelTheme.mono)
+        // The same pair a panel header uses, so the status bar lines up with them across the window.
+        .padding(.horizontal, PanelTheme.barInsetH)
+        .padding(.vertical, PanelTheme.barInsetV)
+        .background(PanelTheme.barMaterial)
     }
 }
 
@@ -562,26 +563,26 @@ struct ToolSection: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 4) {
-                if let text = tools.lastOutput?.text { Text(text).font(.caption) }
-                Text(tools.structuredText).font(.caption2.monospaced()).textSelection(.enabled).lineLimit(30)
-                if let error = tools.error { Text(error).font(.caption).foregroundStyle(.red) }
+            VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
+                if let text = tools.lastOutput?.text { Text(text).font(PanelTheme.caption) }
+                Text(tools.structuredText).font(PanelTheme.monoSmall).textSelection(.enabled).lineLimit(30)
+                if let error = tools.error { Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 2)
+            .padding(.top, PanelTheme.hairGap)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: PanelTheme.controlGap) {
                 Image(
                     systemName: tools.isCalling
                         ? "hourglass" : (tools.error == nil ? "wrench.and.screwdriver" : "xmark.octagon")
                 )
                 .foregroundStyle(tools.error == nil ? Color.secondary : Color.red)
-                Text(tools.lastTool).font(.system(.caption, design: .monospaced))
+                Text(tools.lastTool).font(PanelTheme.mono)
                 Spacer(minLength: 0)
             }
             .help("The last tool this window called; the assistant's calls are in its transcript")
         }
-        .padding(8)
+        .padding(PanelTheme.panelInset)
     }
 }
 
@@ -591,30 +592,32 @@ struct PublishSection: View {
     let publish: PublishConsole
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
             if let history = publish.history, publish.isAvailable {
                 PublishHistoryView(model: history) { publishId in
                     Task { await publish.resume(publishId: publishId) }
                 }
             } else {
-                Text("Publishes").font(.headline).padding(.horizontal, 8)
+                Text("Publishes").font(PanelTheme.sectionTitle).padding(.horizontal, PanelTheme.panelInset)
             }
             if !publish.canPublish {
-                Text(publish.hint).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
+                Text(publish.hint).font(PanelTheme.caption).foregroundStyle(.secondary).padding(
+                    .horizontal, PanelTheme.panelInset)
             }
             if publish.isPublishing {
-                HStack(spacing: 6) {
+                HStack(spacing: PanelTheme.controlGap) {
                     ProgressView().controlSize(.small)
-                    Text("Waiting for the approval card, then the upload runs as a job").font(.caption)
+                    Text("Waiting for the approval card, then the upload runs as a job").font(PanelTheme.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, PanelTheme.panelInset)
             }
             if let error = publish.error {
-                Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 8)
+                Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).padding(
+                    .horizontal, PanelTheme.panelInset)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, PanelTheme.rowGap)
     }
 }
 
@@ -625,7 +628,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: PanelTheme.cardInset) {
                 if let services = model.services, let publish = model.publish {
                     Text("YouTube").font(.title3)
                     if let accounts = publish.accounts {
@@ -637,12 +640,12 @@ struct SettingsView: View {
                     Divider()
                     MCPSection(services: services)
                 } else if let error = model.bootError {
-                    Text(error).foregroundStyle(.red)
+                    Text(error).foregroundStyle(PanelTheme.danger)
                 } else {
                     ProgressView(model.bootStage)
                 }
             }
-            .padding(16)
+            .padding(PanelTheme.pageInset)
         }
         .frame(width: 560, height: 620)
     }
@@ -653,28 +656,30 @@ struct PublishingStateView: View {
     let publishing: PublishingServices
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
             switch publishing.state {
             case .configured(let clientId, let audited):
-                Text("Google OAuth client \(clientId)").font(.caption).foregroundStyle(.secondary)
+                Text("Google OAuth client \(clientId)").font(PanelTheme.caption).foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 if !audited {
-                    Label(PublishCapabilities.unauditedNote, systemImage: "lock").font(.caption)
-                        .foregroundStyle(.orange)
+                    Label(PublishCapabilities.unauditedNote, systemImage: "lock").font(PanelTheme.caption)
+                        .foregroundStyle(PanelTheme.warning)
                 }
             case .notConfigured(let hint):
-                Text(hint).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(hint).font(PanelTheme.caption).foregroundStyle(.secondary).textSelection(.enabled)
             case .fake:
                 Label(
                     "Publishing runs against the in-process fake YouTube server (TIMELINE_PUBLISHING=fake)",
                     systemImage: "testtube.2"
-                ).font(.caption).foregroundStyle(.orange)
+                ).font(PanelTheme.caption).foregroundStyle(PanelTheme.warning)
             case .off:
                 EmptyView()
             }
             if publishing.state != .off {
-                Text("Refresh tokens: \(publishing.tokenStoreDescription)").font(.caption2).foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                Text("Refresh tokens: \(publishing.tokenStoreDescription)").font(PanelTheme.detail).foregroundStyle(
+                    .secondary
+                )
+                .textSelection(.enabled)
             }
         }
     }
@@ -685,23 +690,23 @@ struct MCPSection: View {
     let services: AppServices
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("MCP").font(.headline)
-            Text("Connect Claude Code to this app:").font(.caption).foregroundStyle(.secondary)
-            Text(services.mcp.claudeMCPAddCommand).font(.caption2.monospaced()).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
+            Text("MCP").font(PanelTheme.sectionTitle)
+            Text("Connect Claude Code to this app:").font(PanelTheme.caption).foregroundStyle(.secondary)
+            Text(services.mcp.claudeMCPAddCommand).font(PanelTheme.monoSmall).textSelection(.enabled)
             Text("Or through the stdio proxy (config at \(services.proxyConfigurationURL.path)):")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(services.mcp.claudeMCPAddProxyCommand).font(.caption2.monospaced()).textSelection(.enabled)
+                .font(PanelTheme.caption).foregroundStyle(.secondary)
+            Text(services.mcp.claudeMCPAddProxyCommand).font(PanelTheme.monoSmall).textSelection(.enabled)
             let a = services.agentAvailability
             Text(
                 services.agentIsFallback
                     ? "Embedded assistant: scripted fallback (\(a.detail ?? "claude not usable"))"
                     : "Embedded assistant: Claude Code \(a.version ?? "") (\(a.detail ?? ""))"
             )
-            .font(.caption).foregroundStyle(.secondary)
-            Text("Library root: \(services.layout.root.path)").font(.caption2).foregroundStyle(.secondary)
+            .font(PanelTheme.caption).foregroundStyle(.secondary)
+            Text("Library root: \(services.layout.root.path)").font(PanelTheme.detail).foregroundStyle(.secondary)
         }
-        .padding(8)
+        .padding(PanelTheme.panelInset)
     }
 }
 
@@ -726,8 +731,8 @@ struct AssistantSection: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if let error = assistant.error {
-                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
+                Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, PanelTheme.barInsetH)
             }
             AssistantComposerView(
                 composer: assistant.composer, isBusy: assistant.isRunning || assistant.isStarting,
