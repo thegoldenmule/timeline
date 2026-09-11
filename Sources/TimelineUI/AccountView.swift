@@ -9,12 +9,12 @@ public enum AccountText {
     /// The scope set of publish-plan.md D2, what `AccountsModel.connect` requests by default.
     public static let youtubeScopes = ["openid", "email", "https://www.googleapis.com/auth/youtube.force-ssl"]
 
-    /// D3: where the app looks for an OAuth client.
+    /// D3: no client, no connect. `PublishClientView` sits above this view in both surfaces the account
+    /// list appears in, which is where the client is set.
     public static let setup = "Add a Google OAuth client to enable publishing"
     public static let setupPaths =
-        "Set TIMELINE_GOOGLE_CLIENT_ID (and optionally TIMELINE_GOOGLE_CLIENT_SECRET), or point "
-        + "TIMELINE_GOOGLE_CLIENT_JSON at the console's client_secret_*.json, or put google-oauth-client.json "
-        + "under TIMELINE_ROOT or in ~/Library/Application Support/Timeline."
+        "Set the client above — paste its id, or choose the client_secret_*.json the Cloud console "
+        + "downloads — then connect the channel you publish to."
 
     /// D12: the consent sentence shown next to the connect button.
     public static let consent =
@@ -50,6 +50,9 @@ public final class AccountsModel {
     /// Notices the app passes in (`AccountText.unverifiedApp`, `AccountText.testingExpiry`); the UI does
     /// not know the Cloud project's status.
     public var notices: [String]
+    /// Whether the provider has an OAuth client. Stored rather than asked of the provider on every read,
+    /// so the view follows it when the client is set in the window; `refreshConfiguration` re-reads it.
+    public private(set) var isConfigured: Bool
     public private(set) var accounts: [ConnectedAccount] = []
     public private(set) var isConnecting = false
     public private(set) var error: String?
@@ -59,9 +62,11 @@ public final class AccountsModel {
         self.provider = provider
         self.scopes = scopes
         self.notices = notices
+        self.isConfigured = provider.isConfigured
     }
 
-    public var isConfigured: Bool { provider.isConfigured }
+    /// Re-reads `provider.isConfigured` after the OAuth client changed.
+    public func refreshConfiguration() { isConfigured = provider.isConfigured }
 
     /// Loads the accounts and follows the provider's changes.
     public func start() async {
@@ -74,6 +79,7 @@ public final class AccountsModel {
             }
         }
         accounts = await provider.accounts()
+        isConfigured = provider.isConfigured
     }
 
     public func stop() {

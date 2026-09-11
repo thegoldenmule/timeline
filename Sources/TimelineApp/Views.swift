@@ -589,19 +589,28 @@ struct ToolSection: View {
     }
 }
 
-/// The publish history of the open project (with Resume for interrupted uploads), the last
-/// `publish_youtube` answer, and why the Publish button is disabled when it is.
+/// The Publishes panel: the OAuth client (set it here, no environment variables), the connected
+/// channel, the publish history of the open project with Resume for interrupted uploads, and why the
+/// Publish button is disabled when it is.
 struct PublishSection: View {
     let publish: PublishConsole
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
+            Text("Publishes").font(PanelTheme.sectionTitle).padding(.horizontal, PanelTheme.panelInset)
+            if let client = publish.client {
+                PublishClientView(model: client).padding(.horizontal, PanelTheme.panelInset)
+            }
+            if let accounts = publish.accounts {
+                AccountView(model: accounts)
+            } else {
+                Text("Publishing is switched off (TIMELINE_PUBLISHING=off)").font(PanelTheme.caption)
+                    .foregroundStyle(.secondary).padding(.horizontal, PanelTheme.panelInset)
+            }
             if let history = publish.history, publish.isAvailable {
-                PublishHistoryView(model: history) { publishId in
+                PublishHistoryView(model: history, title: "Recent uploads") { publishId in
                     Task { await publish.resume(publishId: publishId) }
                 }
-            } else {
-                Text("Publishes").font(PanelTheme.sectionTitle).padding(.horizontal, PanelTheme.panelInset)
             }
             if !publish.canPublish {
                 Text(publish.hint).font(PanelTheme.caption).foregroundStyle(.secondary).padding(
@@ -634,6 +643,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: PanelTheme.cardInset) {
                 if let services = model.services, let publish = model.publish {
                     Text("YouTube").font(.title3)
+                    if let client = publish.client { PublishClientView(model: client) }
                     if let accounts = publish.accounts {
                         AccountView(model: accounts)
                     } else {

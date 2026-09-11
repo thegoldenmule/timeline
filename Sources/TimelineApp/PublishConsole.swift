@@ -17,6 +17,11 @@ final class PublishConsole {
     let jobs: JobCenter
     /// Settings > Accounts; nil when publishing is switched off.
     let accounts: AccountsModel?
+    /// The OAuth client card of the Publishes panel; nil under `.fake` and `.off`, which have no client
+    /// of their own to set.
+    let client: PublishClientModel?
+    /// `services.publishing.state`, mirrored so the views follow it when a client is saved.
+    private(set) var publishingState: PublishingServices.State
     /// The open project's `publishes` ledger, for the history section and Resume.
     private(set) var history: PublishHistoryModel?
     /// The done renders of the open project, newest first; the Publish button needs one.
@@ -39,10 +44,12 @@ final class PublishConsole {
         } else {
             accounts = nil
         }
+        client = services.publishing.clientStore.map { PublishClientModel(store: $0) }
+        publishingState = services.publishing.state
     }
 
-    /// True when a publisher exists (a Google client is configured, or the fake is in use).
-    var isAvailable: Bool { services.publisher != nil && services.accounts != nil }
+    /// True when a client is configured (or the fake is in use), so an upload could actually run.
+    var isAvailable: Bool { publishingState.isConfigured && services.publisher != nil && services.accounts != nil }
 
     var connectedAccounts: [ConnectedAccount] {
         (accounts?.accounts ?? []).filter { !$0.tokenStatus.needsReauthorization }
@@ -55,17 +62,29 @@ final class PublishConsole {
     /// Why the Publish button is disabled, for its tooltip.
     var hint: String {
         if !isAvailable {
-            return services.publishing.state == .off
-                ? "Publishing is switched off" : "Add a Google OAuth client to enable publishing (Settings)"
+            return publishingState == .off
+                ? "Publishing is switched off" : "Add a Google OAuth client in the Publishes panel to enable publishing"
         }
-        if connectedAccounts.isEmpty { return "Connect a YouTube channel in Settings first" }
+        if connectedAccounts.isEmpty { return "Connect a YouTube channel in the Publishes panel first" }
         if doneRenders.isEmpty { return "Export first: the sheet publishes a finished render" }
         return "Publish the newest export to YouTube"
     }
 
-    /// Follows the account provider; call once after boot.
+    /// Follows the account provider and the OAuth client; call once after boot.
     func start() async {
+        client?.onChange = { [weak self] in await self?.clientChanged() }
         await accounts?.start()
+    }
+
+    /// The client card saved, imported, or removed a client: install it in the live stack, so the connect
+    /// button and `publish_youtube` follow without a relaunch.
+    private func clientChanged() async {
+        guard let store = services.publishing.clientStore else { return }
+        await services.publishing.apply(
+            await store.configuration(), registry: services.registry, log: services.log)
+        publishingState = services.publishing.state
+        accounts?.refreshConfiguration()
+        await refresh()
     }
 
     /// Points the history and the render list at `document` (nil when the window has no project).

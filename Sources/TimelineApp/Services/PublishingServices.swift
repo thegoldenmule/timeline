@@ -1,5 +1,5 @@
-import AppKit
 import AgentKit
+import AppKit
 import Contracts
 import ContractsTestSupport
 import Foundation

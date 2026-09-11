@@ -94,20 +94,24 @@ public final class PublishHistoryModel {
 /// rows that can continue their upload.
 public struct PublishHistoryView: View {
     public let model: PublishHistoryModel
+    /// The heading above the rows. The Publishes panel heads itself and passes its own ("Recent
+    /// uploads"), so the two do not both say "Publishes".
+    public let title: String
     public let onResume: (String) -> Void
 
-    public init(model: PublishHistoryModel, onResume: @escaping (String) -> Void) {
+    public init(model: PublishHistoryModel, title: String = "Publishes", onResume: @escaping (String) -> Void) {
         self.model = model
+        self.title = title
         self.onResume = onResume
     }
 
-    public init(ledger: any PublishLedger, onResume: @escaping (String) -> Void) {
-        self.init(model: PublishHistoryModel(ledger: ledger), onResume: onResume)
+    public init(ledger: any PublishLedger, title: String = "Publishes", onResume: @escaping (String) -> Void) {
+        self.init(model: PublishHistoryModel(ledger: ledger), title: title, onResume: onResume)
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.controlGap) {
-            Text("Publishes").font(PanelTheme.sectionTitle)
+            Text(title).font(PanelTheme.sectionTitle)
             if model.records.isEmpty {
                 Text("No publishes yet").font(PanelTheme.caption).foregroundStyle(.secondary)
             }

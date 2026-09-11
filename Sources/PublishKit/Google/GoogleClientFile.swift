@@ -67,7 +67,8 @@ public actor GoogleClientFile: PublishClientStore {
         do {
             data = try Data(contentsOf: url)
         } catch {
-            throw PublishClientError.storage("\(url.lastPathComponent) could not be read: \(error.localizedDescription)")
+            throw PublishClientError.storage(
+                "\(url.lastPathComponent) could not be read: \(error.localizedDescription)")
         }
         let configuration: GoogleClientConfiguration
         do {

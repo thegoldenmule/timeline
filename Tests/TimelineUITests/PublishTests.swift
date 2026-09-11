@@ -69,11 +69,9 @@ struct AccountViewTests {
         #expect(!model.isConfigured)
         #expect(model.accounts.isEmpty)
         #expect(AccountText.setup == "Add a Google OAuth client to enable publishing")
-        for path in [
-            "TIMELINE_GOOGLE_CLIENT_ID", "TIMELINE_GOOGLE_CLIENT_JSON", "google-oauth-client.json", "TIMELINE_ROOT",
-        ] {
-            #expect(AccountText.setupPaths.contains(path))
-        }
+        // The hint points at the client card above rather than at a list of environment variables.
+        #expect(AccountText.setupPaths.contains("client_secret_*.json"))
+        #expect(!AccountText.setupPaths.contains("TIMELINE_"))
         // Connecting without a client reports the provider's error instead of opening anything.
         await model.connect()
         #expect(model.error?.contains("No OAuth client is configured") == true)
