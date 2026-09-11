@@ -284,19 +284,20 @@ public struct MediaLibraryView: View {
 
     public var body: some View {
         @Bindable var model = model
-        VStack(spacing: 6) {
+        VStack(spacing: PanelTheme.controlGap) {
             header(model: $model)
             if let error = model.lastError {
-                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).padding(.horizontal, 8)
+                Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).lineLimit(2).padding(
+                    .horizontal, PanelTheme.panelInset)
             }
             list(model: $model)
         }
-        .padding(.top, 6)
+        .padding(.top, PanelTheme.controlGap)
         .task { await model.load() }
     }
 
     private func header(model: Bindable<MediaLibraryModel>) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: PanelTheme.controlGap) {
             // Not `.searchable`: the panel is a plain column, not a navigation column. Refresh and
             // Import are not here either — they are the panel header's controls (`PanelChrome`).
             TextField("Search media", text: model.query).textFieldStyle(.roundedBorder)
@@ -309,7 +310,7 @@ public struct MediaLibraryView: View {
             }
             .pickerStyle(.segmented).labelsHidden()
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, PanelTheme.panelInset)
     }
 
     private func list(model: Bindable<MediaLibraryModel>) -> some View {
@@ -381,32 +382,33 @@ struct MediaLibraryRow: View {
     let row: MediaLibraryModel.Row
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: PanelTheme.sectionGap) {
             poster
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
                 Text(row.asset.displayName).lineLimit(1).truncationMode(.middle)
-                HStack(spacing: 4) {
+                HStack(spacing: PanelTheme.rowGap) {
                     Text(Timecode.label(seconds: row.asset.duration.seconds, interval: 1, frameDuration: second))
                     Text(row.asset.kind.rawValue)
                     if let project = row.foreignProjectName { Text("· \(project)") }
                 }
-                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                .font(PanelTheme.detail).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
             if row.isOffline {
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help("The file is missing")
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(PanelTheme.warning).help(
+                    "The file is missing")
             } else if row.isInProject {
                 Image(systemName: "checkmark.circle").foregroundStyle(.secondary).help("Already in this project")
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, PanelTheme.hairGap)
     }
 
     private var second: RationalTime { RationalTime(1, 1) }
 
     @ViewBuilder private var poster: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 3).fill(.quaternary)
+            RoundedRectangle(cornerRadius: PanelTheme.posterRadius).fill(PanelTheme.chipFill)
             if let image = model.poster(for: row) {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
             } else {
@@ -415,6 +417,6 @@ struct MediaLibraryRow: View {
             }
         }
         .frame(width: 64, height: 36)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .clipShape(RoundedRectangle(cornerRadius: PanelTheme.posterRadius))
     }
 }

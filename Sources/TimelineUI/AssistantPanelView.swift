@@ -172,15 +172,15 @@ public struct AssistantPanelView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: PanelTheme.sectionGap) {
                         ForEach(transcript.items) { item in
                             AssistantItemView(item: item, transcript: transcript)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(item.id)
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, PanelTheme.barInsetH)
+                    .padding(.vertical, PanelTheme.panelInset)
                 }
                 .onChange(of: transcript.items.count) { _, _ in
                     guard let last = transcript.items.last else { return }
@@ -251,53 +251,54 @@ struct AssistantItemView: View {
     var body: some View {
         switch item {
         case .turn(let index):
-            HStack(spacing: 6) {
-                Text("Turn \(index)").font(.caption2).foregroundStyle(.tertiary)
+            HStack(spacing: PanelTheme.controlGap) {
+                Text("Turn \(index)").font(PanelTheme.detail).foregroundStyle(.tertiary)
                 VStack { Divider() }
             }
-            .padding(.top, 2)
+            .padding(.top, PanelTheme.hairGap)
         case .user(_, let text):
             Text(text)
                 .textSelection(.enabled)
-                .padding(8)
+                .padding(PanelTheme.panelInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.14)))
+                .background(RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius).fill(PanelTheme.ownBubbleFill))
         case .text(_, let text):
             Text(text)
                 .textSelection(.enabled)
-                .padding(8)
+                .padding(PanelTheme.panelInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(.quinary))
+                .background(RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius).fill(PanelTheme.bubbleFill))
         case .toolCall(_, let name, let input, let output, let isError):
             DisclosureGroup(isExpanded: $expanded) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Input").font(.caption2).foregroundStyle(.secondary)
-                    Text(AssistantItemView.pretty(input)).font(.system(.caption2, design: .monospaced)).textSelection(
+                VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
+                    Text("Input").font(PanelTheme.detail).foregroundStyle(.secondary)
+                    Text(AssistantItemView.pretty(input)).font(PanelTheme.monoSmall).textSelection(
                         .enabled)
                     if let output {
-                        Text(isError ? "Error" : "Result").font(.caption2).foregroundStyle(isError ? .red : .secondary)
-                        Text(AssistantItemView.pretty(output)).font(.system(.caption2, design: .monospaced))
+                        Text(isError ? "Error" : "Result").font(PanelTheme.detail).foregroundStyle(
+                            isError ? .red : .secondary)
+                        Text(AssistantItemView.pretty(output)).font(PanelTheme.monoSmall)
                             .textSelection(
                                 .enabled)
                     }
                 }
-                .padding(.top, 2)
+                .padding(.top, PanelTheme.hairGap)
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: PanelTheme.controlGap) {
                     Image(systemName: AssistantItemView.toolSymbol(output: output, isError: isError))
                         .foregroundStyle(isError ? Color.red : Color.secondary)
-                    Text(name).font(.system(.caption, design: .monospaced))
-                    if output == nil { Text("running").font(.caption2).foregroundStyle(.tertiary) }
+                    Text(name).font(PanelTheme.mono)
+                    if output == nil { Text("running").font(PanelTheme.detail).foregroundStyle(.tertiary) }
                 }
             }
-            .font(.caption)
+            .font(PanelTheme.caption)
         case .approval(let request, let verdict):
             if let verdict {
                 Label(
                     "\(request.tool): \(AssistantItemView.verdictText(verdict))",
                     systemImage: AssistantItemView.isApproved(verdict) ? "hand.thumbsup" : "hand.raised"
                 )
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(PanelTheme.detail).foregroundStyle(.secondary)
             } else {
                 ApprovalCardView(
                     request: request,
@@ -308,21 +309,23 @@ struct AssistantItemView: View {
             // The running total lives in the status bar; a line per report would only repeat it.
             EmptyView()
         case .finished(_, let result, let cost):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
                 if let result, !result.isEmpty {
-                    Text(result).textSelection(.enabled).padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(.quinary))
+                    Text(result).textSelection(.enabled).padding(PanelTheme.panelInset).frame(
+                        maxWidth: .infinity, alignment: .leading
+                    )
+                    .background(RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius).fill(PanelTheme.bubbleFill))
                 }
                 if let cost {
                     Text(String(format: "Finished · $%.3f · %d turns", cost.usd, cost.turns ?? 0))
-                        .font(.caption2).foregroundStyle(.tertiary)
+                        .font(PanelTheme.detail).foregroundStyle(.tertiary)
                 }
             }
         case .failed(_, let failure):
             Label(failure.message, systemImage: "exclamationmark.octagon")
-                .font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                .font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).textSelection(.enabled)
         case .raw(_, let value):
-            Text(AssistantItemView.pretty(value)).font(.system(.caption2, design: .monospaced)).foregroundStyle(
+            Text(AssistantItemView.pretty(value)).font(PanelTheme.monoSmall).foregroundStyle(
                 .tertiary
             )
             .lineLimit(3)

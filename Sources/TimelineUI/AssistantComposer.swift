@@ -260,9 +260,9 @@ public struct AssistantComposerView: View {
 
     public var body: some View {
         @Bindable var composer = composer
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: PanelTheme.controlGap) {
             if !self.composer.attachments.isEmpty { attachmentStrip }
-            HStack(alignment: .bottom, spacing: 6) {
+            HStack(alignment: .bottom, spacing: PanelTheme.controlGap) {
                 if let onAttach {
                     Button("Attach files", systemImage: "paperclip") { onAttach() }
                         .labelStyle(.iconOnly).buttonStyle(.borderless).help("Stage files for the next message")
@@ -281,42 +281,43 @@ public struct AssistantComposerView: View {
                     .help(isBusy ? "The assistant is working" : "Send (⌘↩)")
             }
         }
-        .padding(8)
+        .padding(PanelTheme.panelInset)
         .background(
-            RoundedRectangle(cornerRadius: 8).fill(.background.secondary)
+            RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius).fill(PanelTheme.fieldFill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius)
                 .strokeBorder(
-                    isTargeted ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: isTargeted ? 2 : 1)
+                    isTargeted ? PanelTheme.borderActive : PanelTheme.borderIdle,
+                    lineWidth: isTargeted ? PanelTheme.borderWidthActive : PanelTheme.borderWidth)
         )
-        .padding(8)
+        .padding(PanelTheme.panelInset)
     }
 
     private var isTargeted: Bool { composer.isDropTargeted }
 
     private var attachmentStrip: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
             // The count and Clear stay put; the chips themselves scroll when there are more than fit.
-            HStack(spacing: 6) {
+            HStack(spacing: PanelTheme.controlGap) {
                 Text(
                     "\(composer.attachments.count) attachment\(composer.attachments.count == 1 ? "" : "s") · paths "
                         + "only, nothing is imported"
                 )
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(PanelTheme.detail).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Button("Clear") { composer.removeAllAttachments() }
-                    .buttonStyle(.borderless).font(.caption2).help("Remove every attachment")
+                    .buttonStyle(.borderless).font(PanelTheme.detail).help("Remove every attachment")
             }
             ScrollView(.horizontal) {
-                HStack(spacing: 6) {
+                HStack(spacing: PanelTheme.controlGap) {
                     ForEach(composer.attachments) { attachment in
                         AssistantAttachmentChip(composer: composer, attachment: attachment) {
                             composer.remove(attachment.id)
                         }
                     }
                 }
-                .padding(.bottom, 2)
+                .padding(.bottom, PanelTheme.hairGap)
             }
             .scrollIndicators(.automatic)
             .frame(maxHeight: 46)
@@ -339,11 +340,11 @@ struct AssistantAttachmentChip: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: PanelTheme.controlGap) {
             poster
             VStack(alignment: .leading, spacing: 1) {
-                Text(attachment.displayName).font(.caption).lineLimit(1).truncationMode(.middle)
-                Text(attachment.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(attachment.displayName).font(PanelTheme.caption).lineLimit(1).truncationMode(.middle)
+                Text(attachment.detail).font(PanelTheme.detail).foregroundStyle(.secondary).lineLimit(1)
             }
             Button("Remove", systemImage: "xmark.circle.fill") { onRemove() }
                 .labelStyle(.iconOnly).buttonStyle(.borderless)
@@ -353,10 +354,11 @@ struct AssistantAttachmentChip: View {
         .padding(.trailing, 5)
         .padding(.vertical, 3)
         .frame(maxWidth: 220)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        .background(RoundedRectangle(cornerRadius: PanelTheme.chipRadius).fill(PanelTheme.chipFill))
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(attachment.isMissing ? Color.orange : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: PanelTheme.chipRadius)
+                .strokeBorder(
+                    attachment.isMissing ? PanelTheme.warning : Color.clear, lineWidth: PanelTheme.borderWidth)
         )
         .onHover { isHovering = $0 }
         .help(attachment.isMissing ? "\(attachment.url.path) — the file is missing" : attachment.url.path)
@@ -364,15 +366,16 @@ struct AssistantAttachmentChip: View {
 
     private var poster: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 3).fill(.quinary)
+            RoundedRectangle(cornerRadius: PanelTheme.posterRadius).fill(PanelTheme.bubbleFill)
             if let image = composer.poster(for: attachment) {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
             } else {
-                Image(systemName: symbol).font(.caption).foregroundStyle(attachment.isMissing ? .orange : .secondary)
+                Image(systemName: symbol).font(PanelTheme.caption).foregroundStyle(
+                    attachment.isMissing ? .orange : .secondary)
             }
         }
         .frame(width: 40, height: 26)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .clipShape(RoundedRectangle(cornerRadius: PanelTheme.posterRadius))
     }
 
     private var symbol: String {
@@ -424,10 +427,11 @@ public struct AssistantDropHost<Content: View>: NSViewRepresentable {
             .overlay {
                 if composer.isDropTargeted {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor, lineWidth: 2)
+                        RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius)
+                            .strokeBorder(PanelTheme.borderActive, lineWidth: PanelTheme.borderWidthActive)
                         Label("Attach to the message — not imported", systemImage: "paperclip")
-                            .font(.caption).padding(8)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                            .font(PanelTheme.caption).padding(PanelTheme.panelInset)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: PanelTheme.bubbleRadius))
                     }
                     .allowsHitTesting(false)
                 }
