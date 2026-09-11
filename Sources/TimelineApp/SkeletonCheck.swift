@@ -1,4 +1,5 @@
 import AVFoundation
+import AgentKit
 import Contracts
 import ContractsTestSupport
 import CoreGraphics
@@ -692,7 +693,59 @@ enum SkeletonCheck {
                     + "thumbnail set; row done, no session; publish_status over MCP lists it; "
                     + "account_status shows \(connected.channelHandle ?? "")")
 
-            // 13. Close, reopen from disk, same version and state; then shut down.
+            // 13. The OAuth client set in the window: an `.auto` stack over its own root starts
+            //     unconfigured with the publish tools unregistered, and saving a client through the store
+            //     the panel uses configures the same provider and publisher and puts the tools back — no
+            //     relaunch (docs/plans/publish-client-setup.md).
+            let clientRoot = root.appendingPathComponent("client-check", isDirectory: true)
+            try FileManager.default.createDirectory(at: clientRoot, withIntermediateDirectories: true)
+            let clientEnvironment = ["TIMELINE_ROOT": clientRoot.path, "TIMELINE_TOKEN_STORE": "file"]
+            let auto = try await PublishingServices.make(
+                mode: .auto, layout: LibraryLayout(root: clientRoot), environment: clientEnvironment,
+                log: AppLog(echo: false))
+            let clientStore = try unwrap(auto.clientStore, "client", "no client store in .auto")
+            let autoProvider = try unwrap(auto.accounts, "client", "no provider in .auto")
+            try require(!autoProvider.isConfigured, "client", "provider configured before a client was set")
+            try require(auto.publisher != nil, "client", "no publisher to reconfigure")
+            let clientRegistry = EditorToolRegistry(tools: EditorTools.all)
+            await auto.syncTools(in: clientRegistry)
+            try require(
+                await clientRegistry.tool(named: "publish_youtube") == nil, "client",
+                "publish_youtube registered without a client")
+            try require(
+                await clientRegistry.tool(named: "account_status") != nil, "client", "account_status dropped")
+
+            let saved = try await clientStore.save(
+                clientId: "check-123.apps.googleusercontent.com", clientSecret: "check-secret", audited: false)
+            try require(saved.isEditable, "client", "the saved client reads as not editable")
+            await auto.apply(
+                await clientStore.configuration(), registry: clientRegistry, environment: clientEnvironment)
+            try require(autoProvider.isConfigured, "client", "the provider did not take the saved client")
+            try require(
+                auto.state == .configured(clientId: "check-123.apps.googleusercontent.com", audited: false),
+                "client", "state \(auto.state)")
+            let backNames = await clientRegistry.list().map(\.name)
+            try require(
+                backNames.contains("publish_youtube") && backNames.contains("publish_status"), "client",
+                "the publish tools did not come back")
+            let clientFile = clientRoot.appendingPathComponent("google-oauth-client.json")
+            let clientMode =
+                try FileManager.default.attributesOfItem(atPath: clientFile.path)[.posixPermissions]
+                as? NSNumber
+            try require(clientMode?.int16Value == 0o600, "client", "client file mode \(clientMode ?? 0)")
+
+            try await clientStore.remove()
+            await auto.apply(nil, registry: clientRegistry, environment: clientEnvironment)
+            try require(!autoProvider.isConfigured, "client", "the provider kept the removed client")
+            try require(
+                await clientRegistry.tool(named: "publish_youtube") == nil, "client",
+                "publish_youtube stayed after the client was removed")
+            ok(
+                "client",
+                "unconfigured .auto stack: publish_youtube hidden; saved check-123... at \(clientFile.path) "
+                    + "(0600) -> provider configured, publish_youtube and publish_status back; removed -> hidden again")
+
+            // 14. Close, reopen from disk, same version and state; then shut down.
             let finalVersion = original.version
             let finalState = original.project
             await original.close(using: services)

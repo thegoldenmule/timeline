@@ -602,7 +602,7 @@ struct PublishSection: View {
                 PublishClientView(model: client).padding(.horizontal, PanelTheme.panelInset)
             }
             if let accounts = publish.accounts {
-                AccountView(model: accounts)
+                AccountView(model: accounts, showsSetupHint: publish.client == nil)
             } else {
                 Text("Publishing is switched off (TIMELINE_PUBLISHING=off)").font(PanelTheme.caption)
                     .foregroundStyle(.secondary).padding(.horizontal, PanelTheme.panelInset)
@@ -612,7 +612,9 @@ struct PublishSection: View {
                     Task { await publish.resume(publishId: publishId) }
                 }
             }
-            if !publish.canPublish {
+            // Only once a client is set: until then the card above is the instruction, and the hint would
+            // point at the panel the reader is already looking at.
+            if publish.isAvailable, !publish.canPublish {
                 Text(publish.hint).font(PanelTheme.caption).foregroundStyle(.secondary).padding(
                     .horizontal, PanelTheme.panelInset)
             }
@@ -645,7 +647,7 @@ struct SettingsView: View {
                     Text("YouTube").font(.title3)
                     if let client = publish.client { PublishClientView(model: client) }
                     if let accounts = publish.accounts {
-                        AccountView(model: accounts)
+                        AccountView(model: accounts, showsSetupHint: publish.client == nil)
                     } else {
                         Text("Publishing is switched off (TIMELINE_PUBLISHING=off)").foregroundStyle(.secondary)
                     }

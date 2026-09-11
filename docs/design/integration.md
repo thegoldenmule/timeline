@@ -264,9 +264,10 @@ ok   agent: 8 items, finished "Exported Reel 9:16."; export gated, approved on t
 ok   undo/redo: v27 -> v29 -> v31, 18 live transactions
 ok   fork: Skeleton fork.tlproj at v32 with 19 live transactions; original still v31
 ok   publish: connected sub-1 (Skeleton Channel @skeleton); render 01a08746… done (h264_1080p, v33, sha256-1064ff26…); publish_youtube -> approval_required (Channel, Account, Privacy, File, Render, Thumbnail, Captions, AI disclosure, Made for kids, Certification); approved on the stack, retried; 0.2 MiB in 256 KiB chunks, dropped after 0.12 MiB, resumed 1; done fake-video-1 https://youtu.be/fake-video-1 private, 1 caption, thumbnail set; row done, no session; publish_status over MCP lists it; account_status shows @skeleton
+ok   client: unconfigured .auto stack: publish_youtube hidden; saved check-123... at <root>/client-check/google-oauth-client.json (0600) -> provider configured, publish_youtube and publish_status back; removed -> hidden again
 ok   reopen: v33 after close and reopen, state and history equal, publish row done; 15 tool receipts logged
 
-Skeleton check passed: 15 steps in 8.93 seconds
+Skeleton check passed: 16 steps in 8.93 seconds
 ```
 
 Step by step: `SQLiteProjectStoreOpener.create` plus V1/A1; `TestMedia.videoWithAudio` (2 s: the generator
@@ -303,6 +304,13 @@ body with the cue text, and a private video; the `publishes` row is `done` with 
 session, and the project version did not move; `publish_status` over the MCP probe lists the row without
 its session; `account_status` shows `@skeleton` on "Skeleton Channel"; the gate has nothing pending. After
 close and reopen the publish row is still `done` without a session and the render row `done`.
+
+The `client` step covers the other half of publishing setup (docs/plans/publish-client-setup.md): a second
+`.auto` stack over its own root starts unconfigured with `publish_youtube` and `publish_status`
+unregistered and `account_status` still there; saving a client through `GoogleClientFile` (the store the
+Publishes panel writes through) and `PublishingServices.apply` configures the provider and the publisher
+that were already built, writes the file 0600, and puts both tools back; removing it takes them away
+again. No relaunch anywhere in that sequence.
 
 ## Known issues
 

@@ -129,17 +129,23 @@ public final class AccountsModel {
 /// per connected account, the notices, and the brand-channel help text.
 public struct AccountView: View {
     public let model: AccountsModel
+    /// False where a `PublishClientView` sits directly above and has already said it: the panel and
+    /// Settings both show one, so repeating the heading there would be two key icons in a row.
+    public let showsSetupHint: Bool
 
-    public init(model: AccountsModel) {
+    public init(model: AccountsModel, showsSetupHint: Bool = true) {
         self.model = model
+        self.showsSetupHint = showsSetupHint
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.cardInset) {
             if !model.isConfigured {
-                Label(AccountText.setup, systemImage: "key").font(PanelTheme.sectionTitle)
-                Text(AccountText.setupPaths).font(PanelTheme.caption).foregroundStyle(.secondary).textSelection(
-                    .enabled)
+                if showsSetupHint {
+                    Label(AccountText.setup, systemImage: "key").font(PanelTheme.sectionTitle)
+                    Text(AccountText.setupPaths).font(PanelTheme.caption).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             } else {
                 ForEach(model.accounts) { account in
                     AccountRowView(
