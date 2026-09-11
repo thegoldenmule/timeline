@@ -29,33 +29,35 @@ public struct PublishOutcomeView: View {
     public static let audienceReminder = "Set the audience (made for kids) in YouTube Studio"
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
             if let receipt {
-                HStack(spacing: 12) {
+                HStack(spacing: PanelTheme.cardInset) {
                     Link("View on YouTube", destination: receipt.remoteURL)
                     if let studio = receipt.studioURL { Link("Open in Studio", destination: studio) }
                 }
-                .font(.caption)
-                HStack(spacing: 8) {
+                .font(PanelTheme.caption)
+                HStack(spacing: PanelTheme.sectionGap) {
                     Text(PublishOutcomeView.privacyText(receipt))
                     if let channel = receipt.channelTitle { Text("on \(channel)") }
                     if let publishAt = receipt.publishAt {
                         Text("scheduled for \(publishAt.formatted(date: .abbreviated, time: .shortened))")
                     }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(PanelTheme.caption).foregroundStyle(.secondary)
                 if receipt.madeForKids == nil {
-                    Label(PublishOutcomeView.audienceReminder, systemImage: "person.2").font(.caption)
-                        .foregroundStyle(.orange)
+                    Label(PublishOutcomeView.audienceReminder, systemImage: "person.2").font(PanelTheme.caption)
+                        .foregroundStyle(PanelTheme.warning)
                 }
                 ForEach(Array(Set(receipt.warnings + outcome.warnings)).sorted(), id: \.self) { warning in
-                    Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    Label(warning, systemImage: "exclamationmark.triangle").font(PanelTheme.caption).foregroundStyle(
+                        PanelTheme.warning)
                 }
             } else {
                 ForEach(outcome.warnings, id: \.self) { warning in
-                    Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    Label(warning, systemImage: "exclamationmark.triangle").font(PanelTheme.caption).foregroundStyle(
+                        PanelTheme.warning)
                 }
-                Text("Published (no receipt)").font(.caption).foregroundStyle(.secondary)
+                Text("Published (no receipt)").font(PanelTheme.caption).foregroundStyle(.secondary)
             }
         }
         .accessibilityIdentifier("publish-outcome")
@@ -104,19 +106,19 @@ public struct PublishHistoryView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Publishes").font(.headline)
+        VStack(alignment: .leading, spacing: PanelTheme.controlGap) {
+            Text("Publishes").font(PanelTheme.sectionTitle)
             if model.records.isEmpty {
-                Text("No publishes yet").font(.caption).foregroundStyle(.secondary)
+                Text("No publishes yet").font(PanelTheme.caption).foregroundStyle(.secondary)
             }
             if let error = model.error {
-                Text(error).font(.caption).foregroundStyle(.red)
+                Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger)
             }
             ForEach(model.records) { record in
                 PublishHistoryRow(record: record, canResume: model.canResume(record)) { onResume(record.id) }
             }
         }
-        .padding(8)
+        .padding(PanelTheme.panelInset)
         .task { await model.load() }
     }
 }
@@ -143,19 +145,21 @@ public struct PublishHistoryRow: View {
     }
 
     public var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.request.title).font(.subheadline).lineLimit(1)
-                Text(PublishHistoryRow.detailText(record)).font(.caption).foregroundStyle(.secondary)
-                if let error = record.error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
-                if let url = record.remoteURL { Link("View on YouTube", destination: url).font(.caption) }
+        HStack(spacing: PanelTheme.barInsetH) {
+            VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
+                Text(record.request.title).font(PanelTheme.rowTitle).lineLimit(1)
+                Text(PublishHistoryRow.detailText(record)).font(PanelTheme.caption).foregroundStyle(.secondary)
+                if let error = record.error {
+                    Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).lineLimit(2)
+                }
+                if let url = record.remoteURL { Link("View on YouTube", destination: url).font(PanelTheme.caption) }
             }
             Spacer()
             if canResume {
-                Button("Resume", action: onResume).font(.caption)
+                Button("Resume", action: onResume).font(PanelTheme.caption)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, PanelTheme.rowGap)
         .accessibilityIdentifier("publish-\(record.id)")
     }
 }

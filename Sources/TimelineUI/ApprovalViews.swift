@@ -94,38 +94,40 @@ public struct ApprovalCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: PanelTheme.sectionGap) {
             HStack {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
-                Text(request.tool).font(.headline)
+                Image(systemName: "hand.raised.fill").foregroundStyle(PanelTheme.warning)
+                Text(request.tool).font(PanelTheme.sectionTitle)
                 Spacer()
-                Text(ActorLabel.text(request.actor)).font(.caption).foregroundStyle(.secondary)
+                Text(ActorLabel.text(request.actor)).font(PanelTheme.caption).foregroundStyle(.secondary)
                     .help(ActorLabel.detail(request.actor) ?? "")
             }
-            Text(summary).font(.body).textSelection(.enabled)
+            Text(summary).font(PanelTheme.bodyText).textSelection(.enabled)
             if !details.isEmpty {
-                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
+                Grid(alignment: .leading, horizontalSpacing: PanelTheme.sectionGap, verticalSpacing: PanelTheme.hairGap)
+                {
                     ForEach(Array(details.enumerated()), id: \.offset) { _, detail in
                         GridRow(alignment: .top) {
-                            Text(detail.label).font(.caption).foregroundStyle(.secondary)
-                            Text(detail.value).font(.caption).textSelection(.enabled)
+                            Text(detail.label).font(PanelTheme.caption).foregroundStyle(.secondary)
+                            Text(detail.value).font(PanelTheme.caption).textSelection(.enabled)
                         }
                     }
                 }
             }
             ForEach(warnings, id: \.self) { warning in
-                Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                Label(warning, systemImage: "exclamationmark.triangle").font(PanelTheme.caption).foregroundStyle(
+                    PanelTheme.warning)
             }
             Text("Estimate: \(ApprovalCardView.estimateText(request.estimate))")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(PanelTheme.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Deny", role: .cancel, action: onDeny).keyboardShortcut(.cancelAction)
                 Button(approveTitle, action: onApprove).keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
             }
         }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(PanelTheme.cardInset)
+        .background(PanelTheme.cardMaterial, in: RoundedRectangle(cornerRadius: PanelTheme.cardRadius))
         .accessibilityIdentifier("approval-card-\(request.id)")
     }
 }
@@ -139,7 +141,7 @@ public struct ApprovalStackView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: PanelTheme.sectionGap) {
             ForEach(center.requests) { request in
                 ApprovalCardView(
                     request: request,
@@ -147,7 +149,7 @@ public struct ApprovalStackView: View {
                     onDeny: { Task { await center.deny(request) } })
             }
             if center.requests.isEmpty {
-                Text("No approvals pending").font(.caption).foregroundStyle(.secondary)
+                Text("No approvals pending").font(PanelTheme.caption).foregroundStyle(.secondary)
             }
         }
         .task { await center.start() }

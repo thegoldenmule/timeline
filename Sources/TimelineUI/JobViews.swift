@@ -139,18 +139,18 @@ public struct JobProgressView: View {
     private var stateText: String { JobProgressView.stateText(entry) }
 
     public var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: PanelTheme.barInsetH) {
+            VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
                 HStack {
-                    Text(entry.label).font(.subheadline).lineLimit(1)
-                    Text(entry.kind.rawValue).font(.caption2).foregroundStyle(.secondary)
+                    Text(entry.label).font(PanelTheme.rowTitle).lineLimit(1)
+                    Text(entry.kind.rawValue).font(PanelTheme.detail).foregroundStyle(.secondary)
                 }
                 if entry.isRunning, let fraction = entry.progress.fraction {
                     ProgressView(value: min(1, max(0, fraction)))
                 } else if entry.isRunning {
                     ProgressView()
                 }
-                Text(stateText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(stateText).font(PanelTheme.caption).foregroundStyle(.secondary).lineLimit(1)
                 if entry.kind == .publish, entry.state == .finished, let outcome = entry.outcome {
                     PublishOutcomeView(outcome: outcome)
                 }
@@ -161,7 +161,7 @@ public struct JobProgressView: View {
                     .buttonStyle(.borderless).help("Cancel")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, PanelTheme.rowGap)
         .accessibilityIdentifier("job-\(entry.id.rawValue)")
     }
 }
@@ -175,21 +175,21 @@ public struct JobList: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
             HStack {
-                Text("Jobs").font(.headline)
+                Text("Jobs").font(PanelTheme.sectionTitle)
                 Spacer()
                 if center.entries.contains(where: { !$0.isRunning }) {
-                    Button("Clear") { center.clearFinished() }.buttonStyle(.borderless).font(.caption)
+                    Button("Clear") { center.clearFinished() }.buttonStyle(.borderless).font(PanelTheme.caption)
                 }
             }
             if center.entries.isEmpty {
-                Text("No jobs").font(.caption).foregroundStyle(.secondary)
+                Text("No jobs").font(PanelTheme.caption).foregroundStyle(.secondary)
             }
             ForEach(center.entries.sorted { $0.isRunning && !$1.isRunning }) { entry in
                 JobProgressView(entry: entry) { center.cancel(entry.id) }
             }
         }
-        .padding(8)
+        .padding(PanelTheme.panelInset)
     }
 }

@@ -39,9 +39,9 @@ public struct HistoryView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: PanelTheme.controlGap) {
             HStack {
-                Text("History").font(.headline)
+                Text("History").font(PanelTheme.sectionTitle)
                 Spacer()
                 Button {
                     Task { await viewModel.undo() }
@@ -63,18 +63,18 @@ public struct HistoryView: View {
                     VStack(alignment: .leading) {
                         Text(row.label).strikethrough(!row.isLive)
                             .foregroundStyle(row.isLive ? .primary : .secondary)
-                        Text("\(ActorLabel.text(row.actor)) · \(row.eventCount) events").font(.caption)
+                        Text("\(ActorLabel.text(row.actor)) · \(row.eventCount) events").font(PanelTheme.caption)
                             .foregroundStyle(.secondary)
                             .help(ActorLabel.detail(row.actor) ?? "")
                     }
                     Spacer()
-                    if row.isUndoTarget { Text("undo").font(.caption2).foregroundStyle(.secondary) }
-                    if row.isRedoTarget { Text("redo").font(.caption2).foregroundStyle(.secondary) }
+                    if row.isUndoTarget { Text("undo").font(PanelTheme.detail).foregroundStyle(.secondary) }
+                    if row.isRedoTarget { Text("redo").font(PanelTheme.detail).foregroundStyle(.secondary) }
                 }
                 .accessibilityIdentifier("history-\(row.id.rawValue)")
             }
             .listStyle(.inset)
         }
-        .padding(8)
+        .padding(PanelTheme.panelInset)
     }
 }
