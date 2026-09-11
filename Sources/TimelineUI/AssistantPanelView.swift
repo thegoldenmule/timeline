@@ -7,7 +7,7 @@ import TimelineCore
 /// The transcript of one `AgentSession`: events folded into display items (tool calls paired with
 /// their results, approvals with their verdicts), the running cost, and `send`.
 @MainActor @Observable
-public final class AgentTranscript {
+public final class AssistantTranscript {
     public enum Item: Identifiable, Sendable, Hashable {
         case turn(index: Int)
         /// What the human sent, echoed so the panel reads as the conversation it is.
@@ -35,6 +35,8 @@ public final class AgentTranscript {
         }
     }
 
+    /// Still an `AgentSession`: the boundary is `Contracts.AgentRuntime`, and above it the name is
+    /// Assistant while at and below it the name is Agent (`docs/design/ui-style.md`).
     public let session: any AgentSession
     public private(set) var items: [Item] = []
     public private(set) var events: [AgentEvent] = []
@@ -157,12 +159,12 @@ public final class AgentTranscript {
 }
 
 /// The transcript of one session: the folded items, approval cards inline, and a status line naming the
-/// cost and whether the assistant is working. The input is `AgentComposerView`, which the app owns so that a
+/// cost and whether the assistant is working. The input is `AssistantComposerView`, which the app owns so that a
 /// message can be composed — and files staged — before any session exists.
-public struct AgentPanelView: View {
-    public let transcript: AgentTranscript
+public struct AssistantPanelView: View {
+    public let transcript: AssistantTranscript
 
-    public init(transcript: AgentTranscript) {
+    public init(transcript: AssistantTranscript) {
         self.transcript = transcript
     }
 
@@ -172,7 +174,7 @@ public struct AgentPanelView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(transcript.items) { item in
-                            AgentItemView(item: item, transcript: transcript)
+                            AssistantItemView(item: item, transcript: transcript)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(item.id)
                         }
@@ -192,14 +194,14 @@ public struct AgentPanelView: View {
 }
 
 /// The one-line state of a session: working or done, what it cost, and Stop while it runs.
-public struct AgentStatusBar: View {
-    public let transcript: AgentTranscript?
+public struct AssistantStatusBar: View {
+    public let transcript: AssistantTranscript?
     public var isStarting: Bool
     public var onStop: () -> Void
     public var onClear: (() -> Void)?
 
     public init(
-        transcript: AgentTranscript?, isStarting: Bool = false, onStop: @escaping () -> Void,
+        transcript: AssistantTranscript?, isStarting: Bool = false, onStop: @escaping () -> Void,
         onClear: (() -> Void)? = nil
     ) {
         self.transcript = transcript
@@ -244,9 +246,9 @@ public struct AgentStatusBar: View {
     }
 }
 
-struct AgentItemView: View {
-    let item: AgentTranscript.Item
-    let transcript: AgentTranscript
+struct AssistantItemView: View {
+    let item: AssistantTranscript.Item
+    let transcript: AssistantTranscript
     @State private var expanded = false
 
     var body: some View {
@@ -273,18 +275,19 @@ struct AgentItemView: View {
             DisclosureGroup(isExpanded: $expanded) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Input").font(.caption2).foregroundStyle(.secondary)
-                    Text(AgentItemView.pretty(input)).font(.system(.caption2, design: .monospaced)).textSelection(
+                    Text(AssistantItemView.pretty(input)).font(.system(.caption2, design: .monospaced)).textSelection(
                         .enabled)
                     if let output {
                         Text(isError ? "Error" : "Result").font(.caption2).foregroundStyle(isError ? .red : .secondary)
-                        Text(AgentItemView.pretty(output)).font(.system(.caption2, design: .monospaced)).textSelection(
-                            .enabled)
+                        Text(AssistantItemView.pretty(output)).font(.system(.caption2, design: .monospaced))
+                            .textSelection(
+                                .enabled)
                     }
                 }
                 .padding(.top, 2)
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: AgentItemView.toolSymbol(output: output, isError: isError))
+                    Image(systemName: AssistantItemView.toolSymbol(output: output, isError: isError))
                         .foregroundStyle(isError ? Color.red : Color.secondary)
                     Text(name).font(.system(.caption, design: .monospaced))
                     if output == nil { Text("running").font(.caption2).foregroundStyle(.tertiary) }
@@ -294,8 +297,8 @@ struct AgentItemView: View {
         case .approval(let request, let verdict):
             if let verdict {
                 Label(
-                    "\(request.tool): \(AgentItemView.verdictText(verdict))",
-                    systemImage: AgentItemView.isApproved(verdict) ? "hand.thumbsup" : "hand.raised"
+                    "\(request.tool): \(AssistantItemView.verdictText(verdict))",
+                    systemImage: AssistantItemView.isApproved(verdict) ? "hand.thumbsup" : "hand.raised"
                 )
                 .font(.caption2).foregroundStyle(.secondary)
             } else {
@@ -322,8 +325,10 @@ struct AgentItemView: View {
             Label(failure.message, systemImage: "exclamationmark.octagon")
                 .font(.caption).foregroundStyle(.red).textSelection(.enabled)
         case .raw(_, let value):
-            Text(AgentItemView.pretty(value)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
-                .lineLimit(3)
+            Text(AssistantItemView.pretty(value)).font(.system(.caption2, design: .monospaced)).foregroundStyle(
+                .tertiary
+            )
+            .lineLimit(3)
         }
     }
 

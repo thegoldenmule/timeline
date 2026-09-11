@@ -152,8 +152,8 @@ struct JobTests {
 }
 
 @MainActor
-@Suite("Agent panel")
-struct AgentPanelTests {
+@Suite("Assistant panel")
+struct AssistantPanelTests {
     @Test func transcriptFoldsEventsAndAnswersApprovals() async throws {
         let request = Fixtures.approvalRequest()
         let script: [AgentEvent] = [
@@ -171,7 +171,7 @@ struct AgentPanelTests {
             goal: "export", tools: Fixtures.toolAccess, policy: Fixtures.runtimePolicy)
         let gate = FakeApprovalGate(policy: .standard)
         let center = ApprovalCenter(gate: gate)
-        let transcript = AgentTranscript(session: session, approvalCenter: center)
+        let transcript = AssistantTranscript(session: session, approvalCenter: center)
         transcript.start()
 
         #expect(await eventually { !transcript.pendingApprovals.isEmpty })
@@ -213,7 +213,7 @@ struct AgentPanelTests {
                 transcript.items.contains { if case .text(_, "Follow-up.") = $0 { return true } else { return false } }
             })
         await transcript.waitUntilFinished()
-        let panel = AgentPanelView(transcript: transcript)
+        let panel = AssistantPanelView(transcript: transcript)
         #expect(ImageRenderer(content: panel.frame(width: 400, height: 500)).cgImage != nil)
     }
 
@@ -221,7 +221,7 @@ struct AgentPanelTests {
         let runtime = FakeAgentRuntime(script: [.turnStarted(index: 1), .approvalRequested(Fixtures.approvalRequest())])
         let session = try await runtime.startSession(
             goal: "x", tools: Fixtures.toolAccess, policy: Fixtures.runtimePolicy)
-        let transcript = AgentTranscript(session: session)
+        let transcript = AssistantTranscript(session: session)
         transcript.start()
         #expect(await eventually { !transcript.pendingApprovals.isEmpty })
         await transcript.cancel()
@@ -302,12 +302,12 @@ struct InspectorTests {
     }
 }
 
-/// Files staged on the agent composer are handed over as paths and nothing else: no import runs, the
+/// Files staged on the assistant composer are handed over as paths and nothing else: no import runs, the
 /// chips can be taken back off before Send, and the composed message says plainly that nothing was
 /// imported.
 @MainActor
-@Suite("Agent composer")
-struct AgentComposerTests {
+@Suite("Assistant composer")
+struct AssistantComposerTests {
     private func item(_ name: String, hash: String = "sha256-cam", project: ProjectID? = nil, assetId: AssetID? = "a1")
         -> LibraryDragItem
     {
@@ -316,8 +316,8 @@ struct AgentComposerTests {
             hasAudio: true, assetId: assetId, projectId: project, url: URL(fileURLWithPath: "/tmp/Library/\(name)"))
     }
 
-    private func composer(missing: Set<String> = []) -> AgentComposer {
-        AgentComposer(fileExists: { !missing.contains($0.lastPathComponent) })
+    private func composer(missing: Set<String> = []) -> AssistantComposer {
+        AssistantComposer(fileExists: { !missing.contains($0.lastPathComponent) })
     }
 
     @Test func stagedFilesAreListedInTheMessageAndNothingIsImported() throws {
@@ -379,7 +379,7 @@ struct AgentComposerTests {
 
     /// A pasteboard carrying the given types, named so the test never touches the general pasteboard.
     private func pasteboard(library: [LibraryDragItem]? = nil, files: [URL] = []) throws -> NSPasteboard {
-        let board = NSPasteboard(name: NSPasteboard.Name("agent-drop-tests-\(UUID().uuidString)"))
+        let board = NSPasteboard(name: NSPasteboard.Name("assistant-drop-tests-\(UUID().uuidString)"))
         board.clearContents()
         if let library {
             board.setData(try LibraryDragPayload(items: library).data(), forType: LibraryDragPayload.pasteboardType)
@@ -395,13 +395,13 @@ struct AgentComposerTests {
     @Test func aDropStagesLibraryRowsAndFileURLs() throws {
         #expect(UTType(LibraryDragPayload.typeIdentifier) == nil)
         #expect(!LibraryDragPayload.contentType.conforms(to: .data))
-        #expect(AgentComposer.dropTypes == [LibraryDragPayload.pasteboardType, .fileURL])
+        #expect(AssistantComposer.dropTypes == [LibraryDragPayload.pasteboardType, .fileURL])
 
         let c = composer()
         // The pane's own drop target, driven exactly as AppKit drives it during a drag.
-        let view = AgentDropTargetView(composer: c)
+        let view = AssistantDropTargetView(composer: c)
         // AppKit keeps its own order; what matters is that both types are registered.
-        #expect(Set(view.registeredDraggedTypes) == Set(AgentComposer.dropTypes))
+        #expect(Set(view.registeredDraggedTypes) == Set(AssistantComposer.dropTypes))
 
         // A library row: the pane highlights while the drag is over it and stages the row on the drop.
         let rows = try FakeDraggingInfo(
@@ -440,7 +440,7 @@ struct AgentComposerTests {
         let c = composer()
         let row = item("cam.mov")
         c.resolve = { url in url.lastPathComponent == "cam.mov" ? row : nil }
-        let view = AgentDropTargetView(composer: c)
+        let view = AssistantDropTargetView(composer: c)
 
         let board = try pasteboard(files: [try #require(row.url)])
         board.setData(Data(), forType: LibraryDragPayload.pasteboardType)
@@ -463,14 +463,14 @@ struct AgentComposerTests {
         c.add(urls: [URL(fileURLWithPath: "/tmp/notes.txt")])
         c.draft = "Cut these together"
         var sent: [String] = []
-        let view = AgentComposerView(composer: c, onSend: { sent.append($0) }, onAttach: {})
+        let view = AssistantComposerView(composer: c, onSend: { sent.append($0) }, onAttach: {})
         #expect(ImageRenderer(content: view.frame(width: 420, height: 160)).cgImage != nil)
         #expect(sent.isEmpty)
 
         let runtime = FakeAgentRuntime(script: [.turnStarted(index: 1), .assistantText("On it.")])
         let session = try await runtime.startSession(
             goal: "cut", tools: Fixtures.toolAccess, policy: Fixtures.runtimePolicy)
-        let transcript = AgentTranscript(session: session)
+        let transcript = AssistantTranscript(session: session)
         transcript.appendUserMessage(c.message)
         transcript.start()
         #expect(await eventually { transcript.items.contains { if case .text = $0 { true } else { false } } })
@@ -480,7 +480,7 @@ struct AgentComposerTests {
             return
         }
         #expect(echoed.contains("/tmp/Library/cam.mov"))
-        let bar = AgentStatusBar(transcript: transcript, onStop: {}, onClear: {})
+        let bar = AssistantStatusBar(transcript: transcript, onStop: {}, onClear: {})
         #expect(ImageRenderer(content: bar.frame(width: 420, height: 24)).cgImage != nil)
     }
 }

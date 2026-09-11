@@ -653,13 +653,13 @@ struct AgentSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AgentStatusBar(
+            AssistantStatusBar(
                 transcript: agent.transcript, isStarting: agent.isStarting,
                 onStop: { model.perform { await agent.cancel() } },
                 onClear: { agent.newSession() })
             Divider()
             if let transcript = agent.transcript {
-                AgentPanelView(transcript: transcript)
+                AssistantPanelView(transcript: transcript)
             } else {
                 ContentUnavailableView {
                     Label("No session yet", systemImage: "sparkles")
@@ -672,14 +672,14 @@ struct AgentSection: View {
                 Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
             }
-            AgentComposerView(
+            AssistantComposerView(
                 composer: agent.composer, isBusy: agent.isRunning || agent.isStarting,
                 placeholder: agent.transcript == nil
                     ? "Tell the assistant what to do — drop clips anywhere here" : "Message the assistant",
                 onSend: { model.sendToAgent($0) }, onAttach: { model.presentAttachPanel() })
         }
         // The whole panel takes the drop, not just the message box.
-        .agentAttachmentTarget(agent.composer)
+        .assistantAttachmentTarget(agent.composer)
     }
 }
 

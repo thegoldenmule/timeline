@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 /// One file staged for the next assistant message. Nothing is imported and no command is applied: the
 /// message names the path and the assistant decides for itself whether to import it
 /// (`docs/design/integration.md`, the assistant panel).
-public struct AgentAttachment: Identifiable, Hashable, Sendable {
+public struct AssistantAttachment: Identifiable, Hashable, Sendable {
     /// The path, standardized, so the same file cannot be staged twice.
     public var id: String { url.path }
     public var url: URL
@@ -69,9 +69,9 @@ public struct AgentAttachment: Identifiable, Hashable, Sendable {
 /// app across sessions, so attachments survive a session that finishes and the next message starts a new
 /// one. Staging is deliberately inert — `MediaImporter` is never reached from here.
 @MainActor @Observable
-public final class AgentComposer {
+public final class AssistantComposer {
     public var draft = ""
-    public private(set) var attachments: [AgentAttachment] = []
+    public private(set) var attachments: [AssistantAttachment] = []
     /// A drag is over the assistant panel. The whole panel is the target — the transcript as much as the
     /// message box — and the box draws the highlight wherever in the pane the pointer is.
     public var isDropTargeted = false
@@ -111,7 +111,7 @@ public final class AgentComposer {
         add(
             libraryItems.compactMap { item in
                 guard let url = item.url else { return nil }
-                return AgentAttachment(
+                return AssistantAttachment(
                     url: url, displayName: item.displayName, kind: item.kind, duration: item.duration,
                     contentHash: item.contentHash, isInProject: item.assetId != nil && item.projectId == nil,
                     isMissing: !fileExists(url))
@@ -122,21 +122,21 @@ public final class AgentComposer {
     /// reads scripts and notes as happily as it imports media.
     @discardableResult
     public func add(urls: [URL]) -> Int {
-        var staged: [AgentAttachment] = []
+        var staged: [AssistantAttachment] = []
         var rows: [LibraryDragItem] = []
         for url in urls {
             if let row = resolve?(url) {
                 rows.append(row)
             } else {
                 staged.append(
-                    AgentAttachment(url: url, kind: MediaFileTypes.kind(of: url), isMissing: !fileExists(url)))
+                    AssistantAttachment(url: url, kind: MediaFileTypes.kind(of: url), isMissing: !fileExists(url)))
             }
         }
         return add(libraryItems: rows) + add(staged)
     }
 
     @discardableResult
-    private func add(_ staged: [AgentAttachment]) -> Int {
+    private func add(_ staged: [AssistantAttachment]) -> Int {
         var added = 0
         for attachment in staged where !attachments.contains(where: { $0.id == attachment.id }) {
             attachments.append(attachment)
@@ -145,7 +145,7 @@ public final class AgentComposer {
         return added
     }
 
-    public func remove(_ id: AgentAttachment.ID) {
+    public func remove(_ id: AssistantAttachment.ID) {
         attachments.removeAll { $0.id == id }
     }
 
@@ -157,7 +157,7 @@ public final class AgentComposer {
 
     /// The message the assistant receives: what was typed, then the staged paths under a line that says
     /// plainly that nothing was imported.
-    public static func message(draft: String, attachments: [AgentAttachment]) -> String {
+    public static func message(draft: String, attachments: [AssistantAttachment]) -> String {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !attachments.isEmpty else { return text }
         let header =
@@ -167,7 +167,7 @@ public final class AgentComposer {
         return text.isEmpty ? "\(header)\n\(lines)" : "\(text)\n\n\(header)\n\(lines)"
     }
 
-    public var message: String { AgentComposer.message(draft: draft, attachments: attachments) }
+    public var message: String { AssistantComposer.message(draft: draft, attachments: attachments) }
 
     /// The message to send, clearing the composer. Nil when there was nothing to send.
     public func take() -> String? {
@@ -209,13 +209,13 @@ public final class AgentComposer {
     /// knows the duration, the kind, and which project the media came from. False when it held neither.
     @discardableResult
     public func stage(_ pasteboard: NSPasteboard) -> Bool {
-        let items = AgentComposer.libraryItems(on: pasteboard)
+        let items = AssistantComposer.libraryItems(on: pasteboard)
         LibraryDragPayload.endInFlight()
         if !items.isEmpty {
             add(libraryItems: items)
             return true
         }
-        let urls = AgentComposer.fileURLs(on: pasteboard)
+        let urls = AssistantComposer.fileURLs(on: pasteboard)
         guard !urls.isEmpty else { return false }
         add(urls: urls)
         return true
@@ -225,7 +225,7 @@ public final class AgentComposer {
 
     /// The poster for a chip, or nil while it is being fetched. Only a staged library row has one: a file
     /// from the Finder has no content hash, and the chip draws its kind instead.
-    public func poster(for attachment: AgentAttachment, height: Int = 32) -> CGImage? {
+    public func poster(for attachment: AssistantAttachment, height: Int = 32) -> CGImage? {
         _ = posterGeneration  // observed, so a landed fetch redraws the chip
         guard !attachment.isMissing, let hash = attachment.contentHash, let kind = attachment.kind else { return nil }
         return thumbnails.poster(
@@ -236,8 +236,8 @@ public final class AgentComposer {
 
 /// The assistant's input: the staged attachments, the message field, and Send. Files dropped here are staged,
 /// never imported — the library pane and the timeline are where a drop imports.
-public struct AgentComposerView: View {
-    public let composer: AgentComposer
+public struct AssistantComposerView: View {
+    public let composer: AssistantComposer
     /// A turn is in flight; Send waits rather than queueing a second message.
     public var isBusy: Bool
     public var placeholder: String
@@ -248,7 +248,7 @@ public struct AgentComposerView: View {
     @FocusState private var isFocused: Bool
 
     public init(
-        composer: AgentComposer, isBusy: Bool = false, placeholder: String = "Message the assistant",
+        composer: AssistantComposer, isBusy: Bool = false, placeholder: String = "Message the assistant",
         onSend: @escaping (String) -> Void, onAttach: (() -> Void)? = nil
     ) {
         self.composer = composer
@@ -311,7 +311,7 @@ public struct AgentComposerView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
                     ForEach(composer.attachments) { attachment in
-                        AgentAttachmentChip(composer: composer, attachment: attachment) {
+                        AssistantAttachmentChip(composer: composer, attachment: attachment) {
                             composer.remove(attachment.id)
                         }
                     }
@@ -331,9 +331,9 @@ public struct AgentComposerView: View {
 }
 
 /// One staged file: its poster or kind, its name, and the button that unstages it.
-struct AgentAttachmentChip: View {
-    let composer: AgentComposer
-    let attachment: AgentAttachment
+struct AssistantAttachmentChip: View {
+    let composer: AssistantComposer
+    let attachment: AssistantAttachment
     let onRemove: () -> Void
 
     @State private var isHovering = false
@@ -398,22 +398,22 @@ struct AgentAttachmentChip: View {
 /// finds a drag's destination by hit-testing the pointer and walking *up* the superview chain, so a
 /// registered view merely sitting behind the content is never reached: it has to be the content's
 /// ancestor, which is what this is.
-public struct AgentDropHost<Content: View>: NSViewRepresentable {
-    public let composer: AgentComposer
+public struct AssistantDropHost<Content: View>: NSViewRepresentable {
+    public let composer: AssistantComposer
     public let content: Content
 
-    public init(composer: AgentComposer, @ViewBuilder content: () -> Content) {
+    public init(composer: AssistantComposer, @ViewBuilder content: () -> Content) {
         self.composer = composer
         self.content = content()
     }
 
-    public func makeNSView(context: Context) -> AgentDropTargetView {
-        let view = AgentDropTargetView(composer: composer)
+    public func makeNSView(context: Context) -> AssistantDropTargetView {
+        let view = AssistantDropTargetView(composer: composer)
         view.install(NSHostingView(rootView: AnyView(decorated)))
         return view
     }
 
-    public func updateNSView(_ view: AgentDropTargetView, context: Context) {
+    public func updateNSView(_ view: AssistantDropTargetView, context: Context) {
         view.composer = composer
         view.hosting?.rootView = AnyView(decorated)
     }
@@ -436,23 +436,23 @@ public struct AgentDropHost<Content: View>: NSViewRepresentable {
 }
 
 extension View {
-    /// See `AgentDropHost`.
-    public func agentAttachmentTarget(_ composer: AgentComposer) -> some View {
-        AgentDropHost(composer: composer) { self }
+    /// See `AssistantDropHost`.
+    public func assistantAttachmentTarget(_ composer: AssistantComposer) -> some View {
+        AssistantDropHost(composer: composer) { self }
     }
 }
 
 /// The pane's drop target: an `NSView` registered for the attachment types that hosts the pane's own
 /// content, so AppKit's hit-test-then-walk-up search for a drag destination reaches it from anywhere in
-/// the pane. See `AgentDropHost`.
-public final class AgentDropTargetView: NSView {
-    public weak var composer: AgentComposer?
+/// the pane. See `AssistantDropHost`.
+public final class AssistantDropTargetView: NSView {
+    public weak var composer: AssistantComposer?
     var hosting: NSHostingView<AnyView>?
 
-    public init(composer: AgentComposer?) {
+    public init(composer: AssistantComposer?) {
         self.composer = composer
         super.init(frame: .zero)
-        registerForDraggedTypes(AgentComposer.dropTypes)
+        registerForDraggedTypes(AssistantComposer.dropTypes)
     }
 
     @available(*, unavailable)
@@ -475,7 +475,7 @@ public final class AgentDropTargetView: NSView {
     }
 
     private func operation(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard AgentComposer.accepts(sender.draggingPasteboard) else {
+        guard AssistantComposer.accepts(sender.draggingPasteboard) else {
             composer?.isDropTargeted = false
             return []
         }

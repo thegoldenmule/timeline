@@ -65,7 +65,7 @@ final class ToolConsole {
 
 // MARK: - Assistant
 
-/// Runs one embedded assistant session at a time: TimelineUI's `AgentTranscript` folds the events and
+/// Runs one embedded assistant session at a time: TimelineUI's `AssistantTranscript` folds the events and
 /// hands approvals to the shared `ApprovalCenter`; the runtime is the Claude Code sidecar (which calls
 /// the tools over MCP itself) or the scripted fallback with its client-side tool loop. The composer is
 /// the console's, not the session's, so a message — and the files staged with it — outlives the session
@@ -74,15 +74,15 @@ final class ToolConsole {
 final class AgentConsole {
     let services: AppServices
     let approvals: ApprovalCenter
-    let composer: AgentComposer
-    private(set) var transcript: AgentTranscript?
+    let composer: AssistantComposer
+    private(set) var transcript: AssistantTranscript?
     private(set) var error: String?
     private(set) var isStarting = false
 
     init(services: AppServices, approvals: ApprovalCenter) {
         self.services = services
         self.approvals = approvals
-        self.composer = AgentComposer(thumbnails: services.thumbnails)
+        self.composer = AssistantComposer(thumbnails: services.thumbnails)
     }
 
     var isRunning: Bool { transcript.map { !$0.isFinished } ?? false }
@@ -113,7 +113,7 @@ final class AgentConsole {
         do {
             let session = try await services.agentRuntime.startSession(
                 goal: goal, tools: services.mcp.toolAccess, policy: services.runtimePolicy)
-            let transcript = AgentTranscript(session: session, approvalCenter: approvals)
+            let transcript = AssistantTranscript(session: session, approvalCenter: approvals)
             transcript.appendUserMessage(goal)
             transcript.start()
             self.transcript = transcript
