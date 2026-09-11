@@ -1,5 +1,6 @@
 import Contracts
 import ContractsTestSupport
+import CoreGraphics
 import Foundation
 import Testing
 import TimelineCore
@@ -59,23 +60,41 @@ struct LibraryThumbnailCacheTests {
         #expect(cache.fetchCount == 2)
     }
 
-    /// A poster asked for at its point height is half the resolution the screen draws it at, so every
-    /// row came out soft on a Retina display. The request is in pixels.
-    @Test func aPosterIsAskedForInPixelsNotPoints() async throws {
-        #expect(MediaLibraryRow.posterPixelHeight(1) == Int(PanelTheme.posterSize.height))
-        #expect(MediaLibraryRow.posterPixelHeight(2) == Int(PanelTheme.posterSize.height) * 2)
-        #expect(MediaLibraryRow.posterPixelHeight(3) == Int(PanelTheme.posterSize.height) * 3)
-        #expect(AssistantAttachmentChip.posterPixelHeight(2) == Int(PanelTheme.chipPosterSize.height) * 2)
+    /// Two bugs in one place. A poster asked for at its *point* height is half the resolution a Retina
+    /// screen draws it at; and a poster asked for by height alone is a third of the width a portrait
+    /// clip needs, because `.fill` magnifies whatever does not already cover the box.
+    @Test func aPosterIsAskedForBigEnoughToFillItsBox() async throws {
+        let box = PanelTheme.posterSize  // 64 x 36
+        let landscape: CGFloat = 16.0 / 9.0
+        let portrait: CGFloat = 9.0 / 16.0
 
-        // And the request reaches the provider at that height, so the cache keys two screens apart.
+        // Landscape: the height is the binding side, and pixels are twice the points on Retina.
+        #expect(PosterGeometry.pixelHeight(box: box, aspect: landscape, displayScale: 1) == 36)
+        #expect(PosterGeometry.pixelHeight(box: box, aspect: landscape, displayScale: 2) == 72)
+        // Portrait: the *width* is the binding side. 64 / (9/16) = 114, not 36.
+        #expect(PosterGeometry.pixelHeight(box: box, aspect: portrait, displayScale: 1) == 114)
+        #expect(PosterGeometry.pixelHeight(box: box, aspect: portrait, displayScale: 2) == 228)
+        // An unknown shape assumes the narrowest, so the box is covered whatever turns up.
+        #expect(
+            PosterGeometry.pixelHeight(box: box, aspect: nil, displayScale: 1)
+                == PosterGeometry.pixelHeight(box: box, aspect: portrait, displayScale: 1))
+
+        // A clip shot sideways is upended by the generator, so its aspect is too.
+        var sideways = Fixtures.asset(name: "IMG_1581.MOV")
+        sideways.probe = Probe(width: 1920, height: 1080, rotation: 90)
+        #expect(try #require(sideways.displayAspectRatio).isApproximately(1080.0 / 1920.0))
+        sideways.probe = Probe(width: 1920, height: 1080, rotation: 0)
+        #expect(try #require(sideways.displayAspectRatio).isApproximately(1920.0 / 1080.0))
+
+        // And the request reaches the provider at that height.
         let provider = FakeThumbnailProvider()
         let cache = LibraryThumbnailCache(thumbnails: provider)
-        let retina = MediaLibraryRow.posterPixelHeight(2)
-        _ = cache.poster(for: media(), kind: .video, duration: duration, height: retina)
+        let wanted = PosterGeometry.pixelHeight(box: box, aspect: portrait, displayScale: 2)
+        _ = cache.poster(for: media(), kind: .video, duration: duration, height: wanted)
         await cache.drain()
-        #expect(provider.calls.first?.height == retina)
-        let image = try #require(cache.poster(for: media(), kind: .video, duration: duration, height: retina))
-        #expect(image.height == retina, "72 px of picture for a 36 pt row")
+        #expect(provider.calls.first?.height == wanted)
+        let image = try #require(cache.poster(for: media(), kind: .video, duration: duration, height: wanted))
+        #expect(image.height == wanted)
     }
 
     @Test func twoRequestsForTheSameItemShareOneFetch() async throws {
@@ -123,5 +142,13 @@ struct LibraryThumbnailCacheTests {
         #expect(cache.poster(for: media("sha256-still"), kind: .image, duration: duration) == nil)
         await cache.drain()
         #expect(provider.calls.count == 1)
+    }
+}
+
+extension CGFloat {
+    /// `CGFloat` and `Double` do not compare cleanly through `Optional`, and an aspect ratio never
+    /// needs exactness anyway.
+    func isApproximately(_ other: Double, tolerance: Double = 1e-9) -> Bool {
+        abs(Double(self) - other) < tolerance
     }
 }

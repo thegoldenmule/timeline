@@ -320,7 +320,15 @@ launch with `defaults write TimelineApp panel.<id>.collapsed -bool true`.
   row was on screen: `LibraryThumbnailCache` stored images and in-flight tasks but had nowhere to put
   "there is nothing here". It remembers failures now, and `clear()` forgets them so a rescan retries.
 
-**Every thumbnail was drawn at half resolution.** A poster was asked for at its *point* height — 36 —
+**Every thumbnail was drawn at a fraction of its resolution, for two compounding reasons.** The first
+was points-versus-pixels (below). The second, and much the larger, was that `.fill` scales a picture
+until it covers *both* sides of its box — so for a portrait clip the binding side is the width, not the
+height. A 9:16 frame asked for at a 64x36 box's height comes back **20x36** and is then magnified 3.2x.
+That is why the rows stayed soft on a 1x display too, where the points/pixels bug does not exist at all.
+`PosterGeometry.pixelHeight(box:aspect:displayScale:)` now asks for `box.width / aspect`, from
+`Asset.displayAspectRatio` (rotation-aware — `AVAssetImageGenerator` upends the frame for us).
+
+**And it was drawn at half resolution on top of that.** A poster was asked for at its *point* height — 36 —
 and drawn into a 36 pt box, which is 72 px on a Retina screen. So the picture was stretched to twice its
 size, in the library rows and the composer's attachment chips alike. The height now comes from
 `@Environment(\.displayScale)`, which also picks a 128 px tile off `AVThumbnailProvider`'s ladder

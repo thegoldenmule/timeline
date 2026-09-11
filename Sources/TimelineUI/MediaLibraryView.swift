@@ -496,12 +496,9 @@ struct MediaLibraryRow: View {
 
     private var second: RationalTime { RationalTime(1, 1) }
 
-    private var posterPixelHeight: Int { MediaLibraryRow.posterPixelHeight(displayScale) }
-
-    /// How tall the picture behind a row has to be, in pixels. A poster asked for at its *point*
-    /// height is half the resolution a Retina screen draws it at, which is what made every row soft.
-    static func posterPixelHeight(_ displayScale: CGFloat) -> Int {
-        Int((PanelTheme.posterSize.height * max(1, displayScale)).rounded())
+    private var posterPixelHeight: Int {
+        PosterGeometry.pixelHeight(
+            box: PanelTheme.posterSize, aspect: row.asset.displayAspectRatio, displayScale: displayScale)
     }
 
     /// What a row draws where its poster will go.

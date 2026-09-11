@@ -383,11 +383,10 @@ struct AssistantAttachmentChip: View {
         .clipShape(RoundedRectangle(cornerRadius: PanelTheme.posterRadius))
     }
 
-    private var posterPixelHeight: Int { AssistantAttachmentChip.posterPixelHeight(displayScale) }
-
-    /// See `MediaLibraryRow.posterPixelHeight(_:)`.
-    static func posterPixelHeight(_ displayScale: CGFloat) -> Int {
-        Int((PanelTheme.chipPosterSize.height * max(1, displayScale)).rounded())
+    /// A staged file's shape is not known — it may not even be in the library yet — so the chip asks
+    /// for enough to cover the box whatever turns up.
+    private var posterPixelHeight: Int {
+        PosterGeometry.pixelHeight(box: PanelTheme.chipPosterSize, aspect: nil, displayScale: displayScale)
     }
 
     private var symbol: String {

@@ -180,12 +180,21 @@ rule a reviewer can grep rather than argue symbol by symbol.
 
 ## Pictures
 
-A thumbnail is asked for in **pixels**, never in points. A 36 pt poster row is 72 px of screen on a
-Retina Mac, and an image fetched at 36 px and drawn into it is stretched to twice its size — which is
-what made every row in the library look soft. Take the height from `@Environment(\.displayScale)`
-(`MediaLibraryRow.posterPixelHeight(_:)`), and pass that same scale to `Image(decorative:scale:)`.
-`AVThumbnailProvider`'s tile ladder is in pixels too, so asking for 72 picks a 128 px tile where asking
-for 36 picked a 64 px one.
+A thumbnail is asked for through `PosterGeometry.pixelHeight(box:aspect:displayScale:)`, never by the
+box's height. Two things go wrong otherwise, and they compound:
+
+- **Points are not pixels.** A 36 pt poster row is 72 px of screen on a Retina Mac, so a picture fetched
+  at 36 px is stretched to twice its size. The height comes from `@Environment(\.displayScale)`, and the
+  same scale goes to `Image(decorative:scale:)`.
+- **`.fill` magnifies whatever does not already cover the box.** It scales a picture until it covers
+  *both* sides, so for anything narrower than the box the binding side is the **width**. A 9:16 phone
+  clip scaled to a 64x36 box's height is 20 pt wide — under a third of the box — and gets blown up more
+  than three times. `PosterGeometry` asks for `box.width / aspect` instead, using
+  `Asset.displayAspectRatio` (which accounts for `probe.rotation`, since the generator upends the frame
+  for us) and falling back to 9:16 when the shape is unknown.
+
+`AVThumbnailProvider`'s tile ladder is in pixels too, so a portrait clip asking for 228 picks a 256 px
+tile where asking for 36 picked a 64 px one.
 
 ## Filter controls
 
