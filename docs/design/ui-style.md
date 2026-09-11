@@ -193,8 +193,10 @@ box's height. Two things go wrong otherwise, and they compound:
   `Asset.displayAspectRatio` (which accounts for `probe.rotation`, since the generator upends the frame
   for us) and falling back to 9:16 when the shape is unknown.
 
-`AVThumbnailProvider`'s tile ladder is in pixels too, so a portrait clip asking for 228 picks a 256 px
-tile where asking for 36 picked a 64 px one.
+A poster goes through `ThumbnailProvider.thumbnail(for:at:height:)`, which is one seek and one small
+cached JPEG. It is not `filmstrip(count: 1)`: a zero-length range carries no frame rate to infer, so
+the ladder returns its densest rung and the sheet path renders every tile of it — about a thousand
+frame extractions to draw one row.
 
 ## Filter controls
 

@@ -46,6 +46,13 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
         var columns: Int
     }
 
+    /// One poster: the frame, the height, and nothing else. Separate from `SheetParameters` so a
+    /// poster and a filmstrip never collide in the artifact table.
+    struct PosterParameters: Hashable, Sendable, Codable {
+        var milliseconds: Int
+        var height: Int
+    }
+
     struct SheetParameters: Hashable, Sendable, Codable {
         var fps: Double
         var tileHeight: Int
@@ -69,6 +76,9 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
         public var sheetsGenerated = 0
         public var sheetsLoaded = 0
         public var sheetsMemoized = 0
+        /// A poster taken with one seek, and one read back from the cache.
+        public var postersGenerated = 0
+        public var postersLoaded = 0
     }
 
     struct Sheet: Sendable {
@@ -86,6 +96,63 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
     public var statistics: Stats { stats.withLock { $0 } }
 
     // MARK: ThumbnailProvider
+
+    /// One frame, taken with one seek and kept as its own small artifact.
+    ///
+    /// Not `filmstrip(count: 1)`. A zero-length range carries no frame rate to infer, so the ladder
+    /// hands back its densest rung and the sheet path then renders every tile of a 4 fps sheet — a
+    /// thousand frame extractions to draw one library row. A poster needs a seek and a JPEG.
+    public func thumbnail(for media: MediaReference, at time: RationalTime, height: Int) async throws -> Thumbnail? {
+        if let still = AVThumbnailProvider.still(media.url, height: height) {
+            return Thumbnail(time: time, image: still)
+        }
+        let parameters = PosterParameters(milliseconds: Int((time.seconds * 1000).rounded()), height: height)
+        let paramsHash = try MediaKit.paramsHash(version: AVThumbnailProvider.version, parameters: parameters)
+        if let record = try cache.artifact(contentHash: media.contentHash, kind: .thumbnails, paramsHash: paramsHash),
+            let image = AVThumbnailProvider.loadImage(at: cache.url(for: record))
+        {
+            stats.withLock { $0.postersLoaded += 1 }
+            return Thumbnail(time: time, image: image)
+        }
+
+        let cmTime = CMTime(seconds: max(0, time.seconds), preferredTimescale: 600)
+        let frames = try await generators.frames(
+            for: media.url, times: [cmTime], maxHeight: height,
+            tolerance: CMTime(seconds: 0.25, preferredTimescale: 600))
+        guard let frame = frames.first ?? nil else { return nil }
+        let image = frame.height == height ? frame : AVThumbnailProvider.scaled(frame, toHeight: height)
+
+        let name = "thumbs/poster-h\(height)-t\(parameters.milliseconds)"
+        try? write(image, named: name, contentHash: media.contentHash, url: media.url, paramsHash: paramsHash)
+        stats.withLock { $0.postersGenerated += 1 }
+        return Thumbnail(time: time, image: image)
+    }
+
+    /// Writes one JPEG into the media's artifact directory and records it.
+    private func write(
+        _ image: CGImage, named name: String, contentHash: String, url: URL, paramsHash: String
+    ) throws {
+        let dir = cache.layout.artifactDir(contentHash: contentHash).appendingPathComponent(
+            "thumbs", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let jpegURL = cache.layout.artifactDir(contentHash: contentHash).appendingPathComponent(name + ".jpg")
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        try AVThumbnailProvider.context.writeJPEGRepresentation(
+            of: CIImage(cgImage: image), to: jpegURL, colorSpace: colorSpace,
+            options: [
+                kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: configuration.jpegQuality
+            ])
+        let now = clock.now()
+        try cache.ensureMedia(contentHash: contentHash, url: url, now: now)
+        try cache.recordArtifact(
+            contentHash: contentHash, kind: .thumbnails, paramsHash: paramsHash,
+            path: cache.artifactPath(contentHash: contentHash, name: name + ".jpg"), summary: nil, now: now)
+    }
+
+    static func loadImage(at url: URL) -> CGImage? {
+        guard FileManager.default.fileExists(atPath: url.path), let ci = CIImage(contentsOf: url) else { return nil }
+        return AVThumbnailProvider.context.createCGImage(ci, from: ci.extent)
+    }
 
     public func filmstrip(for media: MediaReference, range: ClosedRange<RationalTime>, count: Int, height: Int)
         async throws -> [Thumbnail]

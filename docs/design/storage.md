@@ -24,7 +24,8 @@ Status: draft for review, 2026-09-08. Scope: single user, single machine, no aut
     sha256/ab/cd/abcd...ef/
       probe.json
       proxy-540p.mp4
-      thumbs/sheet-1fps.jpg, sheet-0.1fps.jpg
+      thumbs/sheet-1fps-h128-000.jpg, sheet-0.1fps-h128-000.jpg   (filmstrips)
+      thumbs/poster-h114-t1000.jpg                                (one frame, for a library row)
       peaks.json                        waveform peaks at 2-3 zoom levels
       onset-8k.f32                      onset envelope for audio alignment
       transcript.json                   words with start/end/confidence/speaker

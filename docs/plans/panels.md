@@ -335,6 +335,14 @@ size, in the library rows and the composer's attachment chips alike. The height 
 instead of a 64 px one. Worth knowing: this machine's main display is a 1x ultrawide and the built-in is
 2x, so the bug is invisible on the ultrawide and obvious on the laptop screen.
 
+**And drawing one row cost a thousand frame extractions.** `thumbnail(for:at:height:)` was only a
+protocol *extension* over `filmstrip(count: 1)`, so `any ThumbnailProvider` could never reach anything
+cheaper. A zero-length range carries no frame rate to infer, so `AVThumbnailProvider` took the ladder's
+densest rung — 4 fps — and rendered a whole sheet of it. `thumbnail` is a contract requirement now (the
+extension stays as the default), and `AVThumbnailProvider` answers it with one seek and one small JPEG
+artifact, `thumbs/poster-h<height>-t<ms>.jpg`. Measured on four minutes of 1080x1920: **1.19 s and 256
+frame extractions, down to 0.049 s and one.** A library that had no sheets before now builds none at all.
+
 **Still to check by hand** (§7): every item there is real. `SkeletonCheck` touches no SwiftUI, so nothing
 automated has drawn the four-column window; the layout arithmetic is covered by `PanelLayoutTests` and
 the chrome only by `ImageRenderer` smoke checks.

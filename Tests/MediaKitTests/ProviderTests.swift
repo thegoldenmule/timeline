@@ -32,6 +32,37 @@ import TimelineCore
         #expect(provider.statistics.sheetsGenerated == 0, "a still never reaches the sheet path")
     }
 
+    /// A poster is one seek and one small JPEG. It used to be `filmstrip(count: 1)`, which reads a
+    /// zero-length range as the ladder's densest rung and renders a whole 4 fps sheet for it.
+    @Test func aPosterIsOneSeekAndIsCachedOnItsOwn() async throws {
+        let lib = try TestLibrary()
+        let clip = try await TestMedia.barcodeCounter(duration: 30, in: lib.media.url, name: "poster")
+        let imported = try await lib.library.importAsset(url: clip.url, mode: .copy)
+        let media = MediaReference(asset: imported.asset, layout: lib.layout)
+        let provider = AVThumbnailProvider(cache: lib.cache, clock: FixedClock())
+
+        let first = try #require(try await provider.thumbnail(for: media, at: RationalTime(1, 1), height: 128))
+        #expect(first.image.height == 128)
+        #expect(provider.statistics.postersGenerated == 1)
+        #expect(provider.statistics.sheetsGenerated == 0, "no sheet is built for one frame")
+
+        // A second provider over the same cache reads the JPEG back rather than seeking again.
+        let again = AVThumbnailProvider(cache: lib.cache, clock: FixedClock())
+        let second = try #require(try await again.thumbnail(for: media, at: RationalTime(1, 1), height: 128))
+        #expect(second.image.height == 128)
+        #expect(again.statistics.postersLoaded == 1)
+        #expect(again.statistics.postersGenerated == 0)
+        #expect(again.statistics.sheetsGenerated == 0)
+
+        // A different height is a different poster, not a reuse of the first.
+        _ = try await again.thumbnail(for: media, at: RationalTime(1, 1), height: 228)
+        #expect(again.statistics.postersGenerated == 1)
+
+        // The filmstrip path still builds sheets; the two do not collide in the artifact table.
+        _ = try await again.filmstrip(for: media, range: .zero...RationalTime(4, 1), count: 8, height: 128)
+        #expect(again.statistics.sheetsGenerated == 1)
+    }
+
     @Test func filmstripCountHeightAndCacheHit() async throws {
         let lib = try TestLibrary()
         let clip = try await TestMedia.barcodeCounter(duration: 4, in: lib.media.url, name: "strip")
