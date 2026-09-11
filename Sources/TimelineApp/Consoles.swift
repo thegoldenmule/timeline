@@ -63,9 +63,9 @@ final class ToolConsole {
     }
 }
 
-// MARK: - Agent
+// MARK: - Assistant
 
-/// Runs one embedded agent session at a time: TimelineUI's `AgentTranscript` folds the events and
+/// Runs one embedded assistant session at a time: TimelineUI's `AgentTranscript` folds the events and
 /// hands approvals to the shared `ApprovalCenter`; the runtime is the Claude Code sidecar (which calls
 /// the tools over MCP itself) or the scripted fallback with its client-side tool loop. The composer is
 /// the console's, not the session's, so a message — and the files staged with it — outlives the session

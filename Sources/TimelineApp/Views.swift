@@ -81,8 +81,8 @@ final class AppModel {
             viewModel: document.viewModel, catalog: services.catalog, layout: services.layout,
             thumbnails: services.thumbnails)
         self.library = library
-        // A library drag reaches the agent pane as a bare file URL; the panel is what turns it back into
-        // a row, so the chip keeps its poster and duration.
+        // A library drag reaches the assistant panel as a bare file URL; the library is what turns it back
+        // into a row, so the chip keeps its poster and duration.
         agent?.composer.resolve = { [weak library] url in library?.dragItem(forPath: url.path) }
         Task { @MainActor in await library.load() }
     }
@@ -271,20 +271,20 @@ final class AppModel {
         perform { _ = try await tools.call("render_export", input: ToolInput(["preset": "reel9x16"])) }
     }
 
-    /// The agent composer's Send: the first message starts the session, later ones continue it.
+    /// The assistant composer's Send: the first message starts the session, later ones continue it.
     func sendToAgent(_ message: String) {
         guard let agent else { return }
         perform { try await agent.send(message) }
     }
 
-    /// Stages files for the next agent message. Unlike every other panel in the window this imports
-    /// nothing: the agent is handed the paths and decides what to do with them.
+    /// Stages files for the next assistant message. Unlike every other panel in the window this imports
+    /// nothing: the assistant is handed the paths and decides what to do with them.
     func presentAttachPanel() {
         guard let agent else { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.message = "Attach files to the next agent message — nothing is imported"
+        panel.message = "Attach files to the next assistant message — nothing is imported"
         panel.prompt = "Attach"
         if panel.runModal() == .OK { agent.composer.add(urls: panel.urls) }
     }
@@ -423,7 +423,7 @@ struct EditorView: View {
         ToolbarItemGroup {
             // No `.keyboardShortcut`: SwiftUI installs those as key equivalents, which AppKit dispatches
             // before `keyDown` reaches the first responder, so a bare "c" would arm the razor while the
-            // user was typing in the agent composer. Every timeline key lives in `TimelineMetalView`.
+            // user was typing in the assistant composer. Every timeline key lives in `TimelineMetalView`.
             Picker("Tool", selection: activeTool) {
                 ForEach(TimelineTool.allCases, id: \.self) { tool in
                     Label(tool == .razor ? "Razor" : "Select", systemImage: tool.symbolName).tag(tool)
@@ -493,7 +493,7 @@ struct EditorView: View {
 }
 
 /// The last tool the *window* called — Analyze, Align, Export, Publish — with its structured answer,
-/// collapsed until it is asked for. The agent's calls are not here: it reaches the MCP host itself and
+/// collapsed until it is asked for. The assistant's calls are not here: it reaches the MCP host itself and
 /// its calls are folded into the transcript. The section is hidden until a control has called something.
 struct ToolSection: View {
     let tools: ToolConsole
@@ -518,7 +518,7 @@ struct ToolSection: View {
                 Text(tools.lastTool).font(.system(.caption, design: .monospaced))
                 Spacer(minLength: 0)
             }
-            .help("The last tool this window called; the agent's calls are in its transcript")
+            .help("The last tool this window called; the assistant's calls are in its transcript")
         }
         .padding(8)
     }
@@ -634,8 +634,8 @@ struct MCPSection: View {
             let a = services.agentAvailability
             Text(
                 services.agentIsFallback
-                    ? "Embedded agent: scripted fallback (\(a.detail ?? "claude not usable"))"
-                    : "Embedded agent: Claude Code \(a.version ?? "") (\(a.detail ?? ""))"
+                    ? "Embedded assistant: scripted fallback (\(a.detail ?? "claude not usable"))"
+                    : "Embedded assistant: Claude Code \(a.version ?? "") (\(a.detail ?? ""))"
             )
             .font(.caption).foregroundStyle(.secondary)
             Text("Library root: \(services.layout.root.path)").font(.caption2).foregroundStyle(.secondary)
@@ -644,9 +644,9 @@ struct MCPSection: View {
     }
 }
 
-/// The agent pane: what the session has said so far, and the composer under it. There is no "start"
-/// control — the first message starts the session — and files dropped on the composer are staged, not
-/// imported.
+/// The assistant panel: what the session has said so far, and the composer under it. There is no
+/// "start" control — the first message starts the session — and files dropped on the composer are
+/// staged, not imported.
 struct AgentSection: View {
     let agent: AgentConsole
     let model: AppModel
@@ -664,7 +664,7 @@ struct AgentSection: View {
                 ContentUnavailableView {
                     Label("No session yet", systemImage: "sparkles")
                 } description: {
-                    Text("Say what you want done. Drop clips anywhere in this pane to hand over their paths.")
+                    Text("Say what you want done. Drop clips anywhere in this panel to hand the assistant their paths.")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -675,10 +675,10 @@ struct AgentSection: View {
             AgentComposerView(
                 composer: agent.composer, isBusy: agent.isRunning || agent.isStarting,
                 placeholder: agent.transcript == nil
-                    ? "Tell the agent what to do — drop clips anywhere here" : "Message the agent",
+                    ? "Tell the assistant what to do — drop clips anywhere here" : "Message the assistant",
                 onSend: { model.sendToAgent($0) }, onAttach: { model.presentAttachPanel() })
         }
-        // The whole pane takes the drop, not just the message box.
+        // The whole panel takes the drop, not just the message box.
         .agentAttachmentTarget(agent.composer)
     }
 }

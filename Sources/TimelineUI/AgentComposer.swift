@@ -7,9 +7,9 @@ import SwiftUI
 import TimelineCore
 import UniformTypeIdentifiers
 
-/// One file staged for the next agent message. Nothing is imported and no command is applied: the
-/// message names the path and the agent decides for itself whether to import it
-/// (`docs/design/integration.md`, the agent panel).
+/// One file staged for the next assistant message. Nothing is imported and no command is applied: the
+/// message names the path and the assistant decides for itself whether to import it
+/// (`docs/design/integration.md`, the assistant panel).
 public struct AgentAttachment: Identifiable, Hashable, Sendable {
     /// The path, standardized, so the same file cannot be staged twice.
     public var id: String { url.path }
@@ -41,7 +41,7 @@ public struct AgentAttachment: Identifiable, Hashable, Sendable {
         self.isMissing = isMissing
     }
 
-    /// The caption under the name: what the agent is being handed, in the fewest words that still say it.
+    /// The caption under the name: what the assistant is being handed, in the fewest words that still say it.
     public var detail: String {
         var parts: [String] = []
         if let kind { parts.append(kind.rawValue) } else { parts.append(url.pathExtension.lowercased()) }
@@ -65,14 +65,14 @@ public struct AgentAttachment: Identifiable, Hashable, Sendable {
     }
 }
 
-/// What the human is about to say to the agent: the draft text and the files staged with it. Held by the
+/// What the human is about to say to the assistant: the draft text and the files staged with it. Held by the
 /// app across sessions, so attachments survive a session that finishes and the next message starts a new
 /// one. Staging is deliberately inert — `MediaImporter` is never reached from here.
 @MainActor @Observable
 public final class AgentComposer {
     public var draft = ""
     public private(set) var attachments: [AgentAttachment] = []
-    /// A drag is over the agent pane. The whole pane is the target — the transcript as much as the
+    /// A drag is over the assistant panel. The whole panel is the target — the transcript as much as the
     /// message box — and the box draws the highlight wherever in the pane the pointer is.
     public var isDropTargeted = false
     /// Posters for the chips, on the same cache the library panel uses, so a file both panes show is
@@ -104,7 +104,7 @@ public final class AgentComposer {
 
     // MARK: Staging
 
-    /// Stages library rows. A row whose file has gone missing is still staged, badged, so the agent hears
+    /// Stages library rows. A row whose file has gone missing is still staged, badged, so the assistant hears
     /// about it rather than the drop failing silently. Returns how many were new.
     @discardableResult
     public func add(libraryItems: [LibraryDragItem]) -> Int {
@@ -118,7 +118,7 @@ public final class AgentComposer {
             })
     }
 
-    /// Stages files dropped from the Finder or chosen in the attach panel. Anything is allowed: the agent
+    /// Stages files dropped from the Finder or chosen in the attach panel. Anything is allowed: the assistant
     /// reads scripts and notes as happily as it imports media.
     @discardableResult
     public func add(urls: [URL]) -> Int {
@@ -155,7 +155,7 @@ public final class AgentComposer {
 
     // MARK: Sending
 
-    /// The message the agent receives: what was typed, then the staged paths under a line that says
+    /// The message the assistant receives: what was typed, then the staged paths under a line that says
     /// plainly that nothing was imported.
     public static func message(draft: String, attachments: [AgentAttachment]) -> String {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -180,7 +180,7 @@ public final class AgentComposer {
 
     // MARK: Dropping
 
-    /// The types the agent pane accepts, as raw pasteboard types. Not `UTType`, and not SwiftUI's
+    /// The types the assistant panel accepts, as raw pasteboard types. Not `UTType`, and not SwiftUI's
     /// `onDrop`: `LibraryDragPayload.contentType` is exported by the process but declared in no
     /// Info.plist (an SPM executable has none), so the system resolves neither its identifier nor any
     /// conformance — `UTType(LibraryDragPayload.typeIdentifier)` is nil and it reports no conformance to
@@ -234,7 +234,7 @@ public final class AgentComposer {
     }
 }
 
-/// The agent's input: the staged attachments, the message field, and Send. Files dropped here are staged,
+/// The assistant's input: the staged attachments, the message field, and Send. Files dropped here are staged,
 /// never imported — the library pane and the timeline are where a drop imports.
 public struct AgentComposerView: View {
     public let composer: AgentComposer
@@ -248,7 +248,7 @@ public struct AgentComposerView: View {
     @FocusState private var isFocused: Bool
 
     public init(
-        composer: AgentComposer, isBusy: Bool = false, placeholder: String = "Message the agent",
+        composer: AgentComposer, isBusy: Bool = false, placeholder: String = "Message the assistant",
         onSend: @escaping (String) -> Void, onAttach: (() -> Void)? = nil
     ) {
         self.composer = composer
@@ -278,7 +278,7 @@ public struct AgentComposerView: View {
                     .font(.title3)
                     .disabled(!self.composer.canSend || isBusy)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .help(isBusy ? "The agent is working" : "Send (⌘↩)")
+                    .help(isBusy ? "The assistant is working" : "Send (⌘↩)")
             }
         }
         .padding(8)
@@ -386,7 +386,7 @@ struct AgentAttachmentChip: View {
     }
 }
 
-/// Hosts the agent pane inside an AppKit view registered for the attachment types, so anything dropped
+/// Hosts the assistant panel inside an AppKit view registered for the attachment types, so anything dropped
 /// anywhere on the pane — a library row, a file from the Finder — is staged on `composer` and nothing is
 /// imported.
 ///

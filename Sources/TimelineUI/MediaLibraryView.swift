@@ -232,8 +232,8 @@ public final class MediaLibraryModel {
     /// The file URL is not a nicety. Everything a drag hands over goes through SwiftUI's provider
     /// bridge, which promises the bytes and resolves them asynchronously — by the time a drop asks
     /// `pasteboard.data(forType:)` it gets **zero bytes**, whatever the payload was, so both the timeline
-    /// and the agent pane refused every drop. The file URL is a type AppKit carries itself, so a drop
-    /// always has at least the path to work with: the agent pane stages it (a path is all it wanted) and
+    /// and the assistant panel refused every drop. The file URL is a type AppKit carries itself, so a drop
+    /// always has at least the path to work with: the assistant stages it (a path is all it wanted) and
     /// the timeline imports it, which for library media is a content-hash hit and inserts the asset it
     /// already has.
     public func dragProvider(_ ids: Set<String>) -> NSItemProvider {
@@ -265,7 +265,7 @@ public final class MediaLibraryModel {
 }
 
 /// The media library pane: search, kind and scope filters, and one row per browsable file. Rows drag
-/// onto the timeline (and onto the agent pane, which stages the path instead of importing); Return and
+/// onto the timeline (and onto the assistant panel, which stages the path instead of importing); Return and
 /// the context menu insert the selection at the playhead without a drag.
 public struct MediaLibraryView: View {
     public let model: MediaLibraryModel

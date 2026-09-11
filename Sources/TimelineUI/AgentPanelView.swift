@@ -157,7 +157,7 @@ public final class AgentTranscript {
 }
 
 /// The transcript of one session: the folded items, approval cards inline, and a status line naming the
-/// cost and whether the agent is working. The input is `AgentComposerView`, which the app owns so that a
+/// cost and whether the assistant is working. The input is `AgentComposerView`, which the app owns so that a
 /// message can be composed — and files staged — before any session exists.
 public struct AgentPanelView: View {
     public let transcript: AgentTranscript
@@ -212,7 +212,7 @@ public struct AgentStatusBar: View {
 
     public var body: some View {
         HStack(spacing: 6) {
-            Label("Agent", systemImage: "sparkles").font(.caption.weight(.semibold)).labelStyle(.titleAndIcon)
+            Label("Assistant", systemImage: "sparkles").font(.caption.weight(.semibold)).labelStyle(.titleAndIcon)
             if isWorking {
                 ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12, height: 12)
                 Text(isStarting ? "Starting" : "Working").font(.caption2).foregroundStyle(.secondary)
