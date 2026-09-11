@@ -7,8 +7,9 @@ Cloud project is owned by the user's personal Google account, the consent screen
 user as the only test user, the compliance audit is filed after the sheet works on a real account, tokens
 live in the file store for the unsigned `swift run` binary, and no live test runs until the user says so.
 
-Until step 6 is done the app runs with publishing disabled: Settings shows "Add a Google OAuth client to
-enable publishing", `account_status` answers `configured: false`, and `publish_youtube` is not registered.
+Until step 6 is done the app runs with publishing disabled: the Publishes panel shows the empty client
+card, `account_status` answers `configured: false`, and `publish_youtube` is not registered. Steps 5 and 6
+happen in the window; the rest are on Google's side.
 
 ## 1. A Google Cloud project
 
@@ -54,16 +55,27 @@ accept without registering anything.
 
 ## 5. Where the client goes
 
-Any one of these, checked in this order (`GoogleClientConfiguration.load`, publish-plan.md D3):
+The window can do this for you: open the Publishes panel (right column, under the inspector), and in the
+"Google OAuth client" card either paste the client id and secret or press "Choose client_secret_*.json..."
+and pick the console's download. Either way it is written to
+`~/Library/Application Support/Timeline/google-oauth-client.json` (mode 0600, or
+`<TIMELINE_ROOT>/google-oauth-client.json` under a `TIMELINE_ROOT`), the account provider and the publisher
+pick it up at once, and "Connect YouTube..." appears below the card — no relaunch, no environment
+variables. Settings (Cmd-,) shows the same card.
+
+By hand, any one of these, checked in this order (`GoogleClientConfiguration.resolve`, publish-plan.md D3):
 
 1. `TIMELINE_GOOGLE_CLIENT_ID` (and optionally `TIMELINE_GOOGLE_CLIENT_SECRET`) in the environment.
 2. `TIMELINE_GOOGLE_CLIENT_JSON=/path/to/client_secret_<id>.json`.
 3. `<TIMELINE_ROOT>/google-oauth-client.json` when `TIMELINE_ROOT` is set.
-4. `~/Library/Application Support/Timeline/google-oauth-client.json` (the recommended place for the window).
+4. `~/Library/Application Support/Timeline/google-oauth-client.json` (where the panel writes).
+
+The environment entry outranks every file, so while `TIMELINE_GOOGLE_CLIENT_ID` is set the panel shows
+that client read-only and offers no Replace: a file it wrote would never be read.
 
 The file may be the console's download as is (`{"installed": {...}}`) or a flat
-`{"client_id": "...", "client_secret": "...", "audited": false}`. `audited` (or `TIMELINE_GOOGLE_AUDITED=1`)
-is what lifts the forced-private rule in step 9; leave it false until then.
+`{"client_id": "...", "client_secret": "...", "audited": false}` (what the panel writes). `audited` (or
+`TIMELINE_GOOGLE_AUDITED=1`) is what lifts the forced-private rule in step 9; leave it false until then.
 
 ```
 mkdir -p ~/Library/Application\ Support/Timeline
@@ -79,8 +91,8 @@ Either from the terminal, without the window:
 swift run TimelineApp --connect-google
 ```
 
-or from the window: `swift run TimelineApp`, then Settings (Cmd-,) or the Accounts toolbar button, then
-"Connect YouTube...". Both do the same thing: the default browser opens Google's consent page (it shows the
+or from the window: `swift run TimelineApp`, then "Connect YouTube..." in the Publishes panel (or in
+Settings, Cmd-,). Both do the same thing: the default browser opens Google's consent page (it shows the
 "Google hasn't verified this app" warning; choose Continue), you pick the account and, if it has several,
 the channel (a brand channel is a separate choice here; the app publishes to whichever one was picked), you
 tick the three scopes, and the page says "You can close this window". The app then reads

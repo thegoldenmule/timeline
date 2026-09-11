@@ -199,6 +199,23 @@ import TimelineCore
         #expect(out.isError && out.text?.contains("publisher") == true)
     }
 
+    /// The OAuth client can be set while the app runs (docs/plans/publish-client-setup.md), so the two
+    /// tools that need one are added and dropped on a live registry rather than only at boot.
+    @Test func publishToolsComeAndGoWithTheOAuthClient() async throws {
+        let registry = EditorToolRegistry(tools: EditorTools.all)
+        await EditorTools.setRegistered(EditorTools.publishingToolNames, registered: false, in: registry)
+        var names = await registry.list().map(\.name)
+        #expect(!names.contains("publish_youtube") && !names.contains("publish_status"))
+        // `account_status` stays: "configured: false" is the answer the agent needs.
+        #expect(names.contains("account_status"))
+        #expect(await registry.tool(named: "publish_youtube") == nil)
+
+        await EditorTools.setRegistered(EditorTools.publishingToolNames, registered: true, in: registry)
+        names = await registry.list().map(\.name)
+        #expect(names.contains("publish_youtube") && names.contains("publish_status"))
+        #expect(names.filter { $0 == "publish_youtube" }.count == 1)
+    }
+
     @Test func publishYouTubeReturnsApprovalRequiredWithChannelPrivacyAndCertification() async throws {
         let h = try await Harness.make()
         defer { h.cleanup() }

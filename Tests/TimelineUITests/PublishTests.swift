@@ -59,6 +59,81 @@ struct PublishFixture {
 }
 
 @MainActor
+@Suite("Publish client card")
+struct PublishClientViewTests {
+    @Test func typingAClientSavesItAndTellsTheApp() async throws {
+        let store = FakePublishClientStore(destinationPath: "/tmp/timeline/google-oauth-client.json")
+        let model = PublishClientModel(store: store)
+        var changes = 0
+        model.onChange = { changes += 1 }
+        await model.load()
+        // No client yet: the fields are what the card shows.
+        #expect(model.client == nil)
+        #expect(model.isEditing)
+        #expect(model.destinationPath == "/tmp/timeline/google-oauth-client.json")
+
+        model.clientId = "123-abc.apps.googleusercontent.com"
+        model.clientSecret = "sec"
+        await model.save()
+        #expect(await store.saves == ["123-abc.apps.googleusercontent.com"])
+        #expect(model.client?.clientId == "123-abc.apps.googleusercontent.com")
+        #expect(model.client?.hasSecret == true)
+        #expect(!model.isEditing)
+        #expect(model.error == nil)
+        #expect(changes == 1)
+        // The typed secret is not kept in the model after it is stored.
+        #expect(model.clientSecret.isEmpty)
+        #expect(ImageRenderer(content: PublishClientView(model: model).frame(width: 380)).cgImage != nil)
+
+        // Replace shows the fields again over the existing client; Cancel puts it back.
+        model.beginEditing()
+        #expect(model.isEditing)
+        model.cancelEditing()
+        #expect(!model.isEditing)
+
+        await model.remove()
+        #expect(await store.removals == 1)
+        #expect(model.client == nil)
+        #expect(model.isEditing)
+        #expect(changes == 2)
+    }
+
+    @Test func choosingTheConsoleDownloadImportsIt() async throws {
+        let store = FakePublishClientStore()
+        await store.setImportedClientId("999-xyz.apps.googleusercontent.com")
+        let model = PublishClientModel(store: store)
+        await model.load()
+        await model.importJSON(at: URL(fileURLWithPath: "/tmp/client_secret_999.json"))
+        #expect(await store.imports.map(\.lastPathComponent) == ["client_secret_999.json"])
+        #expect(model.client?.clientId == "999-xyz.apps.googleusercontent.com")
+    }
+
+    @Test func aRefusedSaveShowsTheReasonAndKeepsTheFields() async throws {
+        let store = FakePublishClientStore()
+        await store.setFailNext(.invalid("That does not look like a Google client id"))
+        let model = PublishClientModel(store: store)
+        await model.load()
+        model.clientId = "nope"
+        await model.save()
+        #expect(model.error == "That does not look like a Google client id")
+        #expect(model.client == nil)
+        #expect(model.clientId == "nope")
+        #expect(ImageRenderer(content: PublishClientView(model: model).frame(width: 380)).cgImage != nil)
+    }
+
+    @Test func anEnvironmentClientIsShownWithoutTheEditButtons() async throws {
+        let client = PublishClient(
+            clientId: "env.apps.googleusercontent.com", hasSecret: false, audited: true,
+            source: "TIMELINE_GOOGLE_CLIENT_ID (environment)", isEditable: false)
+        let model = PublishClientModel(store: FakePublishClientStore(client: client))
+        await model.load()
+        #expect(!model.isEditable)
+        #expect(!model.isEditing)
+        #expect(ImageRenderer(content: PublishClientView(model: model).frame(width: 380)).cgImage != nil)
+    }
+}
+
+@MainActor
 @Suite("Account view")
 struct AccountViewTests {
     @Test func accountViewShowsSetupWhenUnconfigured() async throws {
