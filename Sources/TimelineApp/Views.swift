@@ -334,12 +334,17 @@ struct EditorView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            if !panels.isCollapsed(.library), let library = model.library {
-                MediaLibraryView(
-                    model: library, onInsert: { model.insertLibraryItems($0) },
-                    onImport: { model.presentImportPanel() }
-                )
-                .frame(width: panels.size(.library))
+            if let library = model.library {
+                PanelChrome(.library, layout: panels) {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await library.load() } }
+                        .labelStyle(.iconOnly).buttonStyle(.borderless).disabled(library.isLoading)
+                    Button("Import…", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
+                        .labelStyle(.iconOnly).buttonStyle(.borderless)
+                } content: {
+                    MediaLibraryView(
+                        model: library, onInsert: { model.insertLibraryItems($0) },
+                        onImport: { model.presentImportPanel() })
+                }
                 PanelDivider(.library, layout: panels)
             }
             centreColumn

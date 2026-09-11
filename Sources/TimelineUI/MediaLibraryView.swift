@@ -297,14 +297,9 @@ public struct MediaLibraryView: View {
 
     private func header(model: Bindable<MediaLibraryModel>) -> some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                // Not `.searchable`: the pane is a plain split-view column, not a navigation column.
-                TextField("Search media", text: model.query).textFieldStyle(.roundedBorder)
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await self.model.load() } }
-                    .labelStyle(.iconOnly).disabled(self.model.isLoading)
-                Button("Import…", systemImage: "square.and.arrow.down") { onImport() }
-                    .labelStyle(.iconOnly)
-            }
+            // Not `.searchable`: the panel is a plain column, not a navigation column. Refresh and
+            // Import are not here either — they are the panel header's controls (`PanelChrome`).
+            TextField("Search media", text: model.query).textFieldStyle(.roundedBorder)
             Picker("Kind", selection: model.kindFilter) {
                 ForEach(MediaLibraryModel.KindFilter.allCases) { Text($0.title).tag($0) }
             }
