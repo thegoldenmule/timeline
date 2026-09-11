@@ -452,7 +452,7 @@ enum SkeletonCheck {
             // 9. The scripted agent through the real gate: export gated, approved on the stack, retried.
             let approvals = ApprovalCenter(gate: services.approvals)
             await approvals.start()
-            let agent = AgentConsole(services: services, approvals: approvals)
+            let agent = AssistantConsole(services: services, approvals: approvals)
             try await agent.start(goal: "Export a vertical reel")
             let deadline = ContinuousClock.now + .seconds(20)
             while approvals.requests.isEmpty, !(agent.transcript?.isFinished ?? false) {

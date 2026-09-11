@@ -71,7 +71,7 @@ final class ToolConsole {
 /// the console's, not the session's, so a message — and the files staged with it — outlives the session
 /// it is written against.
 @MainActor @Observable
-final class AgentConsole {
+final class AssistantConsole {
     let services: AppServices
     let approvals: ApprovalCenter
     let composer: AssistantComposer

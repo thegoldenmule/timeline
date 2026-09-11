@@ -17,7 +17,7 @@ final class AppModel {
     private(set) var approvals: ApprovalCenter?
     private(set) var jobs = JobCenter()
     private(set) var tools: ToolConsole?
-    private(set) var agent: AgentConsole?
+    private(set) var assistant: AssistantConsole?
     private(set) var publish: PublishConsole?
     /// The library panel's state over the open document and the machine-wide catalog.
     private(set) var library: MediaLibraryModel?
@@ -38,7 +38,7 @@ final class AppModel {
             self.approvals = approvals
             let tools = ToolConsole(services: services)
             self.tools = tools
-            agent = AgentConsole(services: services, approvals: approvals)
+            assistant = AssistantConsole(services: services, approvals: approvals)
             let publish = PublishConsole(services: services, tools: tools, jobs: jobs)
             await publish.start()
             self.publish = publish
@@ -83,7 +83,7 @@ final class AppModel {
         self.library = library
         // A library drag reaches the assistant panel as a bare file URL; the library is what turns it back
         // into a row, so the chip keeps its poster and duration.
-        agent?.composer.resolve = { [weak library] url in library?.dragItem(forPath: url.path) }
+        assistant?.composer.resolve = { [weak library] url in library?.dragItem(forPath: url.path) }
         Task { @MainActor in await library.load() }
     }
 
@@ -272,21 +272,21 @@ final class AppModel {
     }
 
     /// The assistant composer's Send: the first message starts the session, later ones continue it.
-    func sendToAgent(_ message: String) {
-        guard let agent else { return }
-        perform { try await agent.send(message) }
+    func sendToAssistant(_ message: String) {
+        guard let assistant else { return }
+        perform { try await assistant.send(message) }
     }
 
     /// Stages files for the next assistant message. Unlike every other panel in the window this imports
     /// nothing: the assistant is handed the paths and decides what to do with them.
     func presentAttachPanel() {
-        guard let agent else { return }
+        guard let assistant else { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.message = "Attach files to the next assistant message — nothing is imported"
         panel.prompt = "Attach"
-        if panel.runModal() == .OK { agent.composer.add(urls: panel.urls) }
+        if panel.runModal() == .OK { assistant.composer.add(urls: panel.urls) }
     }
 
     private func selectedAssets(_ document: ProjectDocument) -> [Asset] {
@@ -300,11 +300,11 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let services = model.services, let document = model.document, let approvals = model.approvals,
-                let tools = model.tools, let agent = model.agent, let publish = model.publish
+                let tools = model.tools, let assistant = model.assistant, let publish = model.publish
             {
                 EditorView(
                     model: model, services: services, document: document, approvals: approvals, jobs: model.jobs,
-                    tools: tools, agent: agent, publish: publish)
+                    tools: tools, assistant: assistant, publish: publish)
             } else if let error = model.bootError {
                 ContentUnavailableView("Could not start", systemImage: "xmark.octagon", description: Text(error))
             } else {
@@ -323,7 +323,7 @@ struct EditorView: View {
     let approvals: ApprovalCenter
     let jobs: JobCenter
     let tools: ToolConsole
-    let agent: AgentConsole
+    let assistant: AssistantConsole
     let publish: PublishConsole
     @AppStorage("showsLibrary") private var showsLibrary = true
 
@@ -403,7 +403,7 @@ struct EditorView: View {
                 }
             }
             .frame(minHeight: 240)
-            AgentSection(agent: agent, model: model)
+            AssistantSection(assistant: assistant, model: model)
                 .frame(minHeight: 260)
         }
     }
@@ -647,18 +647,18 @@ struct MCPSection: View {
 /// The assistant panel: what the session has said so far, and the composer under it. There is no
 /// "start" control — the first message starts the session — and files dropped on the composer are
 /// staged, not imported.
-struct AgentSection: View {
-    let agent: AgentConsole
+struct AssistantSection: View {
+    let assistant: AssistantConsole
     let model: AppModel
 
     var body: some View {
         VStack(spacing: 0) {
             AssistantStatusBar(
-                transcript: agent.transcript, isStarting: agent.isStarting,
-                onStop: { model.perform { await agent.cancel() } },
-                onClear: { agent.newSession() })
+                transcript: assistant.transcript, isStarting: assistant.isStarting,
+                onStop: { model.perform { await assistant.cancel() } },
+                onClear: { assistant.newSession() })
             Divider()
-            if let transcript = agent.transcript {
+            if let transcript = assistant.transcript {
                 AssistantPanelView(transcript: transcript)
             } else {
                 ContentUnavailableView {
@@ -668,18 +668,18 @@ struct AgentSection: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error = agent.error {
+            if let error = assistant.error {
                 Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
             }
             AssistantComposerView(
-                composer: agent.composer, isBusy: agent.isRunning || agent.isStarting,
-                placeholder: agent.transcript == nil
+                composer: assistant.composer, isBusy: assistant.isRunning || assistant.isStarting,
+                placeholder: assistant.transcript == nil
                     ? "Tell the assistant what to do — drop clips anywhere here" : "Message the assistant",
-                onSend: { model.sendToAgent($0) }, onAttach: { model.presentAttachPanel() })
+                onSend: { model.sendToAssistant($0) }, onAttach: { model.presentAttachPanel() })
         }
         // The whole panel takes the drop, not just the message box.
-        .assistantAttachmentTarget(agent.composer)
+        .assistantAttachmentTarget(assistant.composer)
     }
 }
 
