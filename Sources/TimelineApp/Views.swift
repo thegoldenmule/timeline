@@ -296,6 +296,9 @@ final class AppModel {
 
 struct ContentView: View {
     @Bindable var model: AppModel
+    /// Owned here, not in `EditorView`: that view is rebuilt whenever the document changes, and the
+    /// panel sizes have to outlive it.
+    @State private var panels = PanelLayoutModel()
 
     var body: some View {
         Group {
@@ -303,21 +306,24 @@ struct ContentView: View {
                 let tools = model.tools, let assistant = model.assistant, let publish = model.publish
             {
                 EditorView(
-                    model: model, services: services, document: document, approvals: approvals, jobs: model.jobs,
-                    tools: tools, assistant: assistant, publish: publish)
+                    model: model, panels: panels, services: services, document: document, approvals: approvals,
+                    jobs: model.jobs, tools: tools, assistant: assistant, publish: publish)
             } else if let error = model.bootError {
                 ContentUnavailableView("Could not start", systemImage: "xmark.octagon", description: Text(error))
             } else {
                 ProgressView(model.bootStage)
             }
         }
-        .frame(minWidth: 1100, minHeight: 700)
+        // The minimum follows the panels, so collapsing one lets the window get narrower rather than
+        // just freeing space inside it.
+        .frame(minWidth: panels.minimumWindowWidth, minHeight: 700)
         .task { await model.boot() }
     }
 }
 
 struct EditorView: View {
     @Bindable var model: AppModel
+    let panels: PanelLayoutModel
     let services: AppServices
     let document: ProjectDocument
     let approvals: ApprovalCenter
@@ -325,32 +331,32 @@ struct EditorView: View {
     let tools: ToolConsole
     let assistant: AssistantConsole
     let publish: PublishConsole
-    @AppStorage("showsLibrary") private var showsLibrary = true
 
     var body: some View {
-        HSplitView {
-            if showsLibrary, let library = model.library {
+        HStack(spacing: 0) {
+            if !panels.isCollapsed(.library), let library = model.library {
                 MediaLibraryView(
                     model: library, onInsert: { model.insertLibraryItems($0) },
                     onImport: { model.presentImportPanel() }
                 )
-                .frame(minWidth: 220, idealWidth: 280, maxWidth: 420)
+                .frame(width: panels.size(.library))
+                PanelDivider(.library, layout: panels)
             }
-            VStack(spacing: 0) {
-                PreviewLayerView(preview: document.preview)
-                    .frame(minHeight: 240)
-                Divider()
-                TimelineView(viewModel: document.viewModel)
-                    .frame(minHeight: 220)
-                statusBar
-            }
-            .frame(minWidth: 640)
+            centreColumn
+            PanelDivider(.rightColumn, layout: panels)
             sidebar
-                .frame(minWidth: 360, idealWidth: 420, maxWidth: 560)
+                .frame(width: panels.size(.rightColumn))
         }
-        // Fill the window whatever the panes contain. A pane whose content sizes to itself — an empty
-        // library, say — would otherwise shrink the split view and take the rest of the editor with it.
+        // Fill the window whatever the panels contain. A panel whose content sizes to itself — an empty
+        // library, say — would otherwise leave the row short.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // What the columns have to share. `PanelLayoutModel` clamps every width against it, so a drag
+        // can never squeeze the timeline out and shrinking the window pulls the panels in instead.
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.width
+        } action: {
+            panels.availableWidthChanged($0)
+        }
         .toolbar { toolbarContent }
         .navigationTitle("\(document.project.name) — v\(document.version)")
         .sheet(isPresented: publishSheetPresented) {
@@ -372,6 +378,20 @@ struct EditorView: View {
     private var activeTool: Binding<TimelineTool> {
         Binding(
             get: { document.viewModel.activeTool }, set: { document.viewModel.selectTool($0) })
+    }
+
+    /// The preview, the timeline, and the status bar: the one column that takes whatever the panels
+    /// leave it.
+    private var centreColumn: some View {
+        VStack(spacing: 0) {
+            PreviewLayerView(preview: document.preview)
+                .frame(minHeight: 240)
+            Divider()
+            TimelineView(viewModel: document.viewModel)
+                .frame(minHeight: 220)
+            statusBar
+        }
+        .frame(minWidth: PanelTheme.centreMinimum, maxWidth: .infinity)
     }
 
     private var publishSheetPresented: Binding<Bool> {
@@ -416,9 +436,11 @@ struct EditorView: View {
             Button("Fork", systemImage: "arrow.triangle.branch") { model.presentForkPanel() }
                 .disabled(model.document == nil)
             Button("Import", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
-            Button("Library", systemImage: "rectangle.stack") { showsLibrary.toggle() }
-                .keyboardShortcut("l", modifiers: [.command, .option])
-                .help("Show or hide the media library")
+            Button("Library", systemImage: "rectangle.stack") {
+                withAnimation(PanelChromeAnimation.collapse) { panels.toggle(.library) }
+            }
+            .keyboardShortcut(PanelID.library.shortcut, modifiers: [.command, .option])
+            .help("Show or hide the media library")
         }
         ToolbarItemGroup {
             // No `.keyboardShortcut`: SwiftUI installs those as key equivalents, which AppKit dispatches
