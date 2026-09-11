@@ -193,7 +193,9 @@ public struct AssistantPanelView: View {
     }
 }
 
-/// The one-line state of a session: working or done, what it cost, and Stop while it runs.
+/// The one-line state of a session: working or done, what it cost, and Stop while it runs. It carries
+/// neither the name nor a background of its own: it is the assistant panel's header controls, and
+/// `PanelHeader` draws the bar around it.
 public struct AssistantStatusBar: View {
     public let transcript: AssistantTranscript?
     public var isStarting: Bool
@@ -213,22 +215,20 @@ public struct AssistantStatusBar: View {
     private var isWorking: Bool { isStarting || (transcript.map { !$0.isFinished } ?? false) }
 
     public var body: some View {
-        HStack(spacing: 6) {
-            Label("Assistant", systemImage: "sparkles").font(.caption.weight(.semibold)).labelStyle(.titleAndIcon)
+        HStack(spacing: PanelTheme.controlGap) {
             if isWorking {
                 ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 12, height: 12)
-                Text(isStarting ? "Starting" : "Working").font(.caption2).foregroundStyle(.secondary)
+                Text(isStarting ? "Starting" : "Working").font(PanelTheme.detail).foregroundStyle(.secondary)
             } else if let transcript {
                 if let failure = transcript.failure {
-                    Label(failure.message, systemImage: "exclamationmark.triangle").font(.caption2)
-                        .foregroundStyle(.orange).lineLimit(1)
+                    Label(failure.message, systemImage: "exclamationmark.triangle").font(PanelTheme.detail)
+                        .foregroundStyle(PanelTheme.warning).lineLimit(1)
                 } else {
-                    Label("Done", systemImage: "checkmark.circle").font(.caption2).foregroundStyle(.secondary)
+                    Label("Done", systemImage: "checkmark.circle").font(PanelTheme.detail).foregroundStyle(.secondary)
                 }
             }
-            Spacer(minLength: 4)
             if let transcript, transcript.totalCostUSD > 0 {
-                Text(String(format: "$%.3f", transcript.totalCostUSD)).font(.caption2.monospacedDigit())
+                Text(String(format: "$%.3f", transcript.totalCostUSD)).font(PanelTheme.monoDigit)
                     .foregroundStyle(.secondary).help("What this session has cost so far")
             }
             if isWorking, transcript != nil {
@@ -240,9 +240,6 @@ public struct AssistantStatusBar: View {
                     .labelStyle(.iconOnly).buttonStyle(.borderless).help("Clear the transcript and start fresh")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(.bar)
     }
 }
 

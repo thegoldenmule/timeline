@@ -334,6 +334,15 @@ struct EditorView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            PanelChrome(.assistant, layout: panels) {
+                AssistantStatusBar(
+                    transcript: assistant.transcript, isStarting: assistant.isStarting,
+                    onStop: { model.perform { await assistant.cancel() } },
+                    onClear: { assistant.newSession() })
+            } content: {
+                AssistantSection(assistant: assistant, model: model)
+            }
+            PanelDivider(.assistant, layout: panels)
             if let library = model.library {
                 PanelChrome(.library, layout: panels) {
                     Button("Refresh", systemImage: "arrow.clockwise") { Task { await library.load() } }
@@ -349,8 +358,7 @@ struct EditorView: View {
             }
             centreColumn
             PanelDivider(.rightColumn, layout: panels)
-            sidebar
-                .frame(width: panels.size(.rightColumn))
+            rightColumn
         }
         // Fill the window whatever the panels contain. A panel whose content sizes to itself — an empty
         // library, say — would otherwise leave the row short.
@@ -403,33 +411,49 @@ struct EditorView: View {
         Binding(get: { publish.sheet != nil }, set: { if !$0 { publish.dismissSheet() } })
     }
 
-    private var sidebar: some View {
-        VSplitView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+    /// The inspector over the activity panel. Both shut and the column is a single rail — two stacked
+    /// header bars in a 400pt column would be a lot of chrome around nothing.
+    @ViewBuilder private var rightColumn: some View {
+        if panels.isCollapsed(.rightColumn) {
+            PanelRail([.inspector, .activity], layout: panels)
+        } else {
+            VStack(spacing: 0) {
+                PanelChrome(.inspector, layout: panels) {
                     InspectorView(viewModel: document.viewModel)
-                        .frame(minHeight: 120)
-                    Divider()
-                    ApprovalStackView(center: approvals)
-                        .padding(8)
-                    Divider()
-                    JobList(center: jobs)
-                    Divider()
-                    PublishSection(publish: publish)
-                    Divider()
-                    HistoryView(viewModel: document.viewModel)
-                        .frame(height: 220)
-                    if !tools.lastTool.isEmpty {
-                        Divider()
-                        ToolSection(tools: tools)
-                    }
-                    Divider()
-                    MCPSection(services: services)
+                }
+                PanelDivider(.inspector, layout: panels)
+                PanelChrome(.activity, layout: panels) {
+                    ScrollView { activityStack }
                 }
             }
-            .frame(minHeight: 240)
-            AssistantSection(assistant: assistant, model: model)
-                .frame(minHeight: 260)
+            .frame(width: panels.size(.rightColumn))
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height
+            } action: {
+                panels.availableHeightChanged($0)
+            }
+        }
+    }
+
+    /// What the window is doing and has done: cards waiting on an answer, jobs running, publishes,
+    /// the history, the last tool this window called, and how to reach the app from Claude Code.
+    private var activityStack: some View {
+        VStack(alignment: .leading, spacing: PanelTheme.sectionGap) {
+            ApprovalStackView(center: approvals)
+                .padding(PanelTheme.panelInset)
+            Divider()
+            JobList(center: jobs)
+            Divider()
+            PublishSection(publish: publish)
+            Divider()
+            HistoryView(viewModel: document.viewModel)
+                .frame(height: 220)
+            if !tools.lastTool.isEmpty {
+                Divider()
+                ToolSection(tools: tools)
+            }
+            Divider()
+            MCPSection(services: services)
         }
     }
 
@@ -671,8 +695,9 @@ struct MCPSection: View {
     }
 }
 
-/// The assistant panel: what the session has said so far, and the composer under it. There is no
-/// "start" control — the first message starts the session — and files dropped on the composer are
+/// The assistant panel's body: what the session has said so far, and the composer under it. Its state
+/// and its Stop / New session controls are the panel header's (`AssistantStatusBar`). There is no
+/// "start" control — the first message starts the session — and files dropped anywhere in the panel are
 /// staged, not imported.
 struct AssistantSection: View {
     let assistant: AssistantConsole
@@ -680,11 +705,6 @@ struct AssistantSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AssistantStatusBar(
-                transcript: assistant.transcript, isStarting: assistant.isStarting,
-                onStop: { model.perform { await assistant.cancel() } },
-                onClear: { assistant.newSession() })
-            Divider()
             if let transcript = assistant.transcript {
                 AssistantPanelView(transcript: transcript)
             } else {
@@ -705,6 +725,9 @@ struct AssistantSection: View {
                     ? "Tell the assistant what to do — drop clips anywhere here" : "Message the assistant",
                 onSend: { model.sendToAssistant($0) }, onAttach: { model.presentAttachPanel() })
         }
+        // `AssistantDropHost` hosts this in an `NSView`, which sizes to what it is given: without the
+        // fill the column would come out empty.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The whole panel takes the drop, not just the message box.
         .assistantAttachmentTarget(assistant.composer)
     }
