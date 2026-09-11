@@ -154,3 +154,69 @@ public protocol AccountProvider: Sendable {
     /// A fresh stream per access, yielding the full account list after every change made after the access.
     var changes: AsyncStream<[ConnectedAccount]> { get }
 }
+
+// MARK: - The OAuth client
+
+/// The OAuth client the provider authorizes with, as the UI sees it: enough to say which client is in
+/// effect and where it came from, never the secret itself. `PublishClientStore` vends it.
+public struct PublishClient: Hashable, Sendable {
+    /// The console's client id (`<number>-<hash>.apps.googleusercontent.com`).
+    public var clientId: String
+    /// True when a client secret is held with it. A Desktop client's secret is not confidential, but it
+    /// is still not something a panel should print.
+    public var hasSecret: Bool
+    /// True once the Cloud project has passed the compliance audit, which is what lifts the
+    /// forced-private rule (`PublishCapabilities.publicUploadsAllowed`).
+    public var audited: Bool
+    /// Where this client was read from, for the UI's caption: an environment variable, or a file path.
+    public var source: String
+    /// False when the environment supplies the client: saving a file would not change what the app uses,
+    /// so the UI offers no edit.
+    public var isEditable: Bool
+
+    public init(clientId: String, hasSecret: Bool, audited: Bool, source: String, isEditable: Bool) {
+        self.clientId = clientId
+        self.hasSecret = hasSecret
+        self.audited = audited
+        self.source = source
+        self.isEditable = isEditable
+    }
+}
+
+public enum PublishClientError: Error, LocalizedError, Hashable, Sendable {
+    /// The typed id or the chosen file is not a client.
+    case invalid(String)
+    /// The file could not be written or deleted.
+    case storage(String)
+    /// The environment sets the client, so a saved file would be ignored.
+    case notEditable(String)
+
+    public var message: String {
+        switch self {
+        case .invalid(let detail): detail
+        case .storage(let detail): "The client could not be stored: \(detail)"
+        case .notEditable(let detail): detail
+        }
+    }
+
+    public var errorDescription: String? { message }
+}
+
+/// Reads and writes the OAuth client the app authorizes with, so it can be set up in the window instead
+/// of by hand (publish-plan.md D3). Implementations keep the same lookup order the provider uses, which
+/// is why `save` can answer `notEditable`: an environment variable outranks any file it could write.
+public protocol PublishClientStore: Sendable {
+    /// The client in effect, or nil when none is configured.
+    func current() async -> PublishClient?
+    /// Where `save` and `importJSON` write, for the UI to name.
+    var destinationPath: String { get }
+    /// Stores the client and returns what is now in effect.
+    @discardableResult
+    func save(clientId: String, clientSecret: String?, audited: Bool) async throws -> PublishClient
+    /// Stores the console's downloaded `client_secret_*.json` (or the flat form) and returns what is now
+    /// in effect.
+    @discardableResult
+    func importJSON(at url: URL) async throws -> PublishClient
+    /// Deletes the stored client. Leaves an environment-supplied one alone (and throws `notEditable`).
+    func remove() async throws
+}

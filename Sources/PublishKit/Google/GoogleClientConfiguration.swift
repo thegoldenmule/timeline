@@ -1,3 +1,4 @@
+import Contracts
 import Foundation
 
 /// The OAuth client of type "Desktop app" (publish-plan.md D3). Never in the repo: it comes from the
@@ -59,18 +60,8 @@ public struct GoogleClientConfiguration: Sendable, Hashable {
         environment: [String: String] = ProcessInfo.processInfo.environment, fileManager: FileManager = .default,
         applicationSupport: URL = applicationSupportDirectory
     ) throws -> GoogleClientConfiguration? {
-        let audited = ["1", "true", "yes"].contains((environment["TIMELINE_GOOGLE_AUDITED"] ?? "").lowercased())
-        if let id = environment["TIMELINE_GOOGLE_CLIENT_ID"], !id.isEmpty {
-            let secret = environment["TIMELINE_GOOGLE_CLIENT_SECRET"].flatMap { $0.isEmpty ? nil : $0 }
-            return GoogleClientConfiguration(clientId: id, clientSecret: secret, audited: audited)
-        }
-        let candidates = fileCandidates(environment: environment, applicationSupport: applicationSupport)
-        for url in candidates where fileManager.fileExists(atPath: url.path) {
-            var configuration = try parse(Data(contentsOf: url), source: url.path)
-            configuration.audited = configuration.audited || audited
-            return configuration
-        }
-        return nil
+        try resolve(environment: environment, fileManager: fileManager, applicationSupport: applicationSupport)?
+            .configuration
     }
 
     /// Parses the console's `client_secret_*.json` (`{"installed": {...}}` or `{"web": {...}}`) or a flat
@@ -86,5 +77,60 @@ public struct GoogleClientConfiguration: Sendable, Hashable {
         let secret = (inner["client_secret"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let audited = (object["audited"] as? Bool) ?? (inner["audited"] as? Bool) ?? false
         return GoogleClientConfiguration(clientId: id, clientSecret: secret, audited: audited)
+    }
+
+    /// Where a loaded client came from, so the UI can say whether it may be replaced.
+    public enum Source: Sendable, Hashable {
+        /// `TIMELINE_GOOGLE_CLIENT_ID`, which outranks every file.
+        case environment
+        case file(URL)
+
+        /// The caption the panel shows under the client id.
+        public var description: String {
+            switch self {
+            case .environment: "TIMELINE_GOOGLE_CLIENT_ID (environment)"
+            case .file(let url): url.path
+            }
+        }
+
+        /// False for the environment: a file written under it would never be read.
+        public var isEditable: Bool {
+            if case .environment = self { return false }
+            return true
+        }
+    }
+
+    /// `load`, plus where the client came from. Nil when nothing is configured.
+    public static func resolve(
+        environment: [String: String] = ProcessInfo.processInfo.environment, fileManager: FileManager = .default,
+        applicationSupport: URL = applicationSupportDirectory
+    ) throws -> (configuration: GoogleClientConfiguration, source: Source)? {
+        let audited = ["1", "true", "yes"].contains((environment["TIMELINE_GOOGLE_AUDITED"] ?? "").lowercased())
+        if let id = environment["TIMELINE_GOOGLE_CLIENT_ID"], !id.isEmpty {
+            let secret = environment["TIMELINE_GOOGLE_CLIENT_SECRET"].flatMap { $0.isEmpty ? nil : $0 }
+            return (GoogleClientConfiguration(clientId: id, clientSecret: secret, audited: audited), .environment)
+        }
+        for url in fileCandidates(environment: environment, applicationSupport: applicationSupport)
+        where fileManager.fileExists(atPath: url.path) {
+            var configuration = try parse(Data(contentsOf: url), source: url.path)
+            configuration.audited = configuration.audited || audited
+            return (configuration, .file(url))
+        }
+        return nil
+    }
+
+    /// What the app writes when the client is typed or imported in the window: the flat form, which
+    /// `parse` reads back and a human can read too.
+    public func flatJSON() throws -> Data {
+        var object: [String: Any] = ["client_id": clientId, "audited": audited]
+        if let clientSecret { object["client_secret"] = clientSecret }
+        return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
+
+    /// The `PublishClient` the UI shows for this configuration.
+    public func publishClient(source: Source) -> PublishClient {
+        PublishClient(
+            clientId: clientId, hasSecret: clientSecret != nil, audited: audited, source: source.description,
+            isEditable: source.isEditable)
     }
 }

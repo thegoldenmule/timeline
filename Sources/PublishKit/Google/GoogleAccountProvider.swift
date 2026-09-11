@@ -1,5 +1,6 @@
 import Contracts
 import Foundation
+import Synchronization
 import TimelineCore
 
 /// The Google `AccountProvider` (publish-plan.md D1 to D4, D13, D14): connect = PKCE -> loopback listener
@@ -13,13 +14,17 @@ public actor GoogleAccountProvider: AccountProvider {
     public static let recordMaxAge: TimeInterval = 30 * 86_400
 
     public nonisolated let kind: AccountProviderKind = .google
-    public nonisolated let isConfigured: Bool
-    public let configuration: GoogleClientConfiguration?
+    /// Read from any isolation (the window asks while the actor is busy connecting), and it changes when
+    /// `reconfigure` installs a client, so it is a `Mutex` rather than a `let`.
+    private nonisolated let configuredFlag: Mutex<Bool>
+    public nonisolated var isConfigured: Bool { configuredFlag.withLock { $0 } }
+    public private(set) var configuration: GoogleClientConfiguration?
     public let accountsFile: AccountsFile
 
     private let tokenStore: any TokenStore
     private let presenter: any AuthorizationPresenter
-    private let oauth: GoogleOAuthClient?
+    private let session: URLSession
+    private var oauth: GoogleOAuthClient?
     private let api: YouTubeAPI
     private let clock: any Clock
     private let listenerTimeout: Duration
@@ -42,10 +47,11 @@ public actor GoogleAccountProvider: AccountProvider {
         cacheDir: URL? = nil, environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.configuration = configuration
-        self.isConfigured = configuration != nil
+        self.configuredFlag = Mutex(configuration != nil)
         self.tokenStore = tokenStore
         self.accountsFile = accountsFile
         self.presenter = presenter
+        self.session = session
         self.oauth = configuration.map { GoogleOAuthClient(configuration: $0, session: session, clock: clock) }
         self.api = YouTubeAPI(session: session)
         self.clock = clock
@@ -53,6 +59,20 @@ public actor GoogleAccountProvider: AccountProvider {
         self.recordMaxAge = recordMaxAge
         self.cacheDir = cacheDir
         self.environment = environment
+    }
+
+    /// Installs the OAuth client the window just saved (or nil when it was removed), so publishing can be
+    /// set up without a relaunch. The provider keeps its identity — the tool context, the account model,
+    /// and the publisher all hold this object — but rebuilds the OAuth client and drops the access tokens
+    /// it cached, which were issued to the previous client. The stored accounts stay: a token minted for
+    /// another client fails its next refresh with `invalid_grant`, which is already what turns a row into
+    /// "Reconnect required".
+    public func reconfigure(_ configuration: GoogleClientConfiguration?) {
+        guard configuration != self.configuration else { return }
+        self.configuration = configuration
+        configuredFlag.withLock { $0 = configuration != nil }
+        oauth = configuration.map { GoogleOAuthClient(configuration: $0, session: session, clock: clock) }
+        tokens.removeAll()
     }
 
     // MARK: AccountProvider

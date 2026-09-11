@@ -19,7 +19,9 @@ public final class YouTubePublisher: Publisher, Sendable {
     private let accounts: any AccountProvider
     private let api: YouTubeAPI
     private let quota: QuotaMeter
-    private let audited: Bool
+    /// The compliance-audit flag of the client in effect (D6). It follows the client the window saves,
+    /// so it is a `Mutex` rather than a `let`.
+    private let auditedFlag: Mutex<Bool>
     private let options: UploadOptions
     private let clock: any Clock
     private let sleep: Sleeper
@@ -41,12 +43,19 @@ public final class YouTubePublisher: Publisher, Sendable {
         self.accounts = accounts
         self.api = YouTubeAPI(session: session, requestTimeout: options.requestTimeout)
         self.quota = quota
-        self.audited = audited
+        self.auditedFlag = Mutex(audited)
         self.options = options
         self.clock = clock
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
         self.measuredRate = Mutex(Self.defaultUploadRate)
     }
+
+    /// True when the Cloud project has passed the compliance audit, so public uploads stay public.
+    public var audited: Bool { auditedFlag.withLock { $0 } }
+
+    /// Follows the client the window saves: `PublishingServices.apply` sets it when the `audited` flag of
+    /// the configuration changes.
+    public func setAudited(_ value: Bool) { auditedFlag.withLock { $0 = value } }
 
     /// Bytes per second of the last completed upload (or the default before one ran).
     public var uploadRate: Double { measuredRate.withLock { $0 } }
