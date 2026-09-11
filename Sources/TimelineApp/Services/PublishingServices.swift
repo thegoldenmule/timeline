@@ -1,8 +1,10 @@
 import AppKit
+import AgentKit
 import Contracts
 import ContractsTestSupport
 import Foundation
 import PublishKit
+import Synchronization
 import TimelineCore
 import TimelineUI
 
@@ -43,7 +45,12 @@ enum PublishingMode: Sendable {
 
 /// The publishing half of the composition root: the Google account provider, the YouTube publisher,
 /// and how they were built, for the window's Settings and the integration notes.
-struct PublishingServices: Sendable {
+///
+/// A reference type, and in `.auto` the provider and the publisher exist whether or not a client does,
+/// because the client can now be set in the window (docs/plans/publish-client-setup.md): `apply` swaps
+/// the client into the same two objects, so every snapshot that already holds them — the MCP host's
+/// `ToolContext` above all — keeps working. Only `state` and the tool registrations change with it.
+final class PublishingServices: Sendable {
     enum State: Sendable, Equatable {
         /// A real OAuth client; `clientId` is what the console issued.
         case configured(clientId: String, audited: Bool)
@@ -61,16 +68,35 @@ struct PublishingServices: Sendable {
     /// The Google provider; present in every mode but `.off` (unconfigured under `.auto` without a
     /// client, so the account view shows the setup hint and `account_status` answers `configured: false`).
     let accounts: (any AccountProvider)?
-    /// Present only when uploads can actually happen (`.configured` or `.fake`), which is what hides
-    /// `publish_youtube` and `publish_status` otherwise.
+    /// The YouTube publisher, present in every mode but `.off`. Without a client it has nothing to
+    /// upload with, which is why `publish_youtube` and `publish_status` stay unregistered until `state`
+    /// says configured.
     let publisher: (any Publisher)?
-    let state: State
+    /// Where a client typed or imported in the window is stored; nil under `.fake` and `.off`.
+    let clientStore: GoogleClientFile?
     /// Where the refresh tokens live, for the log and the docs.
     let tokenStoreDescription: String
     /// The in-process Google under `.fake`, so the headless check can arm faults and read what it saw.
     let fakeServer: FakeYouTubeServer?
     /// The chunk size the fake publisher uploads with (the check asserts the drop and resume by chunk).
     let uploadOptions: UploadOptions
+    private let stateBox: Mutex<State>
+
+    /// How publishing is configured right now; `apply` moves it between `.configured` and `.notConfigured`.
+    var state: State { stateBox.withLock { $0 } }
+
+    init(
+        accounts: (any AccountProvider)?, publisher: (any Publisher)?, state: State, tokenStoreDescription: String,
+        fakeServer: FakeYouTubeServer?, uploadOptions: UploadOptions, clientStore: GoogleClientFile? = nil
+    ) {
+        self.accounts = accounts
+        self.publisher = publisher
+        self.clientStore = clientStore
+        self.tokenStoreDescription = tokenStoreDescription
+        self.fakeServer = fakeServer
+        self.uploadOptions = uploadOptions
+        self.stateBox = Mutex(state)
+    }
 
     /// The notices the account view shows (publish-plan.md 4.5): both stay on until the OAuth
     /// verification and the compliance audit of section 7 are done.
@@ -82,9 +108,11 @@ struct PublishingServices: Sendable {
         chunkBytes: 256 << 10, backoffUnit: .milliseconds(5), maxBackoff: .milliseconds(20),
         processingPollInitial: .milliseconds(5), processingPollMaximum: .milliseconds(20))
 
-    static let off = PublishingServices(
-        accounts: nil, publisher: nil, state: .off, tokenStoreDescription: "none", fakeServer: nil,
-        uploadOptions: UploadOptions())
+    static var off: PublishingServices {
+        PublishingServices(
+            accounts: nil, publisher: nil, state: .off, tokenStoreDescription: "none", fakeServer: nil,
+            uploadOptions: UploadOptions())
+    }
 
     /// Builds the stack for `mode` over the library `layout`.
     static func make(
@@ -106,6 +134,7 @@ struct PublishingServices: Sendable {
     private static func makeReal(layout: LibraryLayout, environment: [String: String], log: AppLog) throws
         -> PublishingServices
     {
+        let clientStore = GoogleClientFile(environment: environment)
         var configuration: GoogleClientConfiguration?
         var loadError: String?
         do {
@@ -129,24 +158,30 @@ struct PublishingServices: Sendable {
             accountsFile: AccountsFile(url: AccountsFile.defaultURL(environment: environment)),
             presenter: WorkspaceAuthorizationPresenter(), session: session, cacheDir: layout.cacheDir,
             environment: environment)
-        guard let configuration else {
+        let quota = QuotaMeter(fileURL: QuotaMeter.fileURL(cacheDir: layout.cacheDir))
+        // Built even without a client: `apply` reconfigures the provider under it when one is saved in the
+        // window, and the publisher asks the provider for a token per request, so there is nothing stale
+        // to rebuild. `state` is what decides whether the publish tools are registered.
+        let publisher = YouTubePublisher(
+            accounts: provider, session: session, quota: quota, audited: configuration?.audited ?? false)
+        let state: State
+        if let configuration {
+            state = .configured(clientId: configuration.clientId, audited: configuration.audited)
+            log.log(
+                "Publishing: Google client \(configuration.clientId.prefix(12))..., tokens in "
+                    + tokenStoreDescription + ", "
+                    + (configuration.audited ? "audited" : "uploads forced private until the compliance audit"))
+        } else {
             var hint = GoogleClientConfiguration.setupHint(environment: environment)
             if let loadError { hint = "\(loadError); \(hint)" }
-            log.log("Publishing disabled: no Google OAuth client (see docs/design/publish-setup.md); \(hint)")
-            return PublishingServices(
-                accounts: provider, publisher: nil, state: .notConfigured(hint: hint),
-                tokenStoreDescription: tokenStoreDescription, fakeServer: nil, uploadOptions: UploadOptions())
+            state = .notConfigured(hint: hint)
+            log.log(
+                "Publishing: no Google OAuth client yet; set one in the Publishes panel or at "
+                    + clientStore.destinationPath)
         }
-        let quota = QuotaMeter(fileURL: QuotaMeter.fileURL(cacheDir: layout.cacheDir))
-        let publisher = YouTubePublisher(
-            accounts: provider, session: session, quota: quota, audited: configuration.audited)
-        log.log(
-            "Publishing: Google client \(configuration.clientId.prefix(12))..., tokens in \(tokenStoreDescription), "
-                + (configuration.audited ? "audited" : "uploads forced private until the compliance audit"))
         return PublishingServices(
-            accounts: provider, publisher: publisher,
-            state: .configured(clientId: configuration.clientId, audited: configuration.audited),
-            tokenStoreDescription: tokenStoreDescription, fakeServer: nil, uploadOptions: UploadOptions())
+            accounts: provider, publisher: publisher, state: state, tokenStoreDescription: tokenStoreDescription,
+            fakeServer: nil, uploadOptions: UploadOptions(), clientStore: clientStore)
     }
 
     private static func makeFake(layout: LibraryLayout, log: AppLog) async -> PublishingServices {
@@ -168,5 +203,37 @@ struct PublishingServices: Sendable {
         return PublishingServices(
             accounts: provider, publisher: publisher, state: .fake, tokenStoreDescription: "file \(tokenURL.path)",
             fakeServer: server, uploadOptions: fakeUploadOptions)
+    }
+
+    // MARK: Reconfiguring
+
+    /// Installs a client saved in the window: the provider and the publisher follow it in place, `state`
+    /// moves, and the publish tools appear in (or leave) the registry, so nothing needs a relaunch.
+    /// Pass nil for a client that was removed.
+    func apply(
+        _ configuration: GoogleClientConfiguration?, registry: (any ToolRegistry)?,
+        environment: [String: String] = ProcessInfo.processInfo.environment, log: AppLog? = nil
+    ) async {
+        guard let provider = accounts as? GoogleAccountProvider else { return }
+        await provider.reconfigure(configuration)
+        (publisher as? YouTubePublisher)?.setAudited(configuration?.audited ?? false)
+        stateBox.withLock {
+            if let configuration {
+                $0 = .configured(clientId: configuration.clientId, audited: configuration.audited)
+            } else {
+                $0 = .notConfigured(hint: GoogleClientConfiguration.setupHint(environment: environment))
+            }
+        }
+        log?.log(
+            configuration.map { "Publishing: Google client \($0.clientId.prefix(12))... set in the window" }
+                ?? "Publishing: the Google OAuth client was removed")
+        if let registry { await syncTools(in: registry) }
+    }
+
+    /// Registers or unregisters the two tools that need a client, to match `state`. `account_status` stays
+    /// registered either way: reporting `configured: false` is the answer the agent needs.
+    func syncTools(in registry: any ToolRegistry) async {
+        await EditorTools.setRegistered(
+            EditorTools.publishingToolNames, registered: state.isConfigured, in: registry)
     }
 }

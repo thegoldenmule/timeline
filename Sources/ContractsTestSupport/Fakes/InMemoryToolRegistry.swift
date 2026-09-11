@@ -29,6 +29,11 @@ public actor InMemoryToolRegistry: ToolRegistry {
         tools[tool.name] = tool
     }
 
+    public func unregister(_ name: String) {
+        guard tools.removeValue(forKey: name) != nil else { return }
+        order.removeAll { $0 == name }
+    }
+
     public func tool(named name: String) -> Tool? { tools[name] }
 
     public func list() -> [Tool] { order.compactMap { tools[$0] } }

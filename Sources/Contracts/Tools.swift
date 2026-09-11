@@ -283,6 +283,9 @@ public struct ToolContext: Sendable {
 /// `ToolError` and `EditorError` into error outputs, and records a receipt when a sink is configured.
 public protocol ToolRegistry: Sendable {
     func register(_ tool: Tool) async
+    /// Drops a tool from the table. The app calls it when the service a tool needs goes away, so the
+    /// model's list keeps matching what can actually run (the Google client being removed, say).
+    func unregister(_ name: String) async
     func tool(named name: String) async -> Tool?
     func list() async -> [Tool]
     func call(_ name: String, input: ToolInput, context: ToolContext) async throws -> ToolOutput

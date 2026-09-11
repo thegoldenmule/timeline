@@ -40,6 +40,23 @@ public enum EditorTools {
         return registry
     }
 
+    /// The tools that need a publisher and an account provider. Unlike every other service, the Google
+    /// OAuth client can be set while the app runs (docs/plans/publish-client-setup.md), so these two come
+    /// and go through `setRegistered` rather than only at boot.
+    public static let publishingToolNames = ["publish_youtube", "publish_status"]
+
+    /// Adds or drops tools by name on a running registry. Names that are not part of `all` are ignored.
+    public static func setRegistered(_ names: [String], registered: Bool, in registry: any ToolRegistry) async {
+        for name in names {
+            if registered {
+                guard let tool = all.first(where: { $0.name == name }) else { continue }
+                await registry.register(tool)
+            } else {
+                await registry.unregister(name)
+            }
+        }
+    }
+
     /// Registers the standard tools into any registry.
     public static func register(
         into registry: any ToolRegistry, services: ToolServices? = nil, includeUnavailable: Bool = true

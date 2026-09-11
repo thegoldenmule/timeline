@@ -112,6 +112,10 @@ struct AppServices: Sendable {
             thumbnails: thumbnails, waveforms: waveforms, receipts: receipts, publishing: publishingServices)
         let baseContext = ToolContext(projects: projects, services: toolServices, approvals: approvals, actor: .human)
         let registry = await EditorTools.standard(context: baseContext)
+        // The publisher exists in `.auto` whether or not a client does, so the publish tools have to be
+        // dropped by hand when there is none; `PublishingServices.apply` puts them back when one is saved
+        // in the window.
+        await publishingServices.syncTools(in: registry)
 
         let host = MCPServerHost(
             registry: registry, context: baseContext,
