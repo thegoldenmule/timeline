@@ -263,6 +263,37 @@ safe; renaming a bare English word across a file is not.
 was left out. It is free to add now — a `PanelID` case and one `PanelDivider` — but it is a different
 panel from the four this plan is about, and nobody asked for it yet.
 
+**The overflow the first pass shipped, and what caused it.** The assistant panel drew wider than its
+column: the empty state's sentence was clipped on both edges and the composer's plate ran past the panel.
+Three separate things were reporting an ideal width and none of them could honour a 280pt column.
+
+1. `AssistantDropTargetView.intrinsicContentSize` forwarded its `NSHostingView`'s, and the hosting view
+   installs its own min/ideal/max constraints by default. So the representable told SwiftUI the panel
+   wanted to be as wide as its widest content. Fixed by `sizingOptions = []`, dropping the
+   `intrinsicContentSize` override, and a `sizeThatFits` that returns the proposal — the panel's width
+   comes from `PanelLayoutModel` and nothing below it gets a vote.
+2. `ContentUnavailableView` has an ideal width and a floor it will not go under, so its description came
+   out clipped rather than wrapped. Replaced by `PanelEmptyState`, whose message is
+   `.fixedSize(horizontal: false, vertical: true)`.
+3. The composer's placeholder was a whole sentence. It is "Message the assistant" in both states now;
+   the hint about dropping clips is in the empty state, which has room to wrap it.
+
+**`barInsetH` is gone.** A header's symbol was 10pt from the edge and the content under it 8, which read
+as two different gutters because it *was* two different gutters. Bars now use `panelInset` horizontally
+and keep `barInsetV` for the vertical, so there is exactly one horizontal gutter in the window.
+
+**The inspector's form moved from `.grouped` to `.columns`** inside a `ScrollView`. Grouped is the System
+Settings look and its inset cards sat much further from the edge than any other panel's content — the
+single biggest reason the library and the inspector looked unrelated. `.columns` does not scroll itself,
+which grouped did, hence the `ScrollView`.
+
+**Verification is a window capture, not `ImageRenderer`.** `ImageRenderer` draws a placeholder glyph for
+every AppKit-backed control — `List`, `TextField`, `Picker`, `Button`, and any `NSViewRepresentable` —
+so it can smoke-test that a view builds but cannot show what a panel looks like. What works:
+`CGWindowListCopyWindowInfo` to find the running app's window id, then
+`screencapture -x -o -l<id>`, which captures that window alone. Collapsed states can be staged ahead of
+launch with `defaults write TimelineApp panel.<id>.collapsed -bool true`.
+
 **Still to check by hand** (§7): every item there is real. `SkeletonCheck` touches no SwiftUI, so nothing
 automated has drawn the four-column window; the layout arithmetic is covered by `PanelLayoutTests` and
 the chrome only by `ImageRenderer` smoke checks.
