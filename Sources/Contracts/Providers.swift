@@ -34,10 +34,15 @@ public struct Thumbnail: Sendable {
 public protocol ThumbnailProvider: Sendable {
     func filmstrip(for media: MediaReference, range: ClosedRange<RationalTime>, count: Int, height: Int)
         async throws -> [Thumbnail]
+
+    /// A single frame at `time`. A requirement rather than only an extension, because one frame and a
+    /// filmstrip are not the same job: a poster wants one seek, and an implementation that serves
+    /// filmstrips from sprite sheets would otherwise be made to build a whole sheet for it.
+    func thumbnail(for media: MediaReference, at time: RationalTime, height: Int) async throws -> Thumbnail?
 }
 
 extension ThumbnailProvider {
-    /// A single frame at `time`.
+    /// The obvious way, for implementations with nothing cheaper to offer.
     public func thumbnail(for media: MediaReference, at time: RationalTime, height: Int) async throws -> Thumbnail? {
         try await filmstrip(for: media, range: time...time, count: 1, height: height).first
     }
