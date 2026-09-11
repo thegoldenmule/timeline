@@ -29,7 +29,7 @@ without the window.
 | Preview | `RenderKit.PreviewPlayer` | owned by `ProjectDocument`: instruction-only edits update the live item, structural edits are compiled and swapped in on the second player; the window hosts its two `AVPlayerLayer`s (`PreviewLayerView`) |
 | Publishing: `accounts[.google]` | `PublishKit.GoogleAccountProvider` | `PublishingServices` (`Sources/TimelineApp/Services/`): the OAuth client from `GoogleClientConfiguration.load` (D3 lookup order), the token store from `TokenStoreSelection.resolve` (the 0600 file `google-tokens.json` for the unsigned binary, the Keychain from an `.app`), `accounts.json` next to it, the browser opened by `WorkspaceAuthorizationPresenter` (`NSWorkspace.shared.open`; AppKit stays in the app), PublishKit's loopback listener taking the redirect. Without a client the provider is registered unconfigured, so Settings shows the setup hint and `account_status` answers `configured: false` |
 | Publishing: `publishers[.youtube]` | `PublishKit.YouTubePublisher` | only when a client is configured (or under the fake): `QuotaMeter` at `<root>/Cache/publish-quota.json`, `audited` from the client file (false: uploads forced private, the sheet and the card say so). `TIMELINE_PUBLISHING=fake` boots the same two classes over `FakeYouTubeServer` with `FakeAuthorizationPresenter` (what the check uses); `TIMELINE_PUBLISHING=off` registers neither |
-| Timeline, inspector, approvals, jobs, agent, history, accounts, publish | `TimelineUI` | `TimelineView(viewModel:)`, `InspectorView`, `ApprovalStackView`, `JobList` (publish rows embed `PublishOutcomeView`), `AgentStatusBar` / `AgentPanelView` / `AgentComposerView`, `HistoryView`, `AccountView` (Settings), `PublishSheetView`, `PublishHistoryView` |
+| Timeline, panels, inspector, approvals, jobs, assistant, history, accounts, publish | `TimelineUI` | `TimelineView(viewModel:)`, `PanelTheme` / `PanelChrome` / `PanelHeader` / `PanelRail` / `PanelDivider` / `PanelLayoutModel` (`docs/design/ui-style.md`), `InspectorView`, `ApprovalStackView`, `JobList` (publish rows embed `PublishOutcomeView`), `AssistantStatusBar` / `AssistantPanelView` / `AssistantComposerView`, `HistoryView`, `ActorLabel`, `AccountView` (Settings), `PublishSheetView`, `PublishHistoryView` |
 
 ### The preview path
 
@@ -106,7 +106,14 @@ two-hour camera track against a five-minute render, ~45 s); `MEDIAKIT_BENCH=1` r
 first two and runs them in release (`make bench MEDIAKIT_BENCH=30` for a longer one). Everything else
 runs in `make test`.
 
-The window: the media library pane on the left (⌥⌘L, remembered in `showsLibrary`), the preview on top
+The window is four columns: the assistant on the leading edge, the media library, the preview and
+timeline, and a right column holding the inspector over the activity panel. Every panel is resizable by
+its divider and collapsible to a rail (a stacked panel folds to its own header bar instead, and the right
+column shows one merged rail when both of its panels are shut); sizes and collapsed flags are remembered
+under `panel.<id>.size` / `panel.<id>.collapsed`, and the window's own minimum follows them, so
+collapsing a panel lets it get narrower. Every panel wears the same header — symbol, name, its own
+controls — from `PanelChrome`, and every number in it comes from `PanelTheme`
+(`docs/design/ui-style.md`). The preview is on top
 (Play in the status bar or the space bar), TimelineUI's Metal timeline
 below (drag to move, trim handles, B splits at the playhead, Delete removes, Cmd-Z / Shift-Cmd-Z,
 pinch or scroll up and down to zoom — continuously, holding the playhead where it
@@ -116,11 +123,13 @@ razor and V puts it away, and while it is armed the pointer is a blade over the 
 cuts the clip under it, Shift-click every unlocked track, Option one member of a link group — the ruler
 and the track headers keep their ordinary behaviour throughout; every track
 header carries mute / solo / lock / remove buttons, one command per click), a status bar; the
-sidebar holds the inspector, the approval stack, the job list, the publishes, the history, the last
-window tool call (collapsed, and only once a control has called one — the agent's calls are in its own
-transcript), the MCP section, and the agent pane. Toolbar: New, Open, Fork, Import (library import as a job;
-the files land in the library and nowhere else, see below), Library (the pane), the tool picker
-(Select / Razor, which carries no key equivalent so that a bare letter cannot fire while the agent
+inspector panel holds the selected clip's properties, and the activity panel under it holds the approval
+stack, the job list, the publishes, the history, the last window tool call (collapsed, and only once a
+control has called one — the assistant's calls are in its own transcript), and the MCP section.
+Toolbar: New, Open, Fork, Import (library import as a job;
+the files land in the library and nowhere else, see below), the panel toggles (Assistant ⌥⌘A, Library
+⌥⌘L, Inspector ⌥⌘I, Activity ⌥⌘J — always ⌥⌘, for the same reason as the tool picker), the tool picker
+(Select / Razor, which carries no key equivalent so that a bare letter cannot fire while the assistant
 composer has focus), Split, Delete, Undo, Redo,
 Analyze (silence, onset envelope, shots on the selected clip's asset through `media_analyze`), Align (two
 selected clips: `align_audio` with the first as reference, then `moveClip` on the second), Export
@@ -128,24 +137,30 @@ selected clips: `align_audio` with the first as reference, then `moveClip` on th
 `publish_youtube` gated by the approval stack), Accounts (Settings). The player drives the playhead while
 playing; the timeline drives the player while paused.
 
-### The agent pane
+### The assistant panel
 
 There is no start control: the first message is the session's goal, every later one continues it
-(`AgentConsole.send`), and a session that failed is not resumable so the next message starts a fresh one.
-The status bar names what the session is doing, what it has cost, Stop while it runs, and New session
-once it is done. Sent messages are echoed into the transcript (`AgentTranscript.appendUserMessage`), so
-the pane reads as the conversation it is.
+(`AssistantConsole.send`), and a session that failed is not resumable so the next message starts a fresh
+one. The panel header names what the session is doing, what it has cost, Stop while it runs, and New
+session once it is done (`AssistantStatusBar` is the header's controls, not a bar of its own). Sent
+messages are echoed into the transcript (`AssistantTranscript.appendUserMessage`), so the panel reads as
+the conversation it is.
 
-Files dropped on the composer — library rows or Finder files — are *staged*, not imported: `AgentComposer`
-holds them as `AgentAttachment` chips (poster, kind, duration, a badge when the file has gone missing),
-they come off again before Send, and `AgentComposer.message` appends their paths under a line saying
-plainly that nothing was imported. `MediaImporter` is never reached from here; importing is the agent's
-call, through the tools. This is the one drop target in the window that does not import — the library
-pane and the timeline both do.
+Files dropped anywhere in the panel — library rows or Finder files — are *staged*, not imported:
+`AssistantComposer` holds them as `AssistantAttachment` chips (poster, kind, duration, a badge when the
+file has gone missing), they come off again before Send, and `AssistantComposer.message` appends their
+paths under a line saying plainly that nothing was imported. `MediaImporter` is never reached from here;
+importing is the assistant's call, through the tools. This is the one drop target in the window that does
+not import — the library panel and the timeline both do.
+
+The panel is called the Assistant; the protocol it runs on is still `AgentRuntime`, its module is still
+`AgentKit`, and the sidecar's working directory is still `<root>/Agent/`. The boundary is
+`Contracts.AgentRuntime`: above it the name is Assistant, at and below it the name is Agent.
+`TimelineCore.Actor.agent` stays too — it is the wire format; `ActorLabel` is what the window shows.
 
 ### The media library
 
-The pane on the leading edge of the window lists everything importable on this machine: the open
+The library panel lists everything importable on this machine: the open
 project's assets, read live from the document, plus every other project's media and every original in
 `Library/` that no project references, read from `services.catalog` (`MediaCatalog` in `Contracts`).
 `MediaLibraryModel` (TimelineUI) holds the state: a search field scored by `FuzzyMatch` over the display
@@ -194,7 +209,7 @@ alike — is promised through SwiftUI's drag bridge and resolved asynchronously,
 present and the data empty rather than nil), and which of the two representations wins the race varies
 from drop to drop, which is what made dropping a library row flakey. The drag still registers both, for
 other applications and as a fallback. Both drop targets branch on the *decoded* rows, never on the
-presence of the type, and fall back to the file URL: the agent pane stages the path (and asks the panel
+presence of the type, and fall back to the file URL: the assistant panel stages the path (and asks the library
 to turn it back into a row, so the chip keeps its poster and duration), the timeline imports it, which
 for library media is a content-hash hit that inserts the asset the library already holds.
 

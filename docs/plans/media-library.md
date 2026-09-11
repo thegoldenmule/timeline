@@ -49,7 +49,7 @@ untouched.
 
 **There is no library panel.** The window is one `HSplitView`: preview + timeline + status bar on the
 left, a `VSplitView` sidebar on the right holding inspector, approvals, jobs, publishes, history, last
-tool, MCP, and the agent panel. Nothing lists the project's assets, let alone another project's.
+tool, MCP, and the assistant panel. Nothing lists the project's assets, let alone another project's.
 
 **There is no cross-project index.** `OpenProjects` (`AppServices.swift`) is the *open* documents only —
 `ProjectDirectory`, what tools resolve `projectId` against. Packages are discovered by the user through
@@ -284,12 +284,15 @@ Resulting surface behaviour:
 `minWidth: 220, idealWidth: 280, maxWidth: 420`, before the preview/timeline column. Toggled by a
 toolbar `Button("Library", systemImage: "rectangle.stack")` in the first `ToolbarItemGroup` next to
 Import, with `.keyboardShortcut("l", modifiers: [.command, .option])`; the flag is
-`@AppStorage("showsLibrary")` on `AppModel`, default on.
+`@AppStorage("showsLibrary")` on `AppModel`, default on. *(Superseded by `docs/plans/panels.md`: the
+library is one of four panels now, its width and collapsed flag live in `PanelLayoutModel` under
+`panel.library.*`, and `showsLibrary` is migrated once and then inert.)*
 
 **Header.** Search `TextField` (`.roundedBorder`, `.searchable` is not used because the pane is not a
 `NavigationSplitView` column) · a segmented `Picker` for kind — All / Video / Audio / Images, mapping to
 `AssetKind` · a scope `Picker` — This project / All projects · a Refresh button · an Import… button
-calling the same `presentImportPanel`.
+calling the same `presentImportPanel`. *(Refresh and Import moved into the shared `PanelHeader`'s
+controls slot; see `docs/plans/panels.md`.)*
 
 **Rows.** A `List` of `MediaLibraryRow`: a 64×36 thumbnail, the display name
 (`.lineLimit(1).truncationMode(.middle)`), and a caption line with `mm:ss`, kind, and — when `projectId`
