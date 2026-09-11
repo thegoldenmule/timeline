@@ -465,11 +465,21 @@ struct EditorView: View {
             Button("Fork", systemImage: "arrow.triangle.branch") { model.presentForkPanel() }
                 .disabled(model.document == nil)
             Button("Import", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
-            Button("Library", systemImage: "rectangle.stack") {
-                withAnimation(PanelChromeAnimation.collapse) { panels.toggle(.library) }
+        }
+        ToolbarItemGroup {
+            // A `ControlGroup`, not a `Menu`: a menu's content is not built until it opens, so its key
+            // equivalents may never be installed. Every toggle is ⌥⌘-modified — see the note on the
+            // tool picker below for why a bare key cannot be used anywhere in this window.
+            ControlGroup {
+                ForEach(PanelID.panels) { id in
+                    Button(id.title, systemImage: id.systemImage) {
+                        withAnimation(PanelChromeAnimation.collapse) { panels.toggle(id) }
+                    }
+                    .keyboardShortcut(id.shortcut, modifiers: [.command, .option])
+                    .symbolVariant(panels.isCollapsed(id) ? .none : .fill)
+                    .help(panels.isCollapsed(id) ? "Show \(id.title)" : "Hide \(id.title)")
+                }
             }
-            .keyboardShortcut(PanelID.library.shortcut, modifiers: [.command, .option])
-            .help("Show or hide the media library")
         }
         ToolbarItemGroup {
             // No `.keyboardShortcut`: SwiftUI installs those as key equivalents, which AppKit dispatches

@@ -35,7 +35,7 @@ struct TimelineWindowApp: App {
         WindowGroup("Timeline") {
             ContentView(model: model)
         }
-        .defaultSize(width: 1400, height: 860)
+        .defaultSize(width: 1600, height: 920)
         Settings {
             SettingsView(model: model)
         }
