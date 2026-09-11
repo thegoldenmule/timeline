@@ -99,7 +99,8 @@ public struct ApprovalCardView: View {
                 Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
                 Text(request.tool).font(.headline)
                 Spacer()
-                Text(request.actor.description).font(.caption).foregroundStyle(.secondary)
+                Text(ActorLabel.text(request.actor)).font(.caption).foregroundStyle(.secondary)
+                    .help(ActorLabel.detail(request.actor) ?? "")
             }
             Text(summary).font(.body).textSelection(.enabled)
             if !details.isEmpty {

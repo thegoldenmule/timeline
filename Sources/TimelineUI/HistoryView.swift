@@ -63,8 +63,9 @@ public struct HistoryView: View {
                     VStack(alignment: .leading) {
                         Text(row.label).strikethrough(!row.isLive)
                             .foregroundStyle(row.isLive ? .primary : .secondary)
-                        Text("\(row.actor.description) · \(row.eventCount) events").font(.caption)
+                        Text("\(ActorLabel.text(row.actor)) · \(row.eventCount) events").font(.caption)
                             .foregroundStyle(.secondary)
+                            .help(ActorLabel.detail(row.actor) ?? "")
                     }
                     Spacer()
                     if row.isUndoTarget { Text("undo").font(.caption2).foregroundStyle(.secondary) }

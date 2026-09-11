@@ -48,3 +48,20 @@ struct StyleTests {
         #expect(abs(resolved.opacity - 0.5) < 0.01)
     }
 }
+
+@Suite("Actor label")
+struct ActorLabelTests {
+    /// Both halves, so nobody later "helpfully" unifies them: the window says Assistant, the wire says
+    /// agent, and `Actor.init(_:)` has to keep parsing what `description` writes.
+    @Test func theWindowSaysAssistantAndTheWireStillSaysAgent() {
+        let actor = Actor.agent(sessionId: "s1")
+        #expect(ActorLabel.text(actor) == "Assistant")
+        #expect(ActorLabel.text(.human) == "You")
+        #expect(ActorLabel.text(.system) == "System")
+
+        #expect(actor.description == "agent:s1")
+        #expect(Actor(actor.description) == actor)
+        #expect(ActorLabel.detail(actor) == "Assistant session s1")
+        #expect(ActorLabel.detail(.human) == nil)
+    }
+}
