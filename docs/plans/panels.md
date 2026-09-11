@@ -307,6 +307,19 @@ launch with `defaults write TimelineApp panel.<id>.collapsed -bool true`.
   existing tests covered foreign and library-only media but never the open project's own, which is how
   it survived. `Row` now carries `openProjectId`, and the test does too.
 
+**Three more the second pass turned up, all in the library's rows:**
+
+- **A symbols-only segmented control needs a tooltip per segment, and SwiftUI cannot give it one.**
+  `.help` on a `Picker(.segmented)` item is dropped. AppKit has `setToolTip(_:forSegment:)`, so
+  `SymbolSegmentedPicker` is the thin `NSViewRepresentable` that reaches it.
+- **Stills had no thumbnail.** `AVThumbnailProvider` builds sprite sheets with
+  `AVAssetImageGenerator`, and a PNG has no video track, so every image drew a placeholder symbol —
+  the wrong one, too, since the fallback picked `film` for anything that was not audio. The provider
+  now decodes a still with `CGImageSource` and skips the sheet path entirely.
+- **A thumbnail fetch that came back empty was retried on every redraw**, forever, for as long as the
+  row was on screen: `LibraryThumbnailCache` stored images and in-flight tasks but had nowhere to put
+  "there is nothing here". It remembers failures now, and `clear()` forgets them so a rescan retries.
+
 **Still to check by hand** (§7): every item there is real. `SkeletonCheck` touches no SwiftUI, so nothing
 automated has drawn the four-column window; the layout arithmetic is covered by `PanelLayoutTests` and
 the chrome only by `ImageRenderer` smoke checks.

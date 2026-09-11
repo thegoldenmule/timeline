@@ -342,17 +342,17 @@ struct AssistantAttachmentChip: View {
     var body: some View {
         HStack(spacing: PanelTheme.controlGap) {
             poster
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
                 Text(attachment.displayName).font(PanelTheme.caption).lineLimit(1).truncationMode(.middle)
                 Text(attachment.detail).font(PanelTheme.detail).foregroundStyle(.secondary).lineLimit(1)
             }
             Button("Remove", systemImage: "xmark.circle.fill") { onRemove() }
                 .labelStyle(.iconOnly).buttonStyle(.borderless)
                 .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .help("Take \(attachment.displayName) off the message")
         }
-        .padding(.leading, 3)
-        .padding(.trailing, 5)
-        .padding(.vertical, 3)
+        .padding(.horizontal, PanelTheme.rowGap)
+        .padding(.vertical, PanelTheme.hairGap)
         .frame(maxWidth: 220)
         .background(RoundedRectangle(cornerRadius: PanelTheme.chipRadius).fill(PanelTheme.chipFill))
         .overlay(

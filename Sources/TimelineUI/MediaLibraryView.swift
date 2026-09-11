@@ -337,13 +337,14 @@ public struct MediaLibraryView: View {
 
             // Sized to its content and pinned to the gutter: a segmented control stretched across the
             // panel gives four icons a great deal of room they do not need, and centred it reads as
-            // having been dropped there.
-            Picker("Kind", selection: model.kindFilter) {
-                ForEach(MediaLibraryModel.KindFilter.allCases) { kind in
-                    Image(systemName: kind.symbolName).help(kind.title).accessibilityLabel(kind.title).tag(kind)
+            // having been dropped there. `SymbolSegmentedPicker` rather than SwiftUI's, because these
+            // segments are icons and icons need a tooltip each.
+            SymbolSegmentedPicker(
+                selection: model.kindFilter,
+                items: MediaLibraryModel.KindFilter.allCases.map {
+                    .init(value: $0, symbolName: $0.symbolName, title: $0.title)
                 }
-            }
-            .pickerStyle(.segmented).labelsHidden().controlSize(.small)
+            )
             .fixedSize()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -354,10 +355,23 @@ public struct MediaLibraryView: View {
         let rows = self.model.rows
         return Group {
             if rows.isEmpty {
-                PanelEmptyState(
-                    self.model.query.isEmpty ? "No media" : "No matches", systemImage: "rectangle.stack",
-                    message: self.model.query.isEmpty
-                        ? "Import files to add them to the library" : "Nothing matches “\(self.model.query)”")
+                // A row, not a centred panel-wide state: the library's list starts under its filters
+                // and a big block in the middle of it lines up with nothing else in the window.
+                List {
+                    VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
+                        Text(self.model.query.isEmpty ? "No media" : "No matches").foregroundStyle(.secondary)
+                        Text(
+                            self.model.query.isEmpty
+                                ? "Import files to add them to the library"
+                                : "Nothing matches “\(self.model.query)”"
+                        )
+                        .font(PanelTheme.detail).foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, PanelTheme.hairGap)
+                    .selectionDisabled()
+                }
+                .listStyle(.inset)
+                .contentMargins(.top, PanelTheme.rowGap, for: .scrollContent)
             } else {
                 List(rows, selection: model.selection) { row in
                     MediaLibraryRow(model: self.model, row: row)
@@ -479,14 +493,23 @@ struct MediaLibraryRow: View {
 
     private var second: RationalTime { RationalTime(1, 1) }
 
+    /// What a row draws where its poster will go.
+    static func placeholderSymbol(_ kind: AssetKind) -> String {
+        switch kind {
+        case .audio: "waveform"
+        case .image: "photo"
+        default: "film"
+        }
+    }
+
     @ViewBuilder private var poster: some View {
         ZStack {
             RoundedRectangle(cornerRadius: PanelTheme.posterRadius).fill(PanelTheme.chipFill)
             if let image = model.poster(for: row) {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
             } else {
-                // Audio never has a poster, and a video's is drawn as soon as the fetch lands.
-                Image(systemName: row.asset.kind == .audio ? "waveform" : "film").foregroundStyle(.secondary)
+                // Audio never has a poster; everything else draws its own kind until the fetch lands.
+                Image(systemName: MediaLibraryRow.placeholderSymbol(row.asset.kind)).foregroundStyle(.secondary)
             }
         }
         .frame(width: 64, height: 36)
