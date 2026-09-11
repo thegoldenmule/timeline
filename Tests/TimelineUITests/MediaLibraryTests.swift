@@ -54,6 +54,12 @@ struct MediaLibraryTests {
         // Foreign media names its project; the open project's own rows and library-only media do not.
         #expect(model.rows.first { $0.asset.displayName == "gig.mov" }?.foreignProjectName == "Gig")
         #expect(model.rows.first { $0.asset.displayName == "loose.wav" }?.foreignProjectName == nil)
+        // The open project's own media names no project: the human is already looking at it, and a
+        // row that said so on every line was just noise down the panel.
+        for row in model.rows where row.item.projectId == f.viewModel.project.id {
+            #expect(row.foreignProjectName == nil)
+        }
+        #expect(model.rows.contains { $0.item.projectId == f.viewModel.project.id })
         #expect(model.rows.first { $0.asset.displayName == "IMG_1575.MOV" }?.item.projectId == f.viewModel.project.id)
         #expect(model.projects.map(\.name) == ["Gig"])
     }

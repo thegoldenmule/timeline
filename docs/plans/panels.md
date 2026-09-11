@@ -294,6 +294,19 @@ so it can smoke-test that a view builds but cannot show what a panel looks like.
 `screencapture -x -o -l<id>`, which captures that window alone. Collapsed states can be staged ahead of
 launch with `defaults write TimelineApp panel.<id>.collapsed -bool true`.
 
+**The library panel's second pass.** Three things, all visible the moment it had real rows in it:
+
+- **The first row was clipped along its top edge.** A `List` sitting flush under other content in a
+  `VStack` cuts its first row; `.contentMargins(.top, rowGap, for: .scrollContent)` is the fix.
+- **Two stacked full-width segmented controls read as two loud accent blocks** in a 280pt column. Scope
+  is a view option, so it moved into the panel header as a filter menu (filled when it is not the
+  default), and the kind filter became one compact symbols-only segmented control sized to its content
+  and pinned to the gutter. Two rows of filters instead of three, one accent block instead of two.
+- **Every row named its project.** `foreignProjectName` returned the name whenever `item.projectId` was
+  set, and `openProjectItems` sets it to the open project — so all six rows ended in "· Untitled". The
+  existing tests covered foreign and library-only media but never the open project's own, which is how
+  it survived. `Row` now carries `openProjectId`, and the test does too.
+
 **Still to check by hand** (§7): every item there is real. `SkeletonCheck` touches no SwiftUI, so nothing
 automated has drawn the four-column window; the layout arithmetic is covered by `PanelLayoutTests` and
 the chrome only by `ImageRenderer` smoke checks.

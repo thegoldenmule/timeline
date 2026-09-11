@@ -178,6 +178,14 @@ rule a reviewer can grep rather than argue symbol by symbol.
 `TimelineCore.Actor.agent` stays too — `Actor.description` is the wire format (`"agent:<sessionId>"`) and
 `Actor.init(_:)` parses that prefix back. `ActorLabel` is what the window shows.
 
+## Filter controls
+
+A filter that changes *what is listed* belongs in the panel body. A filter that changes *where the panel
+looks* is a view option and belongs in the header's controls slot, as a menu. Segmented controls are
+sized to their content and pinned to the gutter, not stretched across the panel: a stretched one gives
+its segments room they do not need, and a centred one reads as having been dropped there. Two stacked
+full-width segmented controls in one panel is the thing this rule exists to prevent.
+
 ## The inspector's form
 
 `InspectorView` uses `.formStyle(.columns)` inside a `ScrollView`, not `.formStyle(.grouped)`. Grouped is

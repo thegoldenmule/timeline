@@ -345,10 +345,7 @@ struct EditorView: View {
             PanelDivider(.assistant, layout: panels)
             if let library = model.library {
                 PanelChrome(.library, layout: panels) {
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await library.load() } }
-                        .labelStyle(.iconOnly).buttonStyle(.borderless).disabled(library.isLoading)
-                    Button("Import…", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
-                        .labelStyle(.iconOnly).buttonStyle(.borderless)
+                    MediaLibraryControls(model: library, onImport: { model.presentImportPanel() })
                 } content: {
                     MediaLibraryView(
                         model: library, onInsert: { model.insertLibraryItems($0) },

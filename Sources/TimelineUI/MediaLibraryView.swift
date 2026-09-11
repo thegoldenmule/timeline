@@ -29,6 +29,16 @@ public final class MediaLibraryModel {
             }
         }
 
+        /// The segmented control is symbols only: four words do not fit the narrowest the panel goes.
+        public var symbolName: String {
+            switch self {
+            case .all: "square.grid.2x2"
+            case .video: "film"
+            case .audio: "waveform"
+            case .image: "photo"
+            }
+        }
+
         var assetKind: AssetKind? {
             switch self {
             case .all: nil
@@ -59,12 +69,18 @@ public final class MediaLibraryModel {
         public var url: URL
         /// The search score, for tests and for a stable order.
         public var score: Int
+        /// The open project, so a row of its own media does not announce a project the human is
+        /// already looking at.
+        public var openProjectId: ProjectID?
 
         public var id: String { item.id }
         public var asset: Asset { item.asset }
 
         /// Nil for an item that belongs to the open project or to no project at all.
-        public var foreignProjectName: String? { item.projectId == nil ? nil : item.projectName }
+        public var foreignProjectName: String? {
+            guard let projectId = item.projectId, projectId != openProjectId else { return nil }
+            return item.projectName
+        }
     }
 
     /// How the three searchable fields are weighted against each other (`conventions.md`).
@@ -166,7 +182,7 @@ public final class MediaLibraryModel {
                 Row(
                     item: item, isInProject: hashes.contains(item.contentHash),
                     isOffline: item.asset.offline || missingHashes.contains(item.contentHash), url: url,
-                    score: score))
+                    score: score, openProjectId: viewModel.project.id))
         }
         return rows.sorted(by: MediaLibraryModel.isOrderedBefore)
     }
@@ -285,10 +301,10 @@ public struct MediaLibraryView: View {
     public var body: some View {
         @Bindable var model = model
         VStack(spacing: PanelTheme.controlGap) {
-            header(model: $model)
+            filters(model: $model)
             if let error = model.lastError {
-                Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).lineLimit(2).padding(
-                    .horizontal, PanelTheme.panelInset)
+                Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).lineLimit(2)
+                    .padding(.horizontal, PanelTheme.panelInset)
             }
             list(model: $model)
         }
@@ -297,22 +313,39 @@ public struct MediaLibraryView: View {
         .task { await model.load() }
     }
 
-    private func header(model: Bindable<MediaLibraryModel>) -> some View {
+    /// Search, then the kind filter. Scope is not here — it is a view option, so it lives in the panel
+    /// header's controls (`MediaLibraryControls`), which keeps this to two rows at any panel width.
+    private func filters(model: Bindable<MediaLibraryModel>) -> some View {
         VStack(spacing: PanelTheme.controlGap) {
-            // Not `.searchable`: the panel is a plain column, not a navigation column. Refresh and
-            // Import are not here either — they are the panel header's controls (`PanelChrome`).
-            TextField("Search media", text: model.query).textFieldStyle(.roundedBorder)
+            // Not `.searchable`: the panel is a plain column, not a navigation column. Hand-built
+            // rather than `.roundedBorder` so it carries the magnifier and a clear button.
+            HStack(spacing: PanelTheme.controlGap) {
+                Image(systemName: "magnifyingglass").font(PanelTheme.caption).foregroundStyle(.secondary)
+                TextField("Search media", text: model.query).textFieldStyle(.plain)
+                if !self.model.query.isEmpty {
+                    Button("Clear", systemImage: "xmark.circle.fill") { self.model.query = "" }
+                        .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.tertiary)
+                        .help("Clear the search")
+                }
+            }
+            .padding(.horizontal, PanelTheme.controlGap)
+            .padding(.vertical, PanelTheme.rowGap)
+            .background(RoundedRectangle(cornerRadius: PanelTheme.chipRadius).fill(PanelTheme.fieldFill))
+            .overlay(
+                RoundedRectangle(cornerRadius: PanelTheme.chipRadius)
+                    .strokeBorder(PanelTheme.borderIdle, lineWidth: PanelTheme.borderWidth))
+
+            // Sized to its content and pinned to the gutter: a segmented control stretched across the
+            // panel gives four icons a great deal of room they do not need, and centred it reads as
+            // having been dropped there.
             Picker("Kind", selection: model.kindFilter) {
-                ForEach(MediaLibraryModel.KindFilter.allCases) { Text($0.title).tag($0) }
+                ForEach(MediaLibraryModel.KindFilter.allCases) { kind in
+                    Image(systemName: kind.symbolName).help(kind.title).accessibilityLabel(kind.title).tag(kind)
+                }
             }
-            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: .infinity)
-            Picker("Scope", selection: model.scope) {
-                // The segment labels are padded, not the control: a segmented `Picker` sizes to its
-                // content and centres inside whatever frame it is given, so a two-segment row would
-                // otherwise sit narrower than the four-segment one above it.
-                ForEach(MediaLibraryModel.Scope.allCases) { Text($0.title).frame(maxWidth: .infinity).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: .infinity)
+            .pickerStyle(.segmented).labelsHidden().controlSize(.small)
+            .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, PanelTheme.panelInset)
     }
@@ -351,6 +384,9 @@ public struct MediaLibraryView: View {
                         }
                 }
                 .listStyle(.inset)
+                // Without this the first row is drawn hard against the filters above and comes out
+                // clipped along its top edge.
+                .contentMargins(.top, PanelTheme.rowGap, for: .scrollContent)
                 .onKeyPress(.return) {
                     let items = self.model.dragItems(self.model.selection)
                     guard !items.isEmpty else { return .ignored }
@@ -373,6 +409,42 @@ public struct MediaLibraryView: View {
         let items = rows.compactMap { model.dragItem(for: $0) }
         guard !items.isEmpty else { return }
         onInsert(items)
+    }
+}
+
+/// The library panel header's controls: which projects to list, a rescan, and the import panel. They
+/// live here rather than in the app so the panel's chrome is all in one file.
+public struct MediaLibraryControls: View {
+    public let model: MediaLibraryModel
+    public var onImport: () -> Void
+
+    public init(model: MediaLibraryModel, onImport: @escaping () -> Void) {
+        self.model = model
+        self.onImport = onImport
+    }
+
+    public var body: some View {
+        @Bindable var model = model
+        Menu {
+            Picker("Scope", selection: $model.scope) {
+                ForEach(MediaLibraryModel.Scope.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(
+                systemName: self.model.scope == .allProjects
+                    ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Which projects to list")
+        Button("Refresh", systemImage: "arrow.clockwise") { Task { await self.model.load() } }
+            .labelStyle(.iconOnly).buttonStyle(.borderless).disabled(self.model.isLoading)
+            .help("Rescan the library")
+        Button("Import…", systemImage: "square.and.arrow.down") { onImport() }
+            .labelStyle(.iconOnly).buttonStyle(.borderless)
+            .help("Import files into the library")
     }
 }
 
