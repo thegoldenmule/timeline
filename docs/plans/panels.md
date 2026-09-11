@@ -224,4 +224,45 @@ read `TimelineTheme`, so it would notice the two palettes being merged.
 
 ## 9. What the implementation did differently
 
-_Filled in when the work lands._
+**The tokens are one file, not two.** The plan floated splitting the panel *metrics* out of the theme so
+the layout model could read `railWidth` without depending on the chrome. It turned out there was nothing
+to decouple: `PanelTheme` holds no views, so `PanelLayoutModel` imports it freely. One file, three
+consumers.
+
+**`PanelID.activity` stores no size.** It is always the flexible panel while it is open, so there is
+nothing to clamp or remember. Without a `storesSize` flag the re-clamp pass wrote a meaningless height
+into `panel.activity.size` every time anything moved.
+
+**The available height is a second geometry reading, not a derived one.** The plan had one
+`onGeometryChange` on the outer row. The stacked panels need their own, because the right column's height
+is the window's minus nothing the row knows about. So `PanelLayoutModel` takes `availableWidthChanged`
+and `availableHeightChanged` separately, and `upperBound` switches on the panel's axis.
+
+**The container swap shipped without the sidebar's split.** Step 9 was meant to be visually inert, and
+converting the sidebar's `VSplitView` in the same commit would have meant pointing the new divider at
+`.inspector` while the panel underneath it was still the assistant — a persisted number that would mean
+something different one commit later. The vertical split waited until it was two real panels.
+
+**`AssistantStatusBar` kept its name and its `public init`.** It lost its `Label("Agent")`, its padding
+and its `.background(.bar)` — those are `PanelHeader`'s now — and it lost its internal `Spacer`, because
+the header already has one and two greedy spacers split the slack instead of pushing the controls to the
+trailing edge. Keeping the type meant `PanelTests` kept compiling through the whole rename.
+
+**`Actor.description` was the string nobody had listed.** It renders "agent:<uuid>" on every history row
+and approval card, it is the JSON wire format, and `TimelineCore` is frozen — so `ActorLabel` in
+`TimelineUI` is what the window shows, and a test asserts both halves so the two cannot be "helpfully"
+unified later.
+
+**One rename regex over-reached twice**, both caught by the compiler and a diff read: `\bagent\b` in
+`SkeletonCheck` hit the `AppServices.boot(agent:)` argument label and the `"agent"` step labels that
+`integration.md` quotes verbatim, and in `Views.swift` it turned "which agent runtime the window got"
+into "assistant runtime" — which is wrong, because it *is* the `AgentRuntime`. Renaming by type name is
+safe; renaming a bare English word across a file is not.
+
+**Not done, and deliberately:** the optional divider between the preview and the timeline (step 9 of §5)
+was left out. It is free to add now — a `PanelID` case and one `PanelDivider` — but it is a different
+panel from the four this plan is about, and nobody asked for it yet.
+
+**Still to check by hand** (§7): every item there is real. `SkeletonCheck` touches no SwiftUI, so nothing
+automated has drawn the four-column window; the layout arithmetic is covered by `PanelLayoutTests` and
+the chrome only by `ImageRenderer` smoke checks.
