@@ -32,6 +32,7 @@ Tests live in `Tests/<Target>Tests` and use Swift Testing (`import Testing`). `s
 - Ids are UUIDv7 strings minted through `IDGenerator`; tests inject a deterministic generator and `Clock`.
 - JSON: `RationalTime` encodes as `{ "v": Int64, "ts": Int32 }`; state documents are encoded with `[.sortedKeys, .withoutEscapingSlashes]` so they are canonical.
 - No magic numbers for tunables: thresholds live in value types such as `AlignmentParameters`.
+- SwiftUI chrome reads its spacing, radii, type, and colour from `PanelTheme` and builds its headers from `PanelChrome`; see `ui-style.md`. A literal padding, radius, or font in a panel is a review comment.
 - `make lint` runs `swift format lint --strict`; `make format` fixes. `make test` runs everything; `./ci.sh` runs both.
 
 ## Media in tests
