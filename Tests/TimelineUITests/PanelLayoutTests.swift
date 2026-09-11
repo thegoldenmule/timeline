@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import TimelineUI
@@ -170,6 +171,29 @@ struct PanelLayoutTests {
             defaults.set(false, forKey: PanelLayoutModel.legacyLibraryKey)
             defaults.set(false, forKey: PanelID.library.collapsedKey)
             #expect(!PanelLayoutModel(defaults: defaults).isCollapsed(.library))
+        }
+    }
+
+    @Test func theChromeTheRailAndTheDividerAllRender() {
+        withPanelDefaults { defaults in
+            let model = PanelLayoutModel(defaults: defaults)
+            let chrome = PanelChrome(.library, layout: model) {
+                Button("Refresh", systemImage: "arrow.clockwise") {}.labelStyle(.iconOnly)
+            } content: {
+                Color.clear
+            }
+            #expect(ImageRenderer(content: chrome.frame(height: 400)).cgImage != nil)
+
+            let rail = PanelRail([.inspector, .activity], layout: model)
+            #expect(ImageRenderer(content: rail.frame(height: 400)).cgImage != nil)
+
+            let divider = PanelDivider(.library, layout: model)
+            #expect(ImageRenderer(content: divider.frame(height: 400)).cgImage != nil)
+
+            // A stacked panel folds to its own header bar rather than a rail.
+            model.setCollapsed(.inspector, true)
+            let folded = PanelChrome(.inspector, layout: model) { Color.clear }
+            #expect(ImageRenderer(content: folded.frame(width: 300)).cgImage != nil)
         }
     }
 }
