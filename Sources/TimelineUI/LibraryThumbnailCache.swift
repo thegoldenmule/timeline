@@ -34,6 +34,9 @@ public final class LibraryThumbnailCache {
     private var images: [Key: CGImage] = [:]
     private var order: [Key] = []
     private var tasks: [Key: Task<Void, Never>] = [:]
+    /// Keys whose fetch came back empty. Without this a row that has no picture to show starts a fresh
+    /// fetch on every single redraw, for as long as it is on screen.
+    private var failed: Set<Key> = []
     public private(set) var fetchCount = 0
     public private(set) var failedCount = 0
 
@@ -54,7 +57,7 @@ public final class LibraryThumbnailCache {
         let key = Key(
             contentHash: media.contentHash, time: LibraryThumbnailCache.posterTime(for: duration), height: height)
         if let image = images[key] { return image }
-        guard let provider = thumbnails, tasks[key] == nil else { return nil }
+        guard let provider = thumbnails, tasks[key] == nil, !failed.contains(key) else { return nil }
         fetchCount += 1
         tasks[key] = Task { @MainActor [weak self] in
             let thumbnail = try? await provider.thumbnail(for: media, at: key.time, height: height)
@@ -63,6 +66,7 @@ public final class LibraryThumbnailCache {
                 self.store(thumbnail.image, for: key)
             } else {
                 self.failedCount += 1
+                self.failed.insert(key)
             }
             self.tasks[key] = nil
             self.onUpdate?()
@@ -91,5 +95,6 @@ public final class LibraryThumbnailCache {
         tasks = [:]
         images = [:]
         order = []
+        failed = []
     }
 }

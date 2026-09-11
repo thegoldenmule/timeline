@@ -16,8 +16,13 @@ public final class FakeThumbnailProvider: ThumbnailProvider, Sendable {
 
     private let state = Mutex<[Call]>([])
     public let delayPerFrame: Duration?
+    /// Answers every request with no frames, the way the real provider does for a file it cannot draw.
+    public let findsNothing: Bool
 
-    public init(delayPerFrame: Duration? = nil) { self.delayPerFrame = delayPerFrame }
+    public init(delayPerFrame: Duration? = nil, findsNothing: Bool = false) {
+        self.delayPerFrame = delayPerFrame
+        self.findsNothing = findsNothing
+    }
 
     public var calls: [Call] { state.withLock { $0 } }
 
@@ -25,6 +30,7 @@ public final class FakeThumbnailProvider: ThumbnailProvider, Sendable {
         async throws -> [Thumbnail]
     {
         state.withLock { $0.append(Call(media: media, range: range, count: count, height: height)) }
+        guard !findsNothing else { return [] }
         let span = range.upperBound - range.lowerBound
         var result: [Thumbnail] = []
         for i in 0..<max(count, 0) {

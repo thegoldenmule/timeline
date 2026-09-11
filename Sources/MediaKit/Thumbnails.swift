@@ -3,8 +3,10 @@ import Contracts
 import CoreGraphics
 import CoreImage
 import Foundation
+import ImageIO
 import Synchronization
 import TimelineCore
+import UniformTypeIdentifiers
 
 /// Filmstrip frames from content-addressed sprite sheets. A request picks a frame rate from `fpsLadder` (the
 /// smallest at or above the requested density) and a tile height from `tileHeights`; the sheet for that
@@ -89,6 +91,15 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
         async throws -> [Thumbnail]
     {
         guard count > 0 else { return [] }
+        // A still has no video track, so the sprite-sheet path cannot produce anything for it. Decode
+        // the file once instead and hand back the same picture for every requested time.
+        if let still = AVThumbnailProvider.still(media.url, height: height) {
+            let span = range.upperBound - range.lowerBound
+            return (0..<count).map { i in
+                let time = count > 1 ? range.lowerBound + span * Int64(i) / Int64(count - 1) : range.lowerBound
+                return Thumbnail(time: time, image: still)
+            }
+        }
         let span = range.upperBound - range.lowerBound
         let times: [RationalTime] = (0..<count).map { i in
             count > 1 ? range.lowerBound + span * Int64(i) / Int64(count - 1) : range.lowerBound
@@ -239,6 +250,22 @@ public final class AVThumbnailProvider: ThumbnailProvider, Sendable {
     }
 
     private static let context = CIContext(options: [.cacheIntermediates: false])
+
+    /// The picture in a still-image file, scaled to `height`, or nil when the file is not a still.
+    /// `CGImageSource` draws PNG, JPEG, HEIC and the rest; `AVAssetImageGenerator` draws none of them.
+    static func still(_ url: URL, height: Int) -> CGImage? {
+        guard let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image),
+            let source = CGImageSourceCreateWithURL(url as CFURL, nil)
+        else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            // Bounds the longer edge, so ask for enough that a wide still still has `height` rows.
+            kCGImageSourceThumbnailMaxPixelSize: max(1, height * 8),
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return image.height == height ? image : scaled(image, toHeight: height)
+    }
 
     static func scaled(_ image: CGImage, toHeight height: Int) -> CGImage {
         let width = max(1, Int((Double(image.width) * Double(height) / Double(image.height)).rounded()))

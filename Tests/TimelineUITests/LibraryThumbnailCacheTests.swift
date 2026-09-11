@@ -39,6 +39,26 @@ struct LibraryThumbnailCacheTests {
         #expect(call.count == 1)
     }
 
+    /// A fetch that comes back empty is remembered. Without that the row starts a fresh one on every
+    /// redraw, for as long as it is on screen.
+    @Test func aFetchThatFindsNothingIsNotTriedAgain() async throws {
+        let provider = FakeThumbnailProvider(findsNothing: true)
+        let cache = LibraryThumbnailCache(thumbnails: provider)
+
+        #expect(cache.poster(for: media(), kind: .image, duration: duration) == nil)
+        #expect(cache.fetchCount == 1)
+        await cache.drain()
+        #expect(cache.failedCount == 1)
+
+        for _ in 0..<5 { #expect(cache.poster(for: media(), kind: .image, duration: duration) == nil) }
+        #expect(cache.fetchCount == 1, "the empty answer is remembered")
+
+        // Clearing forgets it, so a rescan can try again.
+        cache.clear()
+        #expect(cache.poster(for: media(), kind: .image, duration: duration) == nil)
+        #expect(cache.fetchCount == 2)
+    }
+
     @Test func twoRequestsForTheSameItemShareOneFetch() async throws {
         let provider = FakeThumbnailProvider(delayPerFrame: .milliseconds(20))
         let cache = LibraryThumbnailCache(thumbnails: provider)

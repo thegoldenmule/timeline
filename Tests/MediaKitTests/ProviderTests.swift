@@ -1,5 +1,6 @@
 import Contracts
 import ContractsTestSupport
+import CoreGraphics
 import Foundation
 import Testing
 import TimelineCore
@@ -7,6 +8,30 @@ import TimelineCore
 @testable import MediaKit
 
 @Suite struct ProviderTests {
+    /// A still has no video track, so the sprite-sheet path produces nothing for it and the library
+    /// panel drew a placeholder symbol where the picture should have been.
+    @Test func aStillImageGetsItsOwnPictureBack() async throws {
+        let lib = try TestLibrary()
+        let still = try TestMedia.still(.blue, size: CGSize(width: 800, height: 400), in: lib.media.url, name: "card")
+        let imported = try await lib.library.importAsset(url: still.url, mode: .copy)
+        let media = MediaReference(asset: imported.asset, layout: lib.layout)
+        let provider = AVThumbnailProvider(cache: lib.cache, clock: FixedClock())
+
+        let one = try await provider.thumbnail(for: media, at: .zero, height: 36)
+        let thumbnail = try #require(one)
+        #expect(thumbnail.image.height == 36)
+        #expect(thumbnail.image.width == 72, "the still's 2:1 shape survives the scale")
+
+        // A filmstrip over a still is the same picture at each requested time, not an empty array.
+        let strip = try await provider.filmstrip(
+            for: media, range: RationalTime.zero...RationalTime(2, 1), count: 4, height: 36)
+        #expect(strip.count == 4)
+        #expect(strip.allSatisfy { $0.image.height == 36 })
+        #expect(strip.first?.time == .zero)
+        #expect(strip.last?.time == RationalTime(2, 1))
+        #expect(provider.statistics.sheetsGenerated == 0, "a still never reaches the sheet path")
+    }
+
     @Test func filmstripCountHeightAndCacheHit() async throws {
         let lib = try TestLibrary()
         let clip = try await TestMedia.barcodeCounter(duration: 4, in: lib.media.url, name: "strip")
