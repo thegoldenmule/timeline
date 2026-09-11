@@ -179,8 +179,7 @@ public struct AssistantPanelView: View {
                                 .id(item.id)
                         }
                     }
-                    .padding(.horizontal, PanelTheme.barInsetH)
-                    .padding(.vertical, PanelTheme.panelInset)
+                    .padding(PanelTheme.panelInset)
                 }
                 .onChange(of: transcript.items.count) { _, _ in
                     guard let last = transcript.items.last else { return }

@@ -421,6 +421,15 @@ public struct AssistantDropHost<Content: View>: NSViewRepresentable {
         view.hosting?.rootView = AnyView(decorated)
     }
 
+    /// Take the panel's size rather than the content's ideal. Without this the transcript's longest
+    /// line, or the composer's placeholder, sets an ideal width for the whole panel — and a column
+    /// narrower than that clips its content on both edges instead of wrapping it.
+    public func sizeThatFits(
+        _ proposal: ProposedViewSize, nsView: AssistantDropTargetView, context: Context
+    ) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
     /// The pane with its drag highlight, drawn inside the hosting view so it tracks `isDropTargeted`.
     private var decorated: some View {
         content
@@ -464,6 +473,10 @@ public final class AssistantDropTargetView: NSView {
 
     func install(_ view: NSHostingView<AnyView>) {
         hosting = view
+        // The four constraints below are the only thing that should size this: left to itself the
+        // hosting view installs its own min/ideal/max, which is how the panel came to be wider than
+        // the column it lives in.
+        view.sizingOptions = []
         view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(view)
         NSLayoutConstraint.activate([
@@ -472,10 +485,6 @@ public final class AssistantDropTargetView: NSView {
             view.topAnchor.constraint(equalTo: topAnchor),
             view.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-    }
-
-    public override var intrinsicContentSize: NSSize {
-        hosting?.intrinsicContentSize ?? super.intrinsicContentSize
     }
 
     private func operation(_ sender: any NSDraggingInfo) -> NSDragOperation {

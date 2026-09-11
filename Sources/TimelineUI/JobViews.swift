@@ -139,7 +139,7 @@ public struct JobProgressView: View {
     private var stateText: String { JobProgressView.stateText(entry) }
 
     public var body: some View {
-        HStack(spacing: PanelTheme.barInsetH) {
+        HStack(spacing: PanelTheme.sectionGap) {
             VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
                 HStack {
                     Text(entry.label).font(PanelTheme.rowTitle).lineLimit(1)

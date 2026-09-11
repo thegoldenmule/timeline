@@ -15,7 +15,7 @@ struct StyleTests {
         #expect(PanelTheme.panelInset == 8)
         #expect(PanelTheme.cardInset == 12)
         #expect(PanelTheme.pageInset == 16)
-        #expect(PanelTheme.barInsetH == 10)
+
         #expect(PanelTheme.barInsetV == 5)
     }
 

@@ -439,8 +439,11 @@ struct EditorView: View {
     /// the history, the last tool this window called, and how to reach the app from Claude Code.
     private var activityStack: some View {
         VStack(alignment: .leading, spacing: PanelTheme.sectionGap) {
-            ApprovalStackView(center: approvals)
-                .padding(PanelTheme.panelInset)
+            VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
+                Text("Approvals").font(PanelTheme.sectionTitle)
+                ApprovalStackView(center: approvals)
+            }
+            .padding(PanelTheme.panelInset)
             Divider()
             JobList(center: jobs)
             Divider()
@@ -455,6 +458,9 @@ struct EditorView: View {
             Divider()
             MCPSection(services: services)
         }
+        // Every section insets itself by `panelInset`; this is what makes them all the panel's width
+        // rather than the width of whichever one happens to be widest.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ToolbarContentBuilder
@@ -548,7 +554,7 @@ struct EditorView: View {
         }
         .font(PanelTheme.mono)
         // The same pair a panel header uses, so the status bar lines up with them across the window.
-        .padding(.horizontal, PanelTheme.barInsetH)
+        .padding(.horizontal, PanelTheme.panelInset)
         .padding(.vertical, PanelTheme.barInsetV)
         .background(PanelTheme.barMaterial)
     }
@@ -723,21 +729,20 @@ struct AssistantSection: View {
             if let transcript = assistant.transcript {
                 AssistantPanelView(transcript: transcript)
             } else {
-                ContentUnavailableView {
-                    Label("No session yet", systemImage: "sparkles")
-                } description: {
-                    Text("Say what you want done. Drop clips anywhere in this panel to hand the assistant their paths.")
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                PanelEmptyState(
+                    "No session yet", systemImage: "sparkles",
+                    message: "Say what you want done. Drop clips anywhere in this panel to hand over their paths.")
             }
             if let error = assistant.error {
                 Text(error).font(PanelTheme.caption).foregroundStyle(PanelTheme.danger).lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, PanelTheme.barInsetH)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, PanelTheme.panelInset)
             }
             AssistantComposerView(
                 composer: assistant.composer, isBusy: assistant.isRunning || assistant.isStarting,
-                placeholder: assistant.transcript == nil
-                    ? "Tell the assistant what to do — drop clips anywhere here" : "Message the assistant",
+                // One placeholder, short enough for the narrowest the column goes. The hint about
+                // dropping clips is in the empty state above, which has room to wrap it.
+                placeholder: "Message the assistant",
                 onSend: { model.sendToAssistant($0) }, onAttach: { model.presentAttachPanel() })
         }
         // `AssistantDropHost` hosts this in an `NSView`, which sizes to what it is given: without the

@@ -36,7 +36,7 @@ public struct PanelHeader<Controls: View>: View {
             Spacer(minLength: PanelTheme.rowGap)
             controls
         }
-        .padding(.horizontal, PanelTheme.barInsetH)
+        .padding(.horizontal, PanelTheme.panelInset)
         .frame(height: PanelTheme.barHeight)
         .frame(maxWidth: .infinity)
         .background(PanelTheme.barMaterial)
@@ -84,7 +84,7 @@ public struct PanelRail: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, PanelTheme.barInsetH)
+        .padding(.vertical, PanelTheme.panelInset)
         .frame(width: PanelTheme.railWidth)
         .frame(maxHeight: .infinity)
         .background(PanelTheme.barMaterial)
@@ -130,6 +130,47 @@ public struct PanelDivider: View {
                 layout.setSize(id, start + moved * id.resizeSign)
             }
             .onEnded { _ in base = nil }
+    }
+}
+
+/// What a panel shows when it has nothing yet: a symbol, a line naming the state, and an optional
+/// sentence under it that wraps to the panel's width.
+///
+/// Not `ContentUnavailableView`: that one has an ideal width of its own and a floor it will not go
+/// under, so in a column this narrow its description comes out clipped on both edges rather than
+/// wrapped. `fixedSize(horizontal: false, vertical: true)` is what makes the sentence take the width it
+/// is offered and only the height it needs.
+public struct PanelEmptyState: View {
+    public let title: String
+    public let systemImage: String
+    public var message: String?
+
+    public init(_ title: String, systemImage: String, message: String? = nil) {
+        self.title = title
+        self.systemImage = systemImage
+        self.message = message
+    }
+
+    public var body: some View {
+        VStack(spacing: PanelTheme.sectionGap) {
+            Image(systemName: systemImage)
+                .font(.largeTitle)
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(PanelTheme.sectionTitle)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if let message {
+                Text(message)
+                    .font(PanelTheme.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(PanelTheme.pageInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

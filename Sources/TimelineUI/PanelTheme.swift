@@ -28,9 +28,9 @@ public enum PanelTheme {
     public static let cardInset: CGFloat = 12
     /// Inside a settings page or a sheet.
     public static let pageInset: CGFloat = 16
-    /// A header's or status bar's own padding. One pair for both, so a panel header and the editor's
-    /// status bar line up across a split.
-    public static let barInsetH: CGFloat = 10
+    /// A header's or status bar's vertical padding. There is no horizontal counterpart on purpose:
+    /// bars use `panelInset` like everything else, so a header's symbol starts exactly where the
+    /// content under it does.
     public static let barInsetV: CGFloat = 5
 
     // MARK: Corner radii

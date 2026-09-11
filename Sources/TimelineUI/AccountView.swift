@@ -214,7 +214,7 @@ public struct AccountRowView: View {
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: PanelTheme.barInsetH) {
+        HStack(alignment: .top, spacing: PanelTheme.sectionGap) {
             avatar
             VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
                 Text("Connected as \(AccountRowView.connectedAs(account))").font(PanelTheme.rowTitle)

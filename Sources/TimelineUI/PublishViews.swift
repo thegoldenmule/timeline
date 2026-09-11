@@ -145,7 +145,7 @@ public struct PublishHistoryRow: View {
     }
 
     public var body: some View {
-        HStack(spacing: PanelTheme.barInsetH) {
+        HStack(spacing: PanelTheme.sectionGap) {
             VStack(alignment: .leading, spacing: PanelTheme.hairGap) {
                 Text(record.request.title).font(PanelTheme.rowTitle).lineLimit(1)
                 Text(PublishHistoryRow.detailText(record)).font(PanelTheme.caption).foregroundStyle(.secondary)

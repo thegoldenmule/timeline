@@ -292,7 +292,8 @@ public struct MediaLibraryView: View {
             }
             list(model: $model)
         }
-        .padding(.top, PanelTheme.controlGap)
+        // The same gutter the composer and the inspector use, so the three line up across the window.
+        .padding(.top, PanelTheme.panelInset)
         .task { await model.load() }
     }
 
@@ -304,11 +305,14 @@ public struct MediaLibraryView: View {
             Picker("Kind", selection: model.kindFilter) {
                 ForEach(MediaLibraryModel.KindFilter.allCases) { Text($0.title).tag($0) }
             }
-            .pickerStyle(.segmented).labelsHidden()
+            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: .infinity)
             Picker("Scope", selection: model.scope) {
-                ForEach(MediaLibraryModel.Scope.allCases) { Text($0.title).tag($0) }
+                // The segment labels are padded, not the control: a segmented `Picker` sizes to its
+                // content and centres inside whatever frame it is given, so a two-segment row would
+                // otherwise sit narrower than the four-segment one above it.
+                ForEach(MediaLibraryModel.Scope.allCases) { Text($0.title).frame(maxWidth: .infinity).tag($0) }
             }
-            .pickerStyle(.segmented).labelsHidden()
+            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: .infinity)
         }
         .padding(.horizontal, PanelTheme.panelInset)
     }
@@ -317,12 +321,10 @@ public struct MediaLibraryView: View {
         let rows = self.model.rows
         return Group {
             if rows.isEmpty {
-                ContentUnavailableView(
-                    self.model.query.isEmpty ? "No media" : "No matches",
-                    systemImage: "rectangle.stack",
-                    description: Text(
-                        self.model.query.isEmpty
-                            ? "Import files to add them to the library" : "Nothing matches “\(self.model.query)”"))
+                PanelEmptyState(
+                    self.model.query.isEmpty ? "No media" : "No matches", systemImage: "rectangle.stack",
+                    message: self.model.query.isEmpty
+                        ? "Import files to add them to the library" : "Nothing matches “\(self.model.query)”")
             } else {
                 List(rows, selection: model.selection) { row in
                     MediaLibraryRow(model: self.model, row: row)
@@ -357,9 +359,8 @@ public struct MediaLibraryView: View {
                 }
             }
         }
-        // Both branches must fill the pane. `List` does on its own but `ContentUnavailableView` sizes to
-        // its content, so without this the pane collapses to the empty state's intrinsic size the moment a
-        // filter matches nothing — and the split view hands the slack to its siblings, resizing the window.
+        // Both branches must fill the panel: a body that sizes to its content would leave the column
+        // short the moment a filter matched nothing.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

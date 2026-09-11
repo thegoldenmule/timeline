@@ -49,9 +49,23 @@ Every panel in the window is the same three parts.
 
 | Part | What it is | Metrics |
 |---|---|---|
-| **Header** | One row: the symbol that collapses the panel, its name, `Spacer`, then the panel's own controls. Never wraps, never scrolls, always present. `PanelHeader`. | height `barHeight` 28, padding `barInsetH` 10, `barMaterial`, a `Divider` beneath |
+| **Header** | One row: the symbol that collapses the panel, its name, `Spacer`, then the panel's own controls. Never wraps, never scrolls, always present. `PanelHeader`. | height `barHeight` 28, horizontal `panelInset` 8, vertical `barInsetV` 5, `barMaterial`, a `Divider` beneath |
 | **Body** | The content, scrolling if it must, filling the panel. | `panelInset` 8, `sectionGap` 8 between siblings |
 | **Rail** | What a collapsed column shows instead: the symbol over the rotated name, clickable. `PanelRail`. | width `railWidth` 32, title run `railTitleRun` 84 |
+| **Empty state** | What a panel with nothing in it shows: symbol, title, and a sentence that wraps. `PanelEmptyState`. | `pageInset` 16, centred, fills the body |
+
+**One gutter.** A header's symbol, a body's content, and a status bar's first item all start
+`panelInset` 8 from the panel's leading edge. There is no separate header inset — that is the whole
+reason `barInsetH` does not exist. A `List` or a `Form` that draws its own row insets is the exception
+and sits edge to edge; everything around it still uses the gutter, so the library's search field lines
+up with its header's symbol and the rows below indent themselves.
+
+**Nothing may set its own ideal width.** A panel's width comes from `PanelLayoutModel`, and content that
+reports a larger ideal is clipped on both edges rather than wrapped. Two things in the tree did:
+`ContentUnavailableView` (hence `PanelEmptyState`, whose message is
+`.fixedSize(horizontal: false, vertical: true)` so it takes the width it is offered and only the height
+it needs), and `AssistantDropHost`'s `NSHostingView` (hence `sizingOptions = []` and a `sizeThatFits`
+that returns the proposal). A long `TextField` placeholder does the same, so placeholders are short.
 
 The header is the only bold row in a panel and the only place a panel names itself; a body never repeats
 the name. `PanelChrome` picks between the three, so no caller writes a frame.
@@ -106,7 +120,7 @@ opens, so its key equivalents may never be installed.
 | `panelInset` | 8 | from a panel's edge to its content |
 | `cardInset` | 12 | inside a card that floats on its own background |
 | `pageInset` | 16 | inside a settings page or a sheet |
-| `barInsetH` / `barInsetV` | 10 / 5 | a header's or status bar's own padding |
+| `barInsetV` | 5 | a header's or status bar's vertical padding; horizontally a bar uses `panelInset` |
 
 If a layout seems to want a number that is not here, it wants a different token.
 
@@ -163,6 +177,13 @@ rule a reviewer can grep rather than argue symbol by symbol.
 
 `TimelineCore.Actor.agent` stays too — `Actor.description` is the wire format (`"agent:<sessionId>"`) and
 `Actor.init(_:)` parses that prefix back. `ActorLabel` is what the window shows.
+
+## The inspector's form
+
+`InspectorView` uses `.formStyle(.columns)` inside a `ScrollView`, not `.formStyle(.grouped)`. Grouped is
+the System Settings look: its inset cards sit a good deal further from the edge than every other panel's
+content, which is exactly the mismatch this document exists to prevent. Grouped also scrolls itself,
+which `.columns` does not — hence the `ScrollView`.
 
 ## Adoption
 

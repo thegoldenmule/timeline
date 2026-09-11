@@ -88,20 +88,27 @@ public struct InspectorView: View {
     public var body: some View {
         Group {
             if let clip, let seq = viewModel.sequence {
-                Form {
-                    header(clip, in: seq)
-                    if draft != nil {
-                        speedSection
-                        if seq.track(clip.trackId)?.kind == .video {
-                            transformSection
-                            opacitySection
+                // `.columns`, not `.grouped`: grouped is the System Settings look, and its inset cards
+                // sit a good deal further from the edge than every other panel's content does. It also
+                // scrolls itself, which `.columns` does not — hence the `ScrollView`.
+                ScrollView {
+                    Form {
+                        header(clip, in: seq)
+                        if draft != nil {
+                            speedSection
+                            if seq.track(clip.trackId)?.kind == .video {
+                                transformSection
+                                opacitySection
+                            }
+                            if seq.track(clip.trackId)?.kind != .caption { audioSection }
                         }
-                        if seq.track(clip.trackId)?.kind != .caption { audioSection }
                     }
+                    .formStyle(.columns)
+                    .padding(PanelTheme.panelInset)
                 }
-                .formStyle(.grouped)
             } else {
-                ContentUnavailableView("No clip selected", systemImage: "film")
+                PanelEmptyState(
+                    "No clip selected", systemImage: "film", message: "Select a clip to edit its properties")
             }
         }
         .onAppear { reset() }
@@ -109,7 +116,6 @@ public struct InspectorView: View {
         .onChange(of: focused) { old, _ in
             if let old { commit(old) }
         }
-        .frame(minWidth: 260)
     }
 
     private func reset() {
