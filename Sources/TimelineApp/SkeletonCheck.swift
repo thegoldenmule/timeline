@@ -573,9 +573,9 @@ enum SkeletonCheck {
                     + "package still Skeleton.tlproj; blank and unchanged names send nothing; "
                     + "\(libraryPanel.openProjectItems.count) library rows renamed without a rescan")
 
-            // 11c. Export: the toolbar sheet's exportDraft. The button used to send `preset: "reel9x16"` whatever
+            // 11c. Export: the toolbar sheet's draft. The button used to send `preset: "reel9x16"` whatever
             //      the sequence was, and the compositor pads rather than crops, so a 1920x1080 sequence
-            //      came back as a strip in a tall black frame (docs/plans/export-sheet.md). The exportDraft's
+            //      came back as a strip in a tall black frame (docs/plans/export-sheet.md). The draft's
             //      default, the badge on the preset that would pad, the path it shows, and then the real
             //      gated call with the preset as an object rather than a name.
             let exportSequence = try unwrap(original.sequence, "export", "no sequence")
