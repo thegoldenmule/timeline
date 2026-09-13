@@ -24,6 +24,8 @@ final class AppModel {
     private(set) var bootError: String?
     private(set) var bootStage = "Starting services"
     var lastCommandError: String?
+    /// The rename sheet's draft while it is up; nil when it is not.
+    var renaming: ProjectRename?
     /// A one-line note in the status bar, for things that went right but are worth saying (an import
     /// that stopped at the library rather than the timeline).
     var lastStatusNote: String?
@@ -222,6 +224,42 @@ final class AppModel {
         }
     }
 
+    /// Opens the rename sheet over the project's current name. The package on disk is never touched:
+    /// the name lives in the event stream and the file name is a separate fact (Fork is what makes a
+    /// differently named package) — `docs/plans/project-rename.md`.
+    func presentRenameSheet() {
+        guard let document else { return }
+        renaming = ProjectRename(current: document.project.name)
+    }
+
+    func dismissRenameSheet() {
+        renaming = nil
+    }
+
+    /// Commits the rename as one `renameProject` transaction, so it lands in the event stream, the
+    /// history panel, and undo. An unchanged or blank name sends nothing and just closes the sheet.
+    /// Returns the message to show when the store refused it — `staleVersion` and the rest — which also
+    /// goes to `lastCommandError` so the status bar reports it like every other failed action. This is
+    /// `perform`'s behaviour plus that return value: `perform` answers nothing, so it cannot feed a
+    /// sheet that has to stay open with the typed name still in it.
+    func commitRename(_ rename: ProjectRename) async -> String? {
+        guard let document else { return nil }
+        guard let operation = rename.operation else {
+            renaming = nil
+            return nil
+        }
+        do {
+            _ = try await document.apply(operation)
+            lastCommandError = nil
+            renaming = nil
+            return nil
+        } catch {
+            let message = "\(error)"
+            lastCommandError = message
+            return message
+        }
+    }
+
     /// The Publish sheet over the newest done render; the sheet's Upload goes through `publish_youtube`.
     func presentPublishSheet() {
         publish?.presentSheet()
@@ -369,6 +407,13 @@ struct EditorView: View {
         }
         .toolbar { toolbarContent }
         .navigationTitle("\(document.project.name) — v\(document.version)")
+        .sheet(isPresented: renameSheetPresented) {
+            if model.renaming != nil {
+                ProjectRenameSheet(
+                    rename: renameDraft, onRename: { await model.commitRename($0) },
+                    onCancel: { model.dismissRenameSheet() })
+            }
+        }
         .sheet(isPresented: publishSheetPresented) {
             if let sheet = publish.sheet {
                 PublishSheetView(
@@ -406,6 +451,18 @@ struct EditorView: View {
 
     private var publishSheetPresented: Binding<Bool> {
         Binding(get: { publish.sheet != nil }, set: { if !$0 { publish.dismissSheet() } })
+    }
+
+    private var renameSheetPresented: Binding<Bool> {
+        Binding(get: { model.renaming != nil }, set: { if !$0 { model.dismissRenameSheet() } })
+    }
+
+    /// The draft the sheet types into, written straight back to the model so the sheet and the window
+    /// never disagree about what is in the field.
+    private var renameDraft: Binding<ProjectRename> {
+        Binding(
+            get: { model.renaming ?? ProjectRename(current: document.project.name) },
+            set: { model.renaming = $0 })
     }
 
     /// The inspector over the activity panel. Both shut and the column is a single rail — two stacked
@@ -467,6 +524,12 @@ struct EditorView: View {
             Button("Open", systemImage: "folder") { model.presentOpenPanel() }
             Button("Fork", systemImage: "arrow.triangle.branch") { model.presentForkPanel() }
                 .disabled(model.document == nil)
+            // Next to Fork because that is the pair: Fork makes a new package under a new name, Rename
+            // changes this project's name and leaves the package where it is. No keyboard shortcut —
+            // a plain ⌘-letter belongs to a menu and this window has none (`ui-style.md`, Keyboard).
+            Button("Rename", systemImage: "pencil") { model.presentRenameSheet() }
+                .disabled(model.document == nil)
+                .help("Rename this project; the .tlproj package keeps its file name")
             Button("Import", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
         }
         ToolbarItemGroup {

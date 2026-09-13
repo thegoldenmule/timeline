@@ -96,6 +96,10 @@ timeline out. Widths and collapsed flags persist under `panel.<id>.size` and `pa
 minimum follows the panels (`PanelLayoutModel.minimumWindowWidth`), so collapsing one lets the window get
 narrower rather than just freeing space inside it.
 
+A sheet is not a panel and takes its width from the question it asks. `sheetWidth` 420 is the one that
+asks for a single value — the rename sheet — wide enough for a sentence of explanation under the field
+and narrow enough to read as a question rather than a second window.
+
 ## Keyboard
 
 A panel toggle is always `[.command, .option]`: Assistant `⌥⌘A`, Library `⌥⌘L`, Inspector `⌥⌘I`,

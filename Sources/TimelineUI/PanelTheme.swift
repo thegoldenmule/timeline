@@ -56,6 +56,9 @@ public enum PanelTheme {
     public static let dividerThickness: CGFloat = 8
     /// What the preview-and-timeline column is never squeezed below, whatever the side panels want.
     public static let centreMinimum: CGFloat = 480
+    /// A small sheet that asks for one thing: wide enough for a sentence of explanation under the
+    /// field, narrow enough that it reads as a question rather than a second window.
+    public static let sheetWidth: CGFloat = 420
     /// A library row's poster, in points. The picture behind it is asked for in *pixels* — see
     /// `MediaLibraryRow` — because a 36 pt box is 72 px of screen on every Mac made this decade.
     public static let posterSize = CGSize(width: 64, height: 36)
