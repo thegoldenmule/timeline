@@ -52,10 +52,10 @@ public struct ExportFraming: Hashable, Sendable {
     }
 
     public var bars: Bars {
-        let horizontal = output.width - fitted.width
-        let vertical = output.height - fitted.height
-        if horizontal > ExportFraming.barTolerance { return .pillarbox(horizontal / 2) }
-        if vertical > ExportFraming.barTolerance { return .letterbox(vertical / 2) }
+        let horizontal = (output.width - fitted.width) / 2
+        let vertical = (output.height - fitted.height) / 2
+        if horizontal > ExportFraming.barTolerance { return .pillarbox(horizontal) }
+        if vertical > ExportFraming.barTolerance { return .letterbox(vertical) }
         return .none
     }
 
@@ -105,7 +105,7 @@ public struct ExportFraming: Hashable, Sendable {
         let w = width / a
         let h = height / a
         if w <= 64, h <= 64 { return "\(w):\(h)" }
-        return ExportText.decimal(Double(width) / Double(height)) + ":1"
+        return ExportText.decimal(Double(width) / Double(height), places: 2) + ":1"
     }
 }
 
@@ -157,9 +157,9 @@ public enum ExportText {
         "\(decimal(rate.doubleValue)) fps"
     }
 
-    /// Up to three decimals, with the trailing zeros taken off: 30, 29.97, 23.976.
-    public static func decimal(_ value: Double) -> String {
-        var text = String(format: "%.3f", value)
+    /// Up to `places` decimals, with the trailing zeros taken off: 30, 29.97, 23.976, 2.35.
+    public static func decimal(_ value: Double, places: Int = 3) -> String {
+        var text = String(format: "%.\(places)f", value)
         while text.hasSuffix("0") { text.removeLast() }
         if text.hasSuffix(".") { text.removeLast() }
         return text

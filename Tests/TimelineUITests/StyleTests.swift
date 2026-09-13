@@ -29,6 +29,9 @@ struct StyleTests {
         #expect(PanelTheme.dividerThickness == 8)
         #expect(PanelTheme.centreMinimum == 480)
         #expect(PanelTheme.sheetWidth == 420)
+        #expect(PanelTheme.formSheetWidth == 520)
+        #expect(PanelTheme.framePreviewHeight == 180)
+        #expect(PanelTheme.numberFieldWidth == 72)
     }
 
     /// The two places the chrome and the Metal canvas have to agree. Asserted here so a change to
