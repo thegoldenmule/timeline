@@ -573,6 +573,73 @@ enum SkeletonCheck {
                     + "package still Skeleton.tlproj; blank and unchanged names send nothing; "
                     + "\(libraryPanel.openProjectItems.count) library rows renamed without a rescan")
 
+            // 11c. Export: the toolbar sheet's exportDraft. The button used to send `preset: "reel9x16"` whatever
+            //      the sequence was, and the compositor pads rather than crops, so a 1920x1080 sequence
+            //      came back as a strip in a tall black frame (docs/plans/export-sheet.md). The exportDraft's
+            //      default, the badge on the preset that would pad, the path it shows, and then the real
+            //      gated call with the preset as an object rather than a name.
+            let exportSequence = try unwrap(original.sequence, "export", "no sequence")
+            let sequenceFrame = CGSize(width: exportSequence.width, height: exportSequence.height)
+            var exportDraft = ExportDraft(sequence: exportSequence, exportsDirectory: services.layout.exportsDir)
+            try require(
+                exportDraft.presetName == ExportText.matchSequence, "export",
+                "the default preset is \(exportDraft.presetName)")
+            try require(
+                exportDraft.outputSize == sequenceFrame, "export", "the default frame is \(exportDraft.outputSize)")
+            try require(exportDraft.framing.isExact, "export", "the default letterboxed the sequence")
+            // The one assertion that pins the sheet's copy of the default-path formula to the tool's.
+            try require(
+                exportDraft.outputURL
+                    == ExportDestination.url(
+                        sequenceName: exportSequence.name, presetName: exportDraft.preset.name,
+                        fileExtension: exportDraft.preset.fileExtension, in: services.layout.exportsDir), "export",
+                "the sheet's default path is \(exportDraft.outputURL.path)")
+            // What the old button did, now visible before it happens rather than after.
+            var reel = exportDraft
+            reel.presetName = ExportPreset.reel9x16.name
+            try require(
+                reel.outputSize == CGSize(width: 1080, height: 1920), "export", "the reel frame is \(reel.outputSize)")
+            guard case .letterbox(let bar) = reel.framing.bars else {
+                throw Failure(step: "export", reason: "the reel preset reported \(reel.framing.bars)")
+            }
+            try require(
+                exportDraft.badge(forPresetNamed: ExportPreset.reel9x16.name) == ExportText.letterboxBadge, "export",
+                "the reel row carried no badge")
+            // The call the sheet makes: the whole ExportPreset as an object, and the path it showed.
+            exportDraft.chose(root.appendingPathComponent("Exports/skeleton-sheet.mp4"))
+            let sheetApproval = approveNext("render_export", on: approvals)
+            let sheetExport = try await tools.call(
+                "render_export",
+                input: ToolInput([
+                    "preset": try JSONValue(encoding: exportDraft.preset),
+                    "sequenceId": .string(exportDraft.sequenceId.rawValue),
+                    "outputPath": .string(exportDraft.outputURL.path),
+                ]))
+            try require(await sheetApproval.value != nil, "export", "the sheet's export raised no approval")
+            try require(
+                sheetExport.structured?["status"]?.stringValue == "done", "export", sheetExport.text ?? "export")
+            try require(
+                FileManager.default.fileExists(atPath: exportDraft.outputURL.path), "export",
+                "no file at \(exportDraft.outputURL.path)")
+            let writtenTracks = try await AVURLAsset(url: exportDraft.outputURL).loadTracks(withMediaType: .video)
+            let writtenTrack: AVAssetTrack = try unwrap(writtenTracks.first, "export", "the export has no video track")
+            let written = try await writtenTrack.load(.naturalSize)
+            try require(
+                written == sequenceFrame, "export",
+                "the file is \(written), not the sequence's \(ExportFraming.pixels(sequenceFrame))")
+            let sheetRenderId = try unwrap(sheetExport.structured?["renderId"]?.stringValue, "export", "no renderId")
+            let sheetLedger = try unwrap(original.renderLedger, "export", "the store keeps no render ledger")
+            let sheetRow = try unwrap(try await sheetLedger.render(sheetRenderId), "export", "no render row")
+            try require(sheetRow.status == RenderStatus.done, "export", "the render row is \(sheetRow.status)")
+            try require(
+                sheetRow.preset.size == ExportPreset.OutputSize.matchSequence, "export",
+                "the ledger row's preset is \(sheetRow.preset.size)")
+            ok(
+                "export",
+                "the sheet defaults to \(ExportFraming.pixels(exportDraft.outputSize)) match-sequence; the reel preset "
+                    + "flags \(Int(bar.rounded())) px of letterbox first; gated export wrote "
+                    + "\(ExportFraming.pixels(written)) to \(exportDraft.outputURL.lastPathComponent) and a render row")
+
             // 12. Publish: connect the fixture Google account through the real loopback flow, export through
             //     render_export (a render row), then publish_youtube through the registry: approval_required
             //     with the card's rows, approved on the stack, retried with the token; the fake drops the
