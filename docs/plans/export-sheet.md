@@ -137,12 +137,13 @@ from the window.
 
 ## 2. What is added
 
-`PanelTheme` gains three tokens (`ui-style.md` and `StyleTests` record all three):
+`PanelTheme` gains four tokens (`ui-style.md` and `StyleTests` record all three):
 
 | Token | Value | Why |
 |---|---|---|
 | `formSheetWidth` | 520 | A sheet that asks several related questions and draws something. `sheetWidth` 420 is the one-value sheet; this is its sibling, not a literal frame in new chrome. |
 | `framePreviewHeight` | 180 | The box the export schematic is fitted into. Tall enough that a 9:16 frame is legible, short enough that the sheet stays one screen. |
+| `numberFieldWidth` | 72 | A field holding a pixel count, sized so four digits fit and it does not stretch across its row. |
 | `letterboxFill` | `Color.black` | The black an export composites on. Semantic, not a hue: it is what `Compositor` literally writes where the picture does not reach. |
 
 The fitted picture's placeholder reuses `posterFill` — "the placeholder behind a poster that has not

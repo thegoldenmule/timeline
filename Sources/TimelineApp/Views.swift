@@ -471,7 +471,10 @@ struct EditorView: View {
         .sheet(isPresented: exportSheetPresented) {
             if let draft = model.exporting {
                 ExportSheetView(
-                    draft: exportDraft(default: draft), onChoosePath: { model.chooseExportPath(for: draft) },
+                    draft: exportDraft(default: draft),
+                    // Read back out of the model rather than closing over `draft`, so the save panel is
+                    // seeded with the name the preset picked a moment ago, not the one the sheet opened on.
+                    onChoosePath: { model.exporting.flatMap { model.chooseExportPath(for: $0) } },
                     onPoster: { await model.exportPoster() }, onExport: { model.commitExport($0) },
                     onCancel: { model.dismissExportSheet() })
             }

@@ -101,7 +101,8 @@ asks for a single value — the rename sheet — wide enough for a sentence of e
 and narrow enough to read as a question rather than a second window. `formSheetWidth` 520 is its
 sibling for a sheet that asks several related questions and draws something: the export sheet's preset,
 size, frame rate, and destination over the frame they all land in, which is fitted into a
-`framePreviewHeight` 180 box.
+`framePreviewHeight` 180 box. A field holding a pixel count is `numberFieldWidth` 72 wide, so it does
+not stretch across the row it shares.
 
 ## Keyboard
 
