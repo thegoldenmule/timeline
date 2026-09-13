@@ -98,7 +98,10 @@ narrower rather than just freeing space inside it.
 
 A sheet is not a panel and takes its width from the question it asks. `sheetWidth` 420 is the one that
 asks for a single value — the rename sheet — wide enough for a sentence of explanation under the field
-and narrow enough to read as a question rather than a second window.
+and narrow enough to read as a question rather than a second window. `formSheetWidth` 520 is its
+sibling for a sheet that asks several related questions and draws something: the export sheet's preset,
+size, frame rate, and destination over the frame they all land in, which is fitted into a
+`framePreviewHeight` 180 box.
 
 ## Keyboard
 
@@ -166,6 +169,7 @@ Semantic only. A view never names a hue.
 | `chipFill`, `posterFill` | a chip; the placeholder behind a poster that has not landed |
 | `borderIdle` + `borderWidth` | a resting border |
 | `borderActive` + `borderWidthActive` | a border that is saying something: a drop is over this target |
+| `letterboxFill` | the black an export composites on — what the compositor writes where the fitted picture does not reach |
 | `warning` | attention, nothing failed: a missing file, an unaudited client |
 | `danger` | something failed |
 | `.secondary` / `.tertiary` | supporting and incidental text — use the hierarchy, not an opacity |

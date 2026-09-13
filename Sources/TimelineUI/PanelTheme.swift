@@ -59,6 +59,15 @@ public enum PanelTheme {
     /// A small sheet that asks for one thing: wide enough for a sentence of explanation under the
     /// field, narrow enough that it reads as a question rather than a second window.
     public static let sheetWidth: CGFloat = 420
+    /// A sheet that asks several related questions and draws something: the export sheet's preset,
+    /// size, frame rate, destination, and the frame it is all going to land in.
+    public static let formSheetWidth: CGFloat = 520
+    /// The box the export sheet fits its output frame into. Tall enough that a 9:16 frame is legible,
+    /// short enough that the sheet stays one screen.
+    public static let framePreviewHeight: CGFloat = 180
+    /// A field that holds a pixel count or another small integer, sized so four digits fit and the
+    /// field does not stretch across the row it sits in.
+    public static let numberFieldWidth: CGFloat = 72
     /// A library row's poster, in points. The picture behind it is asked for in *pixels* — see
     /// `MediaLibraryRow` — because a 36 pt box is 72 px of screen on every Mac made this decade.
     public static let posterSize = CGSize(width: 64, height: 36)
@@ -105,6 +114,10 @@ public enum PanelTheme {
     /// A chip, and the placeholder behind a poster that has not landed.
     public static let chipFill = AnyShapeStyle(.quaternary)
     public static let posterFill = AnyShapeStyle(.quaternary)
+    /// The black an export composites the picture on. Not a hue named for its own sake: it is what
+    /// `TimelineCompositor` literally writes wherever the aspect-fitted picture does not reach, so the
+    /// export sheet's schematic has to draw the same thing to be truthful.
+    public static let letterboxFill = Color.black
 
     /// A resting border.
     public static let borderIdle = Color.secondary.opacity(0.25)

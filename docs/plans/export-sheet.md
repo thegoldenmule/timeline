@@ -91,13 +91,16 @@ from the window.
    `Preset` and `Custom`; Custom reveals width and height fields seeded from whatever was resolved a
    moment ago, so the custom path starts from something real rather than from zero.
 
-5. **The default follows the sequence, always.** `ExportDraft.init(sequence:...)` selects
-   `Match sequence` sizing and `Match sequence` frame rate, whatever shape the sequence is, so the
-   default export is the one that cannot letterbox. The preset *named* in the picker defaults to the
-   built-in whose aspect agrees with the sequence — `Reel 9:16` for a portrait sequence,
-   `H.264 1080p` for a landscape one — but with `Match sequence` selected above it, so the chosen
-   codec is a sensible one and the dimensions are still the sequence's. A portrait sequence can no
-   longer default to a landscape frame, and vice versa; that is asserted by tests in both directions.
+5. **The default follows the sequence, always.** `ExportDraft.init(sequence:...)` selects the
+   `Match sequence` preset and the `Match sequence` frame rate, whatever shape the sequence is — so
+   the default export is the one frame that cannot letterbox, and a portrait sequence cannot default
+   to a landscape frame any more than a landscape one can default to a reel. Tests assert it in both
+   directions.
+
+   The alternative — defaulting to whichever built-in's *aspect* agrees with the sequence — was
+   rejected: it is right only for sequences that happen to be exactly 16:9 or 9:16, and it silently
+   letterboxes a 4:5 or 2.35:1 sequence, which is the bug. Orientation matching lives in the badges
+   instead (decision 4), where it warns rather than chooses.
 
 6. **`Match sequence` is a real `ExportPreset`, not a UI flag.** It is H.264/AAC in MP4 at 12 Mb/s,
    tone-mapped to SDR — `h264_1080p`'s codec choices — with `size: .matchSequence` and
