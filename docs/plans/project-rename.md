@@ -65,13 +65,18 @@ applies the rename as the fork's first transaction.
 5. **The media catalog needs no refresh, and that is structural.** The library panel's rows for the open
    project come from `openProjectItems`, which builds each `CatalogItem` from `viewModel.project.name`
    on every read; `catalogItems` explicitly *excludes* the open project because "its database churns
-   while it is edited". So the panel is fresh the moment the store's change lands, with no rescan. The
-   catalog's own `projects` row is stamp-based (`SQLiteMediaCatalog.refresh`, size and mtime of
-   `project.sqlite`), so it picks the new name up on the next scan after the package is closed — which
-   is what the store's WAL checkpoint on close makes true. Both halves are asserted in the skeleton
-   check (section 4).
+   while it is edited". So the panel is fresh the moment the store's change lands, with no rescan, and
+   the skeleton check asserts exactly that (section 4). The catalog's own `projects` row is stamp-based
+   (`SQLiteMediaCatalog.refresh`, size and mtime of `project.sqlite`), so it picks the new name up on
+   the next scan after the package is closed and its WAL is folded in — which
+   `MediaCatalogTests.theProjectNameComesFromTheStateRowWithoutDecodingIt` already proves, at the layer
+   that owns it. Nothing here has to call `refresh()`.
 
 ## 2. What is added
+
+`PanelTheme` gains one token, `sheetWidth` 420: a sheet is not a panel and does not take its width from
+`PanelLayoutModel`, and a literal frame in new chrome is a review comment. `ui-style.md` and `StyleTests`
+record it beside the panel sizes.
 
 ### `Sources/TimelineUI/ProjectRenameView.swift`
 
@@ -108,10 +113,11 @@ characters: long enough for any real title, short enough that the window title a
 one line. `canSubmit` allows the unchanged name deliberately — Return on a sheet you opened by mistake
 should close it, not sit there disabled.
 
-The sheet is `Form` + `Divider` + footer like `PublishSheetView`, at `PanelTheme.pageInset`, with the
-field, a character counter once the name is over half the cap, the package note, the validation error,
-and the submit error the app hands back. Every number and font is a `PanelTheme` token (`ui-style.md`):
-this is new chrome, so the rule applies from the first line.
+The sheet is a `VStack` at `PanelTheme.pageInset` — one field does not want `PublishSheetView`'s
+grouped `Form`, whose section cards would be chrome around a single row — holding the title, the field,
+a character counter once the name is past half the cap, the package note, the validation or submit
+error, and Cancel / Rename on the default and cancel actions. Every number and font is a `PanelTheme`
+token (`ui-style.md`): this is new chrome, so the rule applies from the first line.
 
 ### `Sources/TimelineApp/Views.swift`
 
@@ -143,14 +149,19 @@ Nothing else in `Views.swift` moves. The Export button and `exportReel()` are un
 ## 4. The skeleton check
 
 A sub-step **11b**, right after Fork, because Fork is what it has to be told apart from. On the reopened
-original, it renames "Skeleton" to "Skeleton renamed" and asserts: the name changed, exactly one
-transaction was added, its history label is "Rename project", the package is still at
-`Skeleton.tlproj` with the same file name, a second rename to the same name yields no operation and no
-new version, a whitespace-only name is refused by the validator, and a `MediaLibraryModel` over the
-document reports the new name for the open project's rows *without a rescan*.
+original, it renames "Skeleton" to "Skeleton renamed" through a real `ProjectRename` and asserts: the
+name changed, exactly one transaction was added, its history label is "Rename project", the package is
+still at `Skeleton.tlproj` and still on disk, a second rename to the same name yields no operation and
+no new version, a whitespace-only name is refused by the validator, and a `MediaLibraryModel` over the
+document reports the new name for all five of the open project's rows *without a rescan*.
 
-Step 14 already closes the package and reopens it; two lines there assert that a catalog rescan then
-reports "Skeleton renamed" for the same path — the other half of decision 5.
+It does **not** assert a catalog rescan, and the reason is worth writing down. `SQLiteMediaCatalog.scan`
+upserts on `ON CONFLICT(project_id)`, and a fork carries the original's project id — so in a library
+that holds both, the two packages share one `projects` row and the last one scanned wins, with
+`discoveredPackages()` returning a `Set` so the order is not even stable. The skeleton check has a fork
+by the time it gets here, which makes any assertion about that row a coin flip. The rescan behaviour is
+already covered at the layer that owns it, by
+`MediaCatalogTests.theProjectNameComesFromTheStateRowWithoutDecodingIt`.
 
 ## 5. Left out
 
@@ -158,6 +169,9 @@ reports "Skeleton renamed" for the same path — the other half of decision 5.
 - No rename of the package on disk, and no offer to (decision 3). Fork already covers "I want a file
   called that".
 - No inline editing of the window title, and no change to the status bar's file name.
+- No fix for the fork/project-id collision in the catalog (section 4). It is a pre-existing bug —
+  a fork and its original share one catalog row — that a rename only makes visible, and fixing it means
+  changing the `projects` table's key, which is a `ProjectStore` change with its own migration.
 - No rename from the library panel's project list: that list is not rendered anywhere yet
   (`MediaLibraryModel.projects` is loaded and unused), and renaming a project that is not open would
   mean opening its store behind the user's back.

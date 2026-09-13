@@ -525,6 +525,54 @@ enum SkeletonCheck {
                 "Skeleton fork.tlproj at v\(fork.version) with \(fork.history.live.count) live transactions; original still v\(preForkVersion)"
             )
 
+            // 11b. Rename: the toolbar sheet's one command, right after Fork because that is the pair it
+            //      has to be told apart from — Fork makes a new package under a new name, Rename changes
+            //      this project's name and leaves the package where it is (docs/plans/project-rename.md).
+            let preRenameVersion = original.version
+            let preRenameLive = original.history.live.count
+            var blank = ProjectRename(current: original.project.name)
+            blank.name = "   "
+            try require(blank.operation == nil, "rename", "a blank name produced a command")
+            var draft = ProjectRename(current: original.project.name)
+            draft.name = "  Skeleton renamed  "
+            let renameOp = try unwrap(draft.operation, "rename", "the draft produced no command")
+            let renamed = try await original.apply(renameOp)
+            try await original.waitForVersion(renamed.version)
+            try require(
+                original.project.name == "Skeleton renamed", "rename", "name is \(original.project.name)")
+            try require(
+                original.history.live.count == preRenameLive + 1, "rename",
+                "the rename filed \(original.history.live.count - preRenameLive) transactions")
+            try require(
+                original.history.latestLive?.label == "Rename project", "rename",
+                "last transaction is \(original.history.latestLive?.label ?? "nil")")
+            // The package on disk is untouched: the name and the file name are separate facts.
+            try require(
+                original.url.lastPathComponent == "Skeleton.tlproj"
+                    && FileManager.default.fileExists(atPath: projectURL.path), "rename",
+                "the package moved to \(original.url.lastPathComponent)")
+            // A second rename to the same name sends nothing at all.
+            var unchanged = ProjectRename(current: original.project.name)
+            unchanged.name = "Skeleton renamed"
+            try require(unchanged.operation == nil, "rename", "an unchanged name produced a command")
+            try require(
+                original.version == renamed.version, "rename", "the no-op moved the version to \(original.version)")
+            // The library panel's rows for the open project are built from the live document, so they
+            // carry the new name with no rescan of the catalog (docs/plans/project-rename.md, 5).
+            let libraryPanel = MediaLibraryModel(
+                viewModel: original.viewModel, catalog: services.catalog, layout: services.layout,
+                thumbnails: services.thumbnails)
+            try require(
+                !libraryPanel.openProjectItems.isEmpty
+                    && libraryPanel.openProjectItems.allSatisfy { $0.projectName == "Skeleton renamed" }, "rename",
+                "the library panel still names the project "
+                    + "\(libraryPanel.openProjectItems.first?.projectName ?? "nothing")")
+            ok(
+                "rename",
+                "v\(preRenameVersion) -> v\(original.version) as one \"Rename project\" transaction; "
+                    + "package still Skeleton.tlproj; blank and unchanged names send nothing; "
+                    + "\(libraryPanel.openProjectItems.count) library rows renamed without a rescan")
+
             // 12. Publish: connect the fixture Google account through the real loopback flow, export through
             //     render_export (a render row), then publish_youtube through the registry: approval_required
             //     with the card's rows, approved on the stack, retried with the token; the fake drops the
