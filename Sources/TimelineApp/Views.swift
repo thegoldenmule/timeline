@@ -26,6 +26,8 @@ final class AppModel {
     var lastCommandError: String?
     /// The rename sheet's draft while it is up; nil when it is not.
     var renaming: ProjectRename?
+    /// The export sheet's draft while it is up; nil when it is not.
+    var exporting: ExportDraft?
     /// A one-line note in the status bar, for things that went right but are worth saying (an import
     /// that stopped at the library rather than the timeline).
     var lastStatusNote: String?
@@ -304,9 +306,61 @@ final class AppModel {
         }
     }
 
-    func exportReel() {
+    /// Opens the export sheet over the active sequence. The draft starts at the sequence's own size and
+    /// rate, so the default export is the one frame that cannot letterbox — the button used to send a
+    /// 1080x1920 reel whatever the sequence was (`docs/plans/export-sheet.md`).
+    func presentExportSheet() {
+        guard let services, let document, let sequence = document.sequence else { return }
+        exporting = ExportDraft(sequence: sequence, exportsDirectory: services.layout.exportsDir)
+    }
+
+    func dismissExportSheet() {
+        exporting = nil
+    }
+
+    /// The save panel behind the sheet's Choose button. AppKit stays here, out of the view, like the
+    /// New, Open, and Fork panels.
+    func chooseExportPath(for draft: ExportDraft) -> URL? {
+        let panel = NSSavePanel()
+        let url = draft.outputURL
+        panel.directoryURL = url.deletingLastPathComponent()
+        panel.nameFieldStringValue = url.lastPathComponent
+        panel.message = "Export \(draft.sequenceName)"
+        panel.prompt = "Choose"
+        if let type = UTType(filenameExtension: url.pathExtension) { panel.allowedContentTypes = [type] }
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
+
+    /// The composed frame at the playhead for the sheet's picture, or nil when there is nothing cheap
+    /// to show — no compiled sequence yet, or a decode that did not come back. The schematic stands on
+    /// its own without it.
+    func exportPoster() async -> CGImage? {
+        guard let services, let document, let compiled = document.compiled else { return nil }
+        // A bounding box, not a shape: `maximumSize` keeps the sequence's aspect, and 480 px is enough
+        // for a 180 pt schematic on a Retina display.
+        let box = CGSize(width: 480, height: 480)
+        return try? await services.renderer.frame(compiled, at: document.viewModel.playhead, size: box)
+    }
+
+    /// Sends the sheet's draft to `render_export` as a full `ExportPreset` object with its own output
+    /// path. The sheet is dismissed first on purpose: the tool answers `approval_required`, and the
+    /// card that asks goes on the approval stack behind the sheet (`docs/plans/export-sheet.md`, 3).
+    func commitExport(_ draft: ExportDraft) {
         guard let tools else { return }
-        perform { _ = try await tools.call("render_export", input: ToolInput(["preset": "reel9x16"])) }
+        exporting = nil
+        guard let preset = try? JSONValue(encoding: draft.preset) else {
+            lastCommandError = "Could not encode the export preset"
+            return
+        }
+        perform {
+            _ = try await tools.call(
+                "render_export",
+                input: ToolInput([
+                    "preset": preset, "sequenceId": .string(draft.sequenceId.rawValue),
+                    "outputPath": .string(draft.outputURL.path),
+                ]))
+        }
     }
 
     /// The assistant composer's Send: the first message starts the session, later ones continue it.
@@ -414,6 +468,14 @@ struct EditorView: View {
                     onCancel: { model.dismissRenameSheet() })
             }
         }
+        .sheet(isPresented: exportSheetPresented) {
+            if let draft = model.exporting {
+                ExportSheetView(
+                    draft: exportDraft(default: draft), onChoosePath: { model.chooseExportPath(for: draft) },
+                    onPoster: { await model.exportPoster() }, onExport: { model.commitExport($0) },
+                    onCancel: { model.dismissExportSheet() })
+            }
+        }
         .sheet(isPresented: publishSheetPresented) {
             if let sheet = publish.sheet {
                 PublishSheetView(
@@ -455,6 +517,16 @@ struct EditorView: View {
 
     private var renameSheetPresented: Binding<Bool> {
         Binding(get: { model.renaming != nil }, set: { if !$0 { model.dismissRenameSheet() } })
+    }
+
+    private var exportSheetPresented: Binding<Bool> {
+        Binding(get: { model.exporting != nil }, set: { if !$0 { model.dismissExportSheet() } })
+    }
+
+    /// The export draft the sheet edits, written straight back to the model. The fallback is the draft
+    /// the sheet was opened with, which only matters for the frame in which it is being dismissed.
+    private func exportDraft(default draft: ExportDraft) -> Binding<ExportDraft> {
+        Binding(get: { model.exporting ?? draft }, set: { model.exporting = $0 })
     }
 
     /// The draft the sheet types into, written straight back to the model so the sheet and the window
@@ -579,8 +651,9 @@ struct EditorView: View {
                 .disabled(document.viewModel.selection.isEmpty || tools.isCalling)
             Button("Align", systemImage: "arrow.left.and.right.text.vertical") { model.alignSelection() }
                 .disabled(document.viewModel.selection.count != 2 || tools.isCalling)
-            Button("Export", systemImage: "square.and.arrow.up") { model.exportReel() }
-                .disabled(tools.isCalling)
+            Button("Export", systemImage: "square.and.arrow.up") { model.presentExportSheet() }
+                .disabled(model.document?.sequence == nil || tools.isCalling)
+                .help("Choose the frame, the frame rate, and where the file goes")
         }
         ToolbarItemGroup {
             // The share control is the one place YouTube is named (policy III.F.2); the icon is generic.

@@ -3,6 +3,19 @@ import CoreGraphics
 import Foundation
 import TimelineCore
 
+/// Where an export goes when the caller names no `outputPath`: `<exports>/<sequence>-<preset>.<ext>`.
+///
+/// Public because the window's export sheet shows this path before the tool is ever called, and
+/// `TimelineUI` may not import `AgentKit` to share the formula (`conventions.md`, package layout). Its
+/// copy is `ExportDraft.defaultURL`, and the skeleton check — which sees both — asserts the two agree
+/// (`docs/plans/export-sheet.md`, 8).
+public enum ExportDestination {
+    public static func url(sequenceName: String, presetName: String, fileExtension: String, in exports: URL) -> URL {
+        let name = "\(sequenceName)-\(presetName)".replacingOccurrences(of: "/", with: "-")
+        return exports.appendingPathComponent("\(name).\(fileExtension)")
+    }
+}
+
 /// `render_preview` and `render_export`: the output side. Export is gated by the approval policy.
 enum RenderTools {
     static let renderPreview = Tool(
@@ -171,9 +184,10 @@ enum RenderTools {
         if let path = ToolSupport.string(input, "outputPath") {
             outputURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         } else {
-            let name = "\(sequence.name)-\(preset.name)".replacingOccurrences(of: "/", with: "-")
             let layout = context.services.mediaLibrary?.layout ?? LibraryLayout.default
-            outputURL = layout.exportsDir.appendingPathComponent("\(name).\(preset.fileExtension)")
+            outputURL = ExportDestination.url(
+                sequenceName: sequence.name, presetName: preset.name, fileExtension: preset.fileExtension,
+                in: layout.exportsDir)
         }
         let version = resolved.project.version
         var warnings: [String] = []
