@@ -199,15 +199,22 @@ undo restores it; re-run the mismatch calculation and assert it is clean; then e
 and assert the written file is portrait and its frame at mid-duration is not black at the edges. The
 last clause is the whole point: today that file is 1920x1080 with black down both sides.
 
-## 5. Open questions and risks
+## 5. Resolved risks
 
-- **Does the preview recompile on a resize?** `PreviewPlayer` rebuilds the composition on project
-  changes, and the status bar's `playerItemGeneration` suggests it will, but a size change is a
-  `videoComposition.renderSize` change and may need an explicit rebuild rather than an instruction-table
-  swap (`Sources/RenderKit/Export.swift:116-126` takes that shortcut for exports). Verify before
-  building the sheet; if the preview does not resize live, that is the first thing to fix.
-- **Caption and transition geometry** are expressed in sequence space; a resize moves them. Check
-  `Captions.swift` for anything pinned in absolute pixels.
+Both questions this plan opened have since been checked in the code. Recorded here so the
+implementation does not re-litigate them.
+
+- **The preview does rebuild on a resize — verified.** `RenderFingerprint.Structure` carries
+  `frameDuration`, `width` and `height` (`Sources/RenderKit/Fingerprint.swift:37-40`, combined at
+  `:56`), so a size change changes the structural fingerprint and `PreviewPlayer.update` takes the full
+  recompile branch rather than `.instructionsOnly` (`Sources/RenderKit/PreviewPlayer.swift:85-98`). No
+  explicit rebuild is needed and no change to the preview path is in scope.
+- **Caption geometry is already relative — verified, with one caveat.** `Captions` derives everything
+  from `sequenceSize`: the font is `height * 0.05` (`Sources/RenderKit/Captions.swift:24`), the
+  positions are fractions of width and height (`:39-44`), and the plate is the sequence size (`:51-52`).
+  A resize reflows captions correctly. The one exception is an explicitly set `spec.style.fontSize`
+  (`:24`), which is absolute and will not rescale with the frame — worth a line in the format sheet's
+  copy if captions exist, and nothing more.
 - The fork/project-id catalog collision noted in `project-rename.md` section 4 is still open and still
   unrelated.
 
