@@ -35,6 +35,8 @@ final class AppModel {
     /// A one-line note in the status bar, for things that went right but are worth saying (an import
     /// that stopped at the library rather than the timeline).
     var lastStatusNote: String?
+    /// The file the last export wrote, so the status bar can offer to show it in Finder.
+    var lastExportURL: URL?
 
     func boot() async {
         guard services == nil else { return }
@@ -46,6 +48,7 @@ final class AppModel {
             self.approvals = approvals
             let tools = ToolConsole(services: services)
             self.tools = tools
+            await followJobs(services)
             assistant = AssistantConsole(services: services, approvals: approvals)
             let publish = PublishConsole(services: services, tools: tools, jobs: jobs)
             await publish.start()
@@ -54,6 +57,19 @@ final class AppModel {
             try await open(AppServices.defaultProjectURL(in: services.layout), create: true)
         } catch {
             bootError = "\(error)"
+        }
+    }
+
+    /// Puts every job the app runs into the window's job list, wherever it was submitted.
+    ///
+    /// The window only ever tracked jobs it submitted itself, which meant publishes and nothing else:
+    /// a tool owns the handle for the job it runs, and `render_export` returns its handle only once the
+    /// job is over. So an export showed no row, no progress, and no sign it had started — the one thing
+    /// the user could see was the file appearing, eventually, somewhere.
+    private func followJobs(_ services: AppServices) async {
+        guard let runner = services.jobRunner as? BudgetedJobRunner else { return }
+        await runner.observe { [weak self] handle in
+            Task { @MainActor in self?.jobs.track(handle) }
         }
     }
 
@@ -433,14 +449,40 @@ final class AppModel {
             lastCommandError = "Could not encode the export preset"
             return
         }
+        // Said before the gate, not after: `render_export` always asks for approval first, and the card
+        // is in the right-hand column, so without this the window went quiet at exactly the moment the
+        // user was waiting to be told something.
+        lastExportURL = nil
+        lastStatusNote = "Export waiting for approval — \(draft.outputURL.lastPathComponent)"
         perform {
-            _ = try await tools.call(
+            let output = try await tools.call(
                 "render_export",
                 input: ToolInput([
                     "preset": preset, "sequenceId": .string(draft.sequenceId.rawValue),
                     "outputPath": .string(draft.outputURL.path),
                 ]))
+            if output.isError {
+                self.lastStatusNote = nil
+                return
+            }
+            switch output.structured?["status"]?.stringValue {
+            case "done":
+                let path = output.structured?["outputPath"]?.stringValue ?? draft.outputURL.path
+                self.lastExportURL = URL(fileURLWithPath: path)
+                self.lastStatusNote = "Exported \(URL(fileURLWithPath: path).lastPathComponent)"
+            case "denied", .none:
+                self.lastStatusNote = nil
+            case .some(let status):
+                self.lastStatusNote = "Export \(status)"
+            }
         }
+    }
+
+    /// Shows the last exported file in Finder. An export that lands in a folder nobody opened is not
+    /// much better than one that never ran.
+    func revealLastExport() {
+        guard let url = lastExportURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     /// The assistant composer's Send: the first message starts the session, later ones continue it.
@@ -563,6 +605,11 @@ struct EditorView: View {
                         model.presentFormatSheet()
                     })
             }
+        }
+        .onChange(of: approvals.requests.count) { previous, current in
+            // Only on the way up, and only to open: a card the user has collapsed the panel over is
+            // still their business, but a card they have never seen is not a choice they have made.
+            if current > previous, panels.isCollapsed(.activity) { panels.setCollapsed(.activity, false) }
         }
         .sheet(isPresented: formatSheetPresented) {
             if let draft = model.formatting {
@@ -779,7 +826,40 @@ struct EditorView: View {
             Text(document.url.lastPathComponent)
             Text("Render: \(document.lastRenderPath.rawValue) #\(document.playerItemGeneration)")
             Text(String(format: "Playhead %.2fs", document.playheadSeconds))
-            Text("Jobs: \(jobs.running.count) running")
+            if let job = jobs.running.first {
+                HStack(spacing: PanelTheme.controlGap) {
+                    if let fraction = job.progress.fraction {
+                        ProgressView(value: fraction).progressViewStyle(.linear).frame(width: 120)
+                        Text("\(Int((fraction * 100).rounded()))%")
+                    } else {
+                        ProgressView().progressViewStyle(.linear).frame(width: 120)
+                    }
+                    Text(JobProgressView.stateText(job)).lineLimit(1)
+                    Text(job.label).foregroundStyle(.secondary).lineLimit(1)
+                    if jobs.running.count > 1 {
+                        Text("+\(jobs.running.count - 1)").foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("status-job")
+            } else {
+                Text("Jobs: \(jobs.running.count) running")
+            }
+            // The gate asks in the right-hand column, which can be collapsed or simply unread. An
+            // export that is waiting says so here, where the user is already looking.
+            if !approvals.requests.isEmpty {
+                Button("\(approvals.requests.count) waiting for approval") {
+                    panels.setCollapsed(.activity, false)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PanelTheme.warning)
+                .accessibilityIdentifier("status-approval")
+            }
+            if model.lastExportURL != nil {
+                Button("Show in Finder") { model.revealLastExport() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityIdentifier("status-reveal")
+            }
             if let format = model.formatSummary {
                 Button(action: { model.presentFormatSheet() }) {
                     Label(format, systemImage: model.hasFormatMismatch ? "exclamationmark.triangle" : "aspectratio")

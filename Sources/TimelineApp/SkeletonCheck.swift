@@ -607,6 +607,18 @@ enum SkeletonCheck {
                 "the reel row carried no badge")
             // The call the sheet makes: the whole ExportPreset as an object, and the path it showed.
             exportDraft.chose(root.appendingPathComponent("Exports/skeleton-sheet.mp4"))
+            // The window's job list follows work a *tool* submitted, which is what makes an export
+            // visible while it runs. The sheet's Export goes through `render_export`, and the tool owns
+            // the only handle until the job is over, so before this the export ran with nothing on
+            // screen: no row, no progress, no sign it had started.
+            let exportJobs = JobCenter()
+            if let budgeted = services.jobRunner as? BudgetedJobRunner {
+                await budgeted.observe { handle in
+                    Task { @MainActor in exportJobs.track(handle) }
+                }
+            } else {
+                throw Failure(step: "export", reason: "the runner is not the app's, so nothing follows its jobs")
+            }
             let sheetApproval = approveNext("render_export", on: approvals)
             let sheetExport = try await tools.call(
                 "render_export",
@@ -634,11 +646,25 @@ enum SkeletonCheck {
             try require(
                 sheetRow.preset.size == ExportPreset.OutputSize.matchSequence, "export",
                 "the ledger row's preset is \(sheetRow.preset.size)")
+            // The row, and the progress that reached it: an indeterminate spinner would not have told
+            // the user whether a long export was moving.
+            var exportEntry: JobCenter.Entry?
+            for _ in 0..<200 {
+                exportEntry = exportJobs.entries.first { $0.kind == .export }
+                if exportEntry?.progress.fraction != nil { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let trackedExport = try unwrap(exportEntry, "export", "the export raised no row in the job list")
+            let reportedFraction = try unwrap(
+                trackedExport.progress.fraction, "export", "the export row never reported a fraction")
+            try require(
+                reportedFraction > 0, "export", "the export row's progress stayed at \(reportedFraction)")
             ok(
                 "export",
                 "the sheet defaults to \(ExportFraming.pixels(exportDraft.outputSize)) match-sequence; the reel preset "
                     + "flags \(Int(bar.rounded())) px of letterbox first; gated export wrote "
-                    + "\(ExportFraming.pixels(written)) to \(exportDraft.outputURL.lastPathComponent) and a render row")
+                    + "\(ExportFraming.pixels(written)) to \(exportDraft.outputURL.lastPathComponent) and a render row; "
+                    + "the window's job list followed it to \(Int(reportedFraction * 100))%")
 
             // 11d. Format: the user's own case, end to end. Every project is created 1920x1080 whatever it
             //      holds, and the compositor fits each source into that frame *before* any export is framed,

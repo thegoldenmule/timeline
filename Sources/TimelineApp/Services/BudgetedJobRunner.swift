@@ -52,6 +52,10 @@ actor BudgetedJobRunner: JobRunner {
     private var records: [JobID: Record] = [:]
     /// Jobs cancelled before their continuation was registered.
     private var cancelledEarly: Set<JobID> = []
+    /// Told about every submission, so the window's job list can follow work it did not submit itself.
+    /// A tool that runs a job — `render_export` above all — owns the only handle and returns it only
+    /// when the job is already over, so without this an export ran with nothing on screen at all.
+    private var observers: [@Sendable (JobHandle) -> Void] = []
     private(set) var completed = 0
 
     private struct Record {
@@ -66,6 +70,12 @@ actor BudgetedJobRunner: JobRunner {
     }
 
     var usedBytes: Int64 { runningJobs.values.reduce(0) { $0 + $1.bytes } }
+
+    /// Follows every job from now on. The observer gets its own handle with its own progress stream,
+    /// because a stream has one consumer and the submitter keeps the first one.
+    func observe(_ body: @escaping @Sendable (JobHandle) -> Void) {
+        observers.append(body)
+    }
 
     func submit(_ job: Job) -> JobHandle {
         let context = RunnerJobContext(jobId: job.id)
@@ -92,6 +102,11 @@ actor BudgetedJobRunner: JobRunner {
         }
         tasks[id] = task
         records[id] = Record(kind: job.kind, label: job.label, context: context, task: task)
+        for observer in observers {
+            observer(
+                JobHandle(
+                    id: id, kind: job.kind, label: job.label, progress: context.progressStream(), task: task))
+        }
         return JobHandle(id: id, kind: job.kind, label: job.label, progress: stream, task: task)
     }
 
