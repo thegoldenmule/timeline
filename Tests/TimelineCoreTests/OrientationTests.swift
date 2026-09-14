@@ -62,7 +62,7 @@ import TimelineCore
         #expect(probe(1920, 1080, rotation: 45).displaySize == FrameSize(width: 1920, height: 1080))
     }
 
-    @Test func anAssetWithoutVideoHasNoDisplaySize() {
+    @Test func anAudioAssetHasNoDisplaySizeAndAnImageHasOne() {
         let audio = Asset(
             id: "a", contentHash: "sha256-0", libraryPath: "mix.wav", displayName: "mix.wav", kind: .audio,
             duration: RationalTime(1, 1), hasVideo: false, hasAudio: true)
@@ -75,6 +75,13 @@ import TimelineCore
             probe: Probe(width: 3840, height: 2160, rotation: -90))
         #expect(video.displaySize == FrameSize(width: 2160, height: 3840))
         #expect(video.orientation == .portrait)
+
+        // A still image has no video track but is framed exactly like one, so it keeps a display size.
+        let image = Asset(
+            id: "i", contentHash: "sha256-2", libraryPath: "still.heic", displayName: "still.heic", kind: .image,
+            duration: RationalTime(1, 1), hasVideo: false, hasAudio: false,
+            probe: Probe(width: 4032, height: 3024))
+        #expect(image.orientation == .landscape)
     }
 
     @Test func aSequenceReportsItsOwnFrameWithNoRotation() {

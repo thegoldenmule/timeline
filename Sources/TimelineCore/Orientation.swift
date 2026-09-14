@@ -99,8 +99,10 @@ extension Sequence {
 }
 
 extension Asset {
-    /// The asset's display size, when it has video with a usable probe.
-    public var displaySize: FrameSize? { hasVideo ? probe.displaySize : nil }
+    /// The asset's display size, when it is visual and its probe carries a usable one. Audio probes
+    /// carry no size, and a still image is framed exactly like a video clip, so this is simply the
+    /// probe's own answer.
+    public var displaySize: FrameSize? { probe.displaySize }
 
     public var orientation: Orientation? { displaySize?.orientation }
 }
