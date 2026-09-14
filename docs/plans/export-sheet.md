@@ -280,9 +280,15 @@ the exact shape that made the old button wrong. It:
 - No export-preset persistence: the sheet opens fresh each time from the sequence. Remembering the last
   choice means a store for it, and a remembered reel preset is how you get back to silently
   letterboxing a sequence that has since changed shape.
-- No sequence-dimension editing. "This should be configurable" is answered here for the *export*; the
-  sequence's own `width`/`height` are set at creation and changing them is a `resizeSequence` command
-  that does not exist in `TimelineCore` yet.
+- No sequence-dimension editing. "This should be configurable" is answered here for the *export* only.
+  **Correction:** this section originally said changing a sequence's `width`/`height` needed a
+  `resizeSequence` command that does not exist. That was a search for the wrong name.
+  `setSequenceSettings` (`Sources/TimelineCore/Command.swift:223`, decided at `Decide.swift:290`)
+  carries a complete `SequenceSettings` including width and height, refuses only *frame-rate* changes
+  once clips exist, and leaves size changes unrestricted. The sequence is therefore resizable today,
+  and the gap was the UI and the tool reporting, not the core. `docs/plans/sequence-format.md` covers
+  it — including the reason this sheet's framing preview did not catch the user's problem: it draws
+  sequence-into-output, and the bars were coming from media-into-sequence, one stage earlier.
 - No multi-sequence export and no queue: one sheet exports the active sequence.
 - No keyboard shortcut, for the reason the rename plan gives — a plain command-letter belongs to a menu
   and this window has none.
