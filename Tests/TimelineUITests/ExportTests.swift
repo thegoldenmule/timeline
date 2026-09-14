@@ -17,9 +17,11 @@ struct ExportTests {
             id: SequenceID("seq-1"), name: name, frameDuration: rate, width: width, height: height)
     }
 
-    static func draft(_ width: Int, _ height: Int, rate: RationalTime = RationalTime(1, 30)) -> ExportDraft {
+    static func draft(
+        _ width: Int, _ height: Int, rate: RationalTime = RationalTime(1, 30), project: String = "Main"
+    ) -> ExportDraft {
         ExportDraft(
-            sequence: sequence(width, height, rate: rate),
+            sequence: sequence(width, height, rate: rate), projectName: project,
             exportsDirectory: URL(fileURLWithPath: "/tmp/Timeline/Exports"))
     }
 
@@ -108,7 +110,7 @@ struct ExportTests {
     @Test func theDefaultIsTheSequenceItselfWhicheverWayUpItIs() {
         for size in [(1920, 1080), (1080, 1920), (1080, 1350), (2560, 1090)] {
             let draft = ExportTests.draft(size.0, size.1)
-            #expect(draft.presetName == ExportText.matchSequence)
+            #expect(draft.presetName == ExportText.projectFrame)
             #expect(draft.sizing == .preset)
             #expect(draft.rate == .matchSequence)
             #expect(draft.outputSize == CGSize(width: size.0, height: size.1))
@@ -135,17 +137,17 @@ struct ExportTests {
 
     @Test func aPresetThatWouldPadSaysSoBeforeItIsChosen() {
         let landscape = ExportTests.draft(1920, 1080)
-        #expect(landscape.badge(forPresetNamed: ExportText.matchSequence) == nil)
+        #expect(landscape.badge(forPresetNamed: ExportText.projectFrame) == nil)
         #expect(landscape.badge(forPresetNamed: ExportPreset.h264_1080p.name) == nil)
         #expect(landscape.badge(forPresetNamed: ExportPreset.hevcHLG4K.name) == nil)
         #expect(landscape.badge(forPresetNamed: ExportPreset.reel9x16.name) == ExportText.letterboxBadge)
         #expect(landscape.label(forPresetNamed: ExportPreset.reel9x16.name) == "Reel 9:16 — 1080 × 1920, letterboxed")
 
         let portrait = ExportTests.draft(1080, 1920)
-        #expect(portrait.badge(forPresetNamed: ExportText.matchSequence) == nil)
+        #expect(portrait.badge(forPresetNamed: ExportText.projectFrame) == nil)
         #expect(portrait.badge(forPresetNamed: ExportPreset.reel9x16.name) == nil)
         #expect(portrait.badge(forPresetNamed: ExportPreset.h264_1080p.name) == ExportText.pillarboxBadge)
-        #expect(portrait.label(forPresetNamed: ExportText.matchSequence) == "Match sequence — 1080 × 1920")
+        #expect(portrait.label(forPresetNamed: ExportText.projectFrame) == "Project frame — 1080 × 1920")
 
         // ProRes matches the sequence too, so it never pads whatever shape the sequence is.
         #expect(ExportTests.draft(1080, 1350).badge(forPresetNamed: ExportPreset.proRes.name) == nil)
@@ -221,7 +223,7 @@ struct ExportTests {
 
     @Test func theDestinationFollowsThePresetUntilTheUserChoosesOne() {
         var draft = ExportTests.draft(1920, 1080)
-        #expect(draft.outputURL.path == "/tmp/Timeline/Exports/Main-Match sequence.mp4")
+        #expect(draft.outputURL.path == "/tmp/Timeline/Exports/Main-Project frame.mp4")
 
         draft.presetName = ExportPreset.proRes.name
         #expect(draft.outputURL.lastPathComponent == "Main-ProRes 422.mov")
@@ -239,15 +241,26 @@ struct ExportTests {
     @Test func theDefaultPathIsTheToolsDefaultPath() {
         let draft = ExportTests.draft(1920, 1080)
         let expected = ExportDraft.defaultURL(
-            sequenceName: "Main", presetName: ExportText.matchSequence, fileExtension: "mp4",
+            projectName: "Main", presetName: ExportText.projectFrame, fileExtension: "mp4",
             in: URL(fileURLWithPath: "/tmp/Timeline/Exports"))
         #expect(draft.outputURL == expected)
 
-        // A sequence name with a path separator in it cannot make a subdirectory.
+        // A project name with a path separator in it cannot make a subdirectory.
         let odd = ExportDraft(
-            sequence: ExportTests.sequence(1920, 1080, name: "A/B"),
+            sequence: ExportTests.sequence(1920, 1080), projectName: "A/B",
             exportsDirectory: URL(fileURLWithPath: "/tmp/Timeline/Exports"))
-        #expect(odd.outputURL.lastPathComponent == "A-B-Match sequence.mp4")
+        #expect(odd.outputURL.lastPathComponent == "A-B-Project frame.mp4")
+    }
+
+    /// The user's complaint, stated as a test: a project called 911 whose one sequence is still called
+    /// "Sequence 1" exports `911-…`, not `Sequence 1-Match sequence.mp4`.
+    @Test func theFileIsNamedAfterTheProjectNotTheSequence() {
+        let draft = ExportDraft(
+            sequence: ExportTests.sequence(1920, 1080, name: "Sequence 1"), projectName: "911",
+            exportsDirectory: URL(fileURLWithPath: "/tmp/Timeline/Exports"))
+        #expect(draft.projectName == "911")
+        #expect(draft.outputURL.lastPathComponent == "911-Project frame.mp4")
+        #expect(!draft.outputURL.lastPathComponent.lowercased().contains("sequence"))
     }
 
     // MARK: The wire

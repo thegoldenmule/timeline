@@ -116,7 +116,7 @@ public struct FormatMismatch: Hashable, Sendable {
             + "\(count) \(noun) \(worst.barsDescription.lowercased())"
     }
 
-    /// The sentence the sheet and the offer use: what is wrong and what fixes it.
+    /// The sentence the sheet and the export sheet's warning use: what is wrong and what fixes it.
     public var advice: String? {
         guard let worst else { return nil }
         guard let suggested = suggestedSize else {
@@ -126,25 +126,30 @@ public struct FormatMismatch: Hashable, Sendable {
         return "\(worst.assetName) is \(worst.displaySize.description) "
             + "(\(worst.displaySize.orientation.rawValue)) in a \(sequenceSize.description) "
             + "\(sequenceSize.orientation.rawValue) frame, so it exports \(worst.barsDescription.lowercased()). "
-            + "Matching the sequence to the footage makes it \(suggested.description)."
+            + "Matching the frame to the footage makes it \(suggested.description)."
     }
 }
 
 // MARK: - Copy
 
 public enum SequenceFormatText {
-    public static let title = "Sequence format"
+    /// The one name for the thing, used by the sheet, the menu, and the tooltip. Never "sequence":
+    /// there is one frame per project, the user never made a second, and the model's word for the
+    /// container it lives on is not a word anybody has been shown (`docs/plans/frame-at-edit-time.md`).
+    public static let title = "Project frame"
     public static let frame = "Frame"
     public static let width = "Width"
     public static let height = "Height"
     public static let frameRate = "Frame rate"
-    public static let apply = "Change format"
+    public static let apply = "Change frame"
     public static let cancel = "Cancel"
     public static let custom = "Custom"
-    public static let matchMedia = "Match media"
-    public static let change = "Change format…"
-    public static let matchOffer = "Match sequence to media"
-    public static let dismiss = "Dismiss"
+    public static let matchMedia = "Match footage"
+    public static let change = "Custom frame…"
+    /// The label on the history row, and on the menu's own transaction.
+    public static let changeLabel = "Change frame"
+    /// The label on the transaction the first import files by itself.
+    public static let matchLabel = "Match frame to footage"
 
     public static let note =
         "The frame every clip is fitted into. Changing it rewrites no clip and is one undo step; the "
@@ -161,6 +166,22 @@ public enum SequenceFormatText {
     public static func matchMediaLabel(_ size: FrameSize, source: String?) -> String {
         guard let source else { return "\(matchMedia) — \(size.description)" }
         return "\(matchMedia) — \(size.description), from \(source)"
+    }
+
+    /// What the status bar says after the first import framed the project for the user: the frame it
+    /// set, the clip it followed, and what undo gives back. Saying all three is the whole difference
+    /// between doing the work and doing it behind their back.
+    public static func matched(_ size: FrameSize, source: String?, restoring previous: FrameSize) -> String {
+        let followed = source.map { " to match \($0)" } ?? " to match the footage"
+        return "Frame set to \(size.description)\(followed). Undo restores \(previous.description)."
+    }
+
+    /// The frame control's tooltip. The viewfinder button is an icon, so this is where its numbers are.
+    public static func frameHelp(_ size: FrameSize, mismatched: Bool) -> String {
+        let shape = "\(size.description) · \(size.aspectLabel)"
+        return mismatched
+            ? "\(title): \(shape) — the footage does not fill it. Click to change."
+            : "\(title): \(shape). Click to change."
     }
 
     public static func dimensionRange(_ minimum: Int, _ maximum: Int) -> String {
@@ -310,6 +331,105 @@ public struct SequenceFormat: Hashable, Sendable {
     }
 }
 
+// MARK: - Framing the project by itself
+
+extension SequenceFormat {
+    /// The frame every project is created at (`ProjectDocument.create`). It is a default, not a choice:
+    /// nothing in the New flow asks, so a project sitting at exactly this frame is one nobody has
+    /// framed.
+    public static let creationFrameSize = FrameSize(width: 1920, height: 1080)
+
+    /// The frame change to make when footage first lands in a project nobody has framed — or nil, when
+    /// the user's own choice must stand.
+    ///
+    /// This used to be an offer in the status bar with a Dismiss beside it. It is not any more: nobody
+    /// wants a frame that does not fit their footage, so the app sets it and says so
+    /// (`docs/plans/frame-at-edit-time.md`, 4). The three guards are what keep "says so" from becoming
+    /// "argues with":
+    ///
+    /// - the frame is still the creation default, so no framing decision is being overwritten;
+    /// - the history holds **no** `sequenceSettingsChanged`, which is the durable form of "the user has
+    ///   never set a frame themselves". Reading it from the log rather than from a flag is what makes an
+    ///   undo final: this function's own change stays in the log after it is undone, so the next import
+    ///   does not re-apply what was just rejected, and a relaunch does not forget;
+    /// - the footage agrees on one shape, because mixed shapes have no single right answer.
+    public static func autoMatch(sequence: Sequence, assets: [AssetID: Asset], history: History)
+        -> SequenceFormat?
+    {
+        guard sequence.frameSize == SequenceFormat.creationFrameSize else { return nil }
+        let framed = history.allEvents.contains {
+            if case .sequenceSettingsChanged = $0.payload { true } else { false }
+        }
+        guard !framed else { return nil }
+        var draft = SequenceFormat(sequence: sequence, assets: assets)
+        guard !draft.mismatch.isClean, draft.canMatchMedia else { return nil }
+        draft.selection = .matchMedia
+        guard draft.operation != nil else { return nil }
+        return draft
+    }
+}
+
+// MARK: - The frame control
+
+/// What the frame control offers, in the order it offers it.
+///
+/// The arithmetic is a value type and the `View` is a rendering of it, the way `ExportFraming`,
+/// `FormatMismatch`, `FrameGuide` and `PanelLayoutModel` are (`ui-style.md`). A test can hold the rows
+/// and read the words in them, which is how the vocabulary stays swept.
+public struct FrameChoices: Hashable, Sendable {
+    public struct Row: Hashable, Sendable, Identifiable {
+        public enum Kind: Hashable, Sendable {
+            case matchFootage
+            case preset
+            case custom
+        }
+
+        public let kind: Kind
+        public let title: String
+        /// The frame this row would set; nil for Custom, which opens the sheet instead.
+        public let size: FrameSize?
+        /// True when the project is already in this frame.
+        public let isCurrent: Bool
+        /// True for the one row that fixes a frame the footage does not fill.
+        public let isRecommended: Bool
+
+        public var id: String { title }
+    }
+
+    public let current: FrameSize
+    public let rows: [Row]
+    /// True when the footage does not fill the frame, which is what tints the control.
+    public let hasMismatch: Bool
+
+    public init(mismatch: FormatMismatch) {
+        let current = mismatch.sequenceSize
+        self.current = current
+        self.hasMismatch = !mismatch.isClean
+        var rows: [Row] = []
+        if let suggested = mismatch.suggestedSize, suggested != current {
+            rows.append(
+                Row(
+                    kind: .matchFootage,
+                    title: SequenceFormatText.matchMediaLabel(suggested, source: mismatch.suggestedSource),
+                    size: suggested, isCurrent: false, isRecommended: !mismatch.isClean))
+        }
+        for preset in SequenceFormatPreset.builtIn {
+            rows.append(
+                Row(
+                    kind: .preset, title: preset.label, size: preset.size, isCurrent: preset.size == current,
+                    isRecommended: false))
+        }
+        rows.append(
+            Row(kind: .custom, title: SequenceFormatText.change, size: nil, isCurrent: false, isRecommended: false))
+        self.rows = rows
+    }
+
+    /// "1080x1920 · 9:16" — what the status bar's copy of the control shows on its face.
+    public var label: String { "\(current.description) · \(current.aspectLabel)" }
+
+    public var help: String { SequenceFormatText.frameHelp(current, mismatched: hasMismatch) }
+}
+
 // MARK: - Views
 
 /// The sequence's frame with its footage drawn inside it: the stage the export sheet cannot show,
@@ -368,7 +488,97 @@ public struct FormatMismatchView: View {
     }
 }
 
-/// The format sheet: what frame the sequence is in, what the footage wants, and what the change does.
+/// The frame control: the project's frame, and the one click that changes it.
+///
+/// This is where framing lives now. It is on the preview because the preview is where the frame is
+/// *drawn* — `FrameGuideOverlay` strokes it on the picture's edge and names its size — and a control
+/// that changes what an overlay draws belongs beside that overlay's switch, the way every NLE puts its
+/// viewfinder controls on the viewer (`docs/plans/frame-at-edit-time.md`, 2). The same menu is the
+/// status bar's frame line, which is the labelled twin of the icon in the corner.
+///
+/// A menu rather than a sheet because nine answers in ten are one row: match the footage, or one of
+/// five shapes. Picking one applies a single transaction, so undo is the confirmation and the preview
+/// redraws under the pointer. Custom sizes and the frame rate are a form, and they are what the sheet
+/// is still for.
+public struct FrameMenu: View {
+    /// Where the control is drawn. The viewfinder copy is an icon on the picture, because the guide's
+    /// own label is already showing the numbers; the status copy carries them.
+    public enum Style: Hashable, Sendable {
+        case viewfinder
+        case status
+    }
+
+    public let choices: FrameChoices
+    public let style: Style
+    public let pick: (FrameSize) -> Void
+    public let custom: () -> Void
+
+    public init(
+        choices: FrameChoices, style: Style, pick: @escaping (FrameSize) -> Void, custom: @escaping () -> Void
+    ) {
+        self.choices = choices
+        self.style = style
+        self.pick = pick
+        self.custom = custom
+    }
+
+    public var body: some View {
+        Menu {
+            rows
+        } label: {
+            label
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(style == .status ? .visible : .hidden)
+        .fixedSize()
+        .help(choices.help)
+        .accessibilityLabel(choices.help)
+        .accessibilityIdentifier(style == .status ? "status-frame" : "preview-frame")
+    }
+
+    @ViewBuilder private var label: some View {
+        switch style {
+        case .viewfinder:
+            Image(systemName: choices.hasMismatch ? "exclamationmark.triangle" : "aspectratio")
+                .foregroundStyle(choices.hasMismatch ? PanelTheme.warning : Color.accentColor)
+                .padding(PanelTheme.rowGap)
+                .background(PanelTheme.barMaterial, in: RoundedRectangle(cornerRadius: PanelTheme.chipRadius))
+        case .status:
+            Label(
+                choices.label, systemImage: choices.hasMismatch ? "exclamationmark.triangle" : "aspectratio"
+            )
+            .foregroundStyle(choices.hasMismatch ? PanelTheme.warning : Color.secondary)
+        }
+    }
+
+    @ViewBuilder private var rows: some View {
+        let matches = choices.rows.filter { $0.kind == .matchFootage }
+        let presets = choices.rows.filter { $0.kind == .preset }
+        if !matches.isEmpty {
+            ForEach(matches) { row($0) }
+            Divider()
+        }
+        ForEach(presets) { row($0) }
+        Divider()
+        ForEach(choices.rows.filter { $0.kind == .custom }) { row($0) }
+    }
+
+    @ViewBuilder private func row(_ row: FrameChoices.Row) -> some View {
+        Button {
+            if let size = row.size { pick(size) } else { custom() }
+        } label: {
+            if row.isCurrent {
+                Label(row.title, systemImage: "checkmark")
+            } else if row.isRecommended {
+                Label(row.title, systemImage: "wand.and.stars")
+            } else {
+                Text(row.title)
+            }
+        }
+    }
+}
+
+/// The frame sheet: what frame the project is in, what the footage wants, and what the change does.
 public struct SequenceFormatSheet: View {
     @State private var draft: SequenceFormat
     @State private var error: String?

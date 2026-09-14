@@ -3,15 +3,19 @@ import CoreGraphics
 import Foundation
 import TimelineCore
 
-/// Where an export goes when the caller names no `outputPath`: `<exports>/<sequence>-<preset>.<ext>`.
+/// Where an export goes when the caller names no `outputPath`: `<exports>/<project>-<preset>.<ext>`.
+///
+/// The **project's** name, not the sequence's: a sequence is called "Sequence 1" because
+/// `ProjectDocument.create` says so, and a user whose project is called 911 does not recognise a file
+/// called `Sequence 1-…` (`docs/plans/frame-at-edit-time.md`, 3).
 ///
 /// Public because the window's export sheet shows this path before the tool is ever called, and
 /// `TimelineUI` may not import `AgentKit` to share the formula (`conventions.md`, package layout). Its
 /// copy is `ExportDraft.defaultURL`, and the skeleton check — which sees both — asserts the two agree
 /// (`docs/plans/export-sheet.md`, 8).
 public enum ExportDestination {
-    public static func url(sequenceName: String, presetName: String, fileExtension: String, in exports: URL) -> URL {
-        let name = "\(sequenceName)-\(presetName)".replacingOccurrences(of: "/", with: "-")
+    public static func url(projectName: String, presetName: String, fileExtension: String, in exports: URL) -> URL {
+        let name = "\(projectName)-\(presetName)".replacingOccurrences(of: "/", with: "-")
         return exports.appendingPathComponent("\(name).\(fileExtension)")
     }
 }
@@ -127,7 +131,7 @@ enum RenderTools {
                             Schema.object("Full preset.", properties: [:], additionalProperties: true),
                         ]),
                     "outputPath": Schema.string(
-                        "Destination file path (default: <library root>/Exports/<sequence>-<preset>.<ext>, where the library root is ~/Movies/Timeline unless TIMELINE_ROOT points elsewhere)."
+                        "Destination file path (default: <library root>/Exports/<project>-<preset>.<ext>, where the library root is ~/Movies/Timeline unless TIMELINE_ROOT points elsewhere)."
                     ),
                     "approvalToken": Schema.string("Token from the approval_required result, once granted."),
                 ]), required: ["preset"]),
@@ -186,8 +190,8 @@ enum RenderTools {
         } else {
             let layout = context.services.mediaLibrary?.layout ?? LibraryLayout.default
             outputURL = ExportDestination.url(
-                sequenceName: sequence.name, presetName: preset.name, fileExtension: preset.fileExtension,
-                in: layout.exportsDir)
+                projectName: resolved.project.name, presetName: preset.name,
+                fileExtension: preset.fileExtension, in: layout.exportsDir)
         }
         let version = resolved.project.version
         var warnings: [String] = []

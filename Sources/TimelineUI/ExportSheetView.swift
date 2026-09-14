@@ -74,8 +74,8 @@ public struct ExportFraming: Hashable, Sendable {
 
     /// One line under the picture saying what the renderer will do, in its own terms.
     public var summary: String {
-        guard !isExact else { return "\(outputLabel) — the sequence fills the frame" }
-        return "\(outputLabel) — the \(ExportFraming.pixels(sequence)) sequence "
+        guard !isExact else { return "\(outputLabel) — the project's frame fills it" }
+        return "\(outputLabel) — the \(ExportFraming.pixels(sequence)) project frame "
             + "(\(ExportFraming.aspectLabel(sequence))) fills \(Int((coverage * 100).rounded()))% of it"
     }
 
@@ -125,11 +125,16 @@ public enum ExportText {
     public static let export = "Export"
     public static let cancel = "Cancel"
     public static let fillsFrame = "Fills the frame"
-    public static let matchSequence = "Match sequence"
+    /// The preset that writes the project's own frame, and the name that then goes into the file name,
+    /// the render ledger row, and the receipt. Never "Match sequence": nobody has been shown a sequence
+    /// (`docs/plans/frame-at-edit-time.md`, 1).
+    public static let projectFrame = "Project frame"
+    /// The frame-rate row that follows the project rather than fixing a rate.
+    public static let projectRate = "Project frame rate"
     /// Said once, under the picture, because it is the whole reason this sheet exists.
     public static let fitNote =
-        "The sequence is scaled to fit and centred on black. Nothing is cropped, so a frame that is not "
-        + "the sequence's shape is padded to fill it."
+        "The picture is scaled to fit and centred on black. Nothing is cropped, so an output that is not "
+        + "the project's shape is padded to fill it."
 
     public static func letterboxed(_ bar: Int) -> String {
         "Letterboxed: \(bar) px of black above and below"
@@ -147,23 +152,25 @@ public enum ExportText {
     /// sequence, and this export boxes that again. The picture ends up small with black on all four
     /// sides — `RenderKitTests.PortraitFramingTests` writes the file and reads the black back out.
     public static func boxedTwice(
-        _ clip: String, _ clipSize: String, _ sequenceSize: String, _ outputSize: String
+        _ clip: String, _ clipSize: String, _ frameSize: String, _ outputSize: String
     ) -> String {
-        "This boxes the picture twice: \(clip) is \(clipSize) fitted into the \(sequenceSize) sequence, "
+        "This boxes the picture twice: \(clip) is \(clipSize) fitted into the \(frameSize) project frame, "
             + "and that is fitted again into \(outputSize). Changing the export's size cannot undo the "
-            + "first fit — only the sequence's own frame can."
+            + "first fit — only the project's own frame can. \(changeFrame)"
     }
 
-    public static func matchAndExport(_ size: String) -> String { "Match the sequence to the footage (\(size))" }
-
-    /// The warning about the stage before this one: the footage does not fill the sequence, so no
-    /// preset here can save it. Named in the sheet where the problem is found, not where it is caused.
-    public static func sequenceMismatch(
-        _ clip: String, _ clipSize: String, _ sequenceSize: String, _ bars: String
+    /// The warning about the stage before this one: the footage does not fill the project's frame, so no
+    /// preset here can save it. Said where the problem is found, and it stops at saying it — framing is
+    /// edit-time work and this sheet no longer does it (`docs/plans/frame-at-edit-time.md`, 5).
+    public static func frameMismatch(
+        _ clip: String, _ clipSize: String, _ frameSize: String, _ bars: String
     ) -> String {
-        "\(clip) is \(clipSize) in a \(sequenceSize) sequence, so it is \(bars) before this export "
-            + "begins. No preset removes that — the sequence's own frame is what to change."
+        "\(clip) is \(clipSize) in a \(frameSize) project frame, so it is \(bars) before this export "
+            + "begins. No preset removes that. \(changeFrame)"
     }
+
+    /// Where the fix is, named rather than offered.
+    public static let changeFrame = "Change the project's frame above the timeline."
 
     public static func dimensionRange(_ minimum: Int, _ maximum: Int) -> String {
         "Width and height are between \(minimum) and \(maximum) pixels"
@@ -211,7 +218,7 @@ public struct ExportDraft: Hashable, Sendable {
     /// rate. It is a real `ExportPreset` and goes down the wire like any other, so the receipt, the
     /// render ledger row, and the file name all name it (`docs/plans/export-sheet.md`, 6).
     public static let matchSequence = ExportPreset(
-        name: ExportText.matchSequence, container: .mp4, videoCodec: .h264, size: .matchSequence,
+        name: ExportText.projectFrame, container: .mp4, videoCodec: .h264, size: .matchSequence,
         frameRate: .matchSequence, videoQuality: .bitrate(bitsPerSecond: 12_000_000), hdr: .toneMapToSDR)
 
     /// The picker's rows, in order.
@@ -227,7 +234,10 @@ public struct ExportDraft: Hashable, Sendable {
     public static let maximumDimension = 8192
 
     public let sequenceId: SequenceID
-    public let sequenceName: String
+    /// The **project's** name, which is what an exported file is named after. It used to be the
+    /// sequence's — "Sequence 1", a string nobody typed — so a project called 911 exported
+    /// `Sequence 1-Match sequence.mp4` (`docs/plans/frame-at-edit-time.md`, 3).
+    public let projectName: String
     /// The sequence's own pixels — what every framing in this sheet is measured against.
     public let sequenceSize: CGSize
     /// The sequence's frame rate, as frames per second.
@@ -247,9 +257,9 @@ public struct ExportDraft: Hashable, Sendable {
     /// The default: the sequence's own size and rate, whatever shape it is. A portrait sequence cannot
     /// default to a landscape frame here, because no frame but the sequence's is ever the default
     /// (`docs/plans/export-sheet.md`, 5).
-    public init(sequence: Sequence, exportsDirectory: URL) {
+    public init(sequence: Sequence, projectName: String, exportsDirectory: URL) {
         self.sequenceId = sequence.id
-        self.sequenceName = sequence.name
+        self.projectName = projectName
         let width = max(1, sequence.width)
         let height = max(1, sequence.height)
         self.sequenceSize = CGSize(width: width, height: height)
@@ -304,7 +314,7 @@ public struct ExportDraft: Hashable, Sendable {
     public var outputURL: URL {
         guard let chosenURL else {
             return ExportDraft.defaultURL(
-                sequenceName: sequenceName, presetName: preset.name, fileExtension: preset.fileExtension,
+                projectName: projectName, presetName: preset.name, fileExtension: preset.fileExtension,
                 in: exportsDirectory)
         }
         return chosenURL.deletingPathExtension().appendingPathExtension(preset.fileExtension)
@@ -313,16 +323,16 @@ public struct ExportDraft: Hashable, Sendable {
     /// The save panel's answer.
     public mutating func chose(_ url: URL) { chosenURL = url }
 
-    /// `<exports>/<sequence>-<preset>.<ext>`.
+    /// `<exports>/<project>-<preset>.<ext>`.
     ///
     /// The second copy of this formula, on purpose: `render_export` builds the same path when no
     /// `outputPath` is given (`RenderTools.ExportDestination`), and `TimelineUI` may not import
     /// `AgentKit` to share it (`conventions.md`, package layout). The skeleton check imports both and
     /// asserts the two agree (`docs/plans/export-sheet.md`, 8).
     public static func defaultURL(
-        sequenceName: String, presetName: String, fileExtension: String, in directory: URL
+        projectName: String, presetName: String, fileExtension: String, in directory: URL
     ) -> URL {
-        let name = "\(sequenceName)-\(presetName)".replacingOccurrences(of: "/", with: "-")
+        let name = "\(projectName)-\(presetName)".replacingOccurrences(of: "/", with: "-")
         return directory.appendingPathComponent("\(name).\(fileExtension)")
     }
 
@@ -476,21 +486,19 @@ public struct ExportSheetView: View {
     public let onPoster: (@MainActor () async -> CGImage?)?
     public let onExport: (ExportDraft) -> Void
     public let onCancel: () -> Void
-    /// Whether the sequence's own clips fill its frame. An export cannot fix this — by the time a file
-    /// is framed the footage has already been fitted into the sequence — so the sheet reports it and
-    /// hands over to the format sheet rather than pretending a preset could help.
+    /// Whether the project's own clips fill its frame. An export cannot fix this — by the time a file
+    /// is framed the footage has already been fitted into the project's frame — so the sheet says so
+    /// and stops there. It used to carry a fix-it button that resized the project and exported in one
+    /// click; framing is edit-time work and the frame control above the timeline is where it lives now
+    /// (`docs/plans/frame-at-edit-time.md`, 5). The sentence stays because this is the last moment
+    /// before a file with black in it exists, and going quiet here would be worse than saying it.
     public let mismatch: FormatMismatch?
-    public let onChangeFormat: (() -> Void)?
-    /// Resizes the sequence to the footage's own frame and exports that, in one click. The sheet's own
-    /// size controls cannot express this: they change the second fit, and the damage is in the first.
-    public let onMatchAndExport: (() -> Void)?
     @State private var frame: CGImage?
 
     public init(
         draft: Binding<ExportDraft>, onChoosePath: @escaping () -> URL?,
         onPoster: (@MainActor () async -> CGImage?)? = nil, onExport: @escaping (ExportDraft) -> Void,
-        onCancel: @escaping () -> Void, mismatch: FormatMismatch? = nil,
-        onChangeFormat: (() -> Void)? = nil, onMatchAndExport: (() -> Void)? = nil
+        onCancel: @escaping () -> Void, mismatch: FormatMismatch? = nil
     ) {
         self._draft = draft
         self.onChoosePath = onChoosePath
@@ -498,12 +506,10 @@ public struct ExportSheetView: View {
         self.onExport = onExport
         self.onCancel = onCancel
         self.mismatch = mismatch
-        self.onChangeFormat = onChangeFormat
-        self.onMatchAndExport = onMatchAndExport
     }
 
-    /// True when this export would box an already boxed picture: the sequence does not hold its footage,
-    /// *and* the export's frame is not the sequence's shape either.
+    /// True when this export would box an already boxed picture: the project's frame does not hold its
+    /// footage, *and* the export's frame is not that frame's shape either.
     private var wouldBoxTwice: Bool {
         guard let mismatch, !mismatch.isClean else { return false }
         return !draft.framing.isExact
@@ -520,34 +526,20 @@ public struct ExportSheetView: View {
             Text(ExportText.title).font(PanelTheme.sectionTitle)
             ExportFramingView(framing: draft.framing, frame: frame, media: mediaFraming)
             if let mismatch, !mismatch.isClean, let worst = mismatch.worst {
-                VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
-                    Label(
-                        wouldBoxTwice
-                            ? ExportText.boxedTwice(
-                                worst.assetName, worst.displaySize.description,
-                                mismatch.sequenceSize.description, ExportFraming.pixels(draft.outputSize))
-                            : ExportText.sequenceMismatch(
-                                worst.assetName, worst.displaySize.description,
-                                mismatch.sequenceSize.description, worst.barsDescription.lowercased()),
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(PanelTheme.caption)
-                    .foregroundStyle(PanelTheme.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-                    // The one control that reaches the outcome the user actually wants. The size
-                    // controls below cannot: they change the second fit, and the loss is in the first.
-                    if let onMatchAndExport, let suggested = mismatch.suggestedSize {
-                        Button(ExportText.matchAndExport(suggested.description), action: onMatchAndExport)
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("export-match-and-export")
-                    }
-                    if let onChangeFormat {
-                        Button(SequenceFormatText.change, action: onChangeFormat)
-                            .buttonStyle(.link)
-                            .font(PanelTheme.caption)
-                    }
-                }
-                .accessibilityIdentifier("export-sequence-mismatch")
+                Label(
+                    wouldBoxTwice
+                        ? ExportText.boxedTwice(
+                            worst.assetName, worst.displaySize.description,
+                            mismatch.sequenceSize.description, ExportFraming.pixels(draft.outputSize))
+                        : ExportText.frameMismatch(
+                            worst.assetName, worst.displaySize.description,
+                            mismatch.sequenceSize.description, worst.barsDescription.lowercased()),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(PanelTheme.caption)
+                .foregroundStyle(PanelTheme.warning)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("export-frame-mismatch")
             }
             Text(ExportText.fitNote)
                 .font(PanelTheme.caption)
@@ -626,7 +618,7 @@ public struct ExportSheetView: View {
 
     private var ratePicker: some View {
         Picker(ExportText.frameRate, selection: $draft.rate) {
-            Text("\(ExportText.matchSequence) (\(ExportText.fps(draft.sequenceRate)))")
+            Text("\(ExportText.projectRate) (\(ExportText.fps(draft.sequenceRate)))")
                 .tag(ExportDraft.Rate.matchSequence)
             ForEach(ExportDraft.rates, id: \.self) { rate in
                 Text(ExportText.fps(rate)).tag(ExportDraft.Rate.fixed(rate))

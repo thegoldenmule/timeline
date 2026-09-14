@@ -580,9 +580,11 @@ enum SkeletonCheck {
             //      gated call with the preset as an object rather than a name.
             let exportSequence = try unwrap(original.sequence, "export", "no sequence")
             let sequenceFrame = CGSize(width: exportSequence.width, height: exportSequence.height)
-            var exportDraft = ExportDraft(sequence: exportSequence, exportsDirectory: services.layout.exportsDir)
+            var exportDraft = ExportDraft(
+                sequence: exportSequence, projectName: original.project.name,
+                exportsDirectory: services.layout.exportsDir)
             try require(
-                exportDraft.presetName == ExportText.matchSequence, "export",
+                exportDraft.presetName == ExportText.projectFrame, "export",
                 "the default preset is \(exportDraft.presetName)")
             try require(
                 exportDraft.outputSize == sequenceFrame, "export", "the default frame is \(exportDraft.outputSize)")
@@ -591,9 +593,18 @@ enum SkeletonCheck {
             try require(
                 exportDraft.outputURL
                     == ExportDestination.url(
-                        sequenceName: exportSequence.name, presetName: exportDraft.preset.name,
+                        projectName: original.project.name, presetName: exportDraft.preset.name,
                         fileExtension: exportDraft.preset.fileExtension, in: services.layout.exportsDir), "export",
                 "the sheet's default path is \(exportDraft.outputURL.path)")
+            // The user's own complaint as an assertion: the file is named after the project they named,
+            // not after "Sequence 1", which is a string `ProjectDocument.create` wrote and nobody read.
+            let defaultName = exportDraft.outputURL.lastPathComponent
+            try require(
+                defaultName.hasPrefix("\(original.project.name)-"), "export",
+                "the default file is \(defaultName), not named after the project")
+            try require(
+                !defaultName.lowercased().contains("sequence"), "export",
+                "the default file name still says sequence: \(defaultName)")
             // What the old button did, now visible before it happens rather than after.
             var reel = exportDraft
             reel.presetName = ExportPreset.reel9x16.name
@@ -661,16 +672,19 @@ enum SkeletonCheck {
                 reportedFraction > 0, "export", "the export row's progress stayed at \(reportedFraction)")
             ok(
                 "export",
-                "the sheet defaults to \(ExportFraming.pixels(exportDraft.outputSize)) match-sequence; the reel preset "
-                    + "flags \(Int(bar.rounded())) px of letterbox first; gated export wrote "
-                    + "\(ExportFraming.pixels(written)) to \(exportDraft.outputURL.lastPathComponent) and a render row; "
-                    + "the window's job list followed it to \(Int(reportedFraction * 100))%")
+                "the sheet defaults to \(ExportFraming.pixels(exportDraft.outputSize)) \(ExportText.projectFrame) "
+                    + "and names the file \(defaultName) after the project; the reel preset flags "
+                    + "\(Int(bar.rounded())) px of letterbox first; gated export wrote "
+                    + "\(ExportFraming.pixels(written)) to \(exportDraft.outputURL.lastPathComponent) "
+                    + "and a render row; the window's job list followed it to \(Int(reportedFraction * 100))%")
 
             // 11d. Format: the user's own case, end to end. Every project is created 1920x1080 whatever it
             //      holds, and the compositor fits each source into that frame *before* any export is framed,
-            //      so a project of portrait clips exported "match sequence" is a pillarboxed landscape file
-            //      while the export sheet correctly reports no letterboxing — it draws the later stage. The
-            //      format sheet is what sees the earlier one (docs/plans/sequence-format.md).
+            //      so a project of portrait clips exported at the project's frame is a pillarboxed landscape
+            //      file while the export sheet correctly reports no letterboxing — it draws the later stage.
+            //      The frame control is what sees the earlier one, and since
+            //      `docs/plans/frame-at-edit-time.md` the first import does not *ask* about it: it sets the
+            //      frame to the footage's own and says so. This step is that behaviour, and its guard.
             let portraitClip = try await TestMedia.videoWithAudio(
                 .tone(frequency: 330), size: CGSize(width: 720, height: 1280), duration: 2, in: media.url,
                 name: "portrait")
@@ -692,23 +706,45 @@ enum SkeletonCheck {
             }
             // The export sheet is blind to this on purpose, and proving it is the point: its own framing is
             // exact, because the sequence does fill the frame it is being exported at.
-            let blindDraft = ExportDraft(sequence: createdSequence, exportsDirectory: services.layout.exportsDir)
+            let blindDraft = ExportDraft(
+                sequence: createdSequence, projectName: portraitDoc.project.name,
+                exportsDirectory: services.layout.exportsDir)
             try require(
                 blindDraft.framing.isExact, "format",
                 "the export framing should be exact here; it is \(blindDraft.framing.bars)")
 
-            var format = SequenceFormat(sequence: createdSequence, assets: portraitDoc.project.assets)
-            try require(format.recommendsMatchMedia, "format", "matching the media was not recommended")
-            format.selection = .matchMedia
+            // The frame menu the preview and the status bar both render, over the project as imported.
+            let choices = FrameChoices(mismatch: firstLook)
+            try require(choices.hasMismatch, "format", "the frame menu reported no mismatch")
+            let matchRow = try unwrap(
+                choices.rows.first { $0.kind == .matchFootage }, "format", "the menu offered no Match footage row")
             try require(
-                format.size == FrameSize(width: 720, height: 1280), "format", "match media gives \(format.size)")
+                matchRow.isRecommended && matchRow.size == FrameSize(width: 720, height: 1280), "format",
+                "the Match footage row is \(String(describing: matchRow.size))")
+            try require(
+                !matchRow.title.lowercased().contains("sequence"), "format",
+                "the menu still says sequence: \(matchRow.title)")
+
+            // What the window does by itself when footage first lands in a project nobody has framed.
+            let format = try unwrap(
+                SequenceFormat.autoMatch(
+                    sequence: createdSequence, assets: portraitDoc.project.assets,
+                    history: portraitDoc.viewModel.history), "format", "the import did not frame the project")
+            try require(
+                format.size == FrameSize(width: 720, height: 1280), "format", "match footage gives \(format.size)")
             try require(format.resultingMismatch.isClean, "format", "matching left bars behind")
+            let statusNote = SequenceFormatText.matched(
+                format.size, source: format.matchMediaSource, restoring: createdSequence.frameSize)
+            try require(
+                statusNote.contains("720x1280") && statusNote.contains("portrait")
+                    && statusNote.contains("1920x1080"), "format",
+                "the status note does not say what happened: \(statusNote)")
             let beforeFormat = portraitDoc.version
             let clipsBeforeFormat =
                 portraitDoc.project.sequences[createdSequence.id]?.tracks
                 .reduce(0) { $0 + $1.clips.count } ?? 0
             let formatted = try await portraitDoc.apply(
-                try unwrap(format.operation, "format", "no operation"), label: "Change sequence format")
+                try unwrap(format.operation, "format", "no operation"), label: SequenceFormatText.matchLabel)
             try await portraitDoc.waitForVersion(formatted.version)
             let resized = try unwrap(portraitDoc.sequence, "format", "no sequence after the resize")
             try require(
@@ -727,10 +763,15 @@ enum SkeletonCheck {
 
             // The export sheet over the resized sequence: its default is the footage's own frame and
             // nothing is boxed at either stage, so the user's next click cannot undo the fix.
-            let afterDraft = ExportDraft(sequence: resized, exportsDirectory: services.layout.exportsDir)
+            let afterDraft = ExportDraft(
+                sequence: resized, projectName: portraitDoc.project.name,
+                exportsDirectory: services.layout.exportsDir)
             try require(
                 afterDraft.outputSize == CGSize(width: 720, height: 1280), "format",
                 "the sheet would export \(ExportFraming.pixels(afterDraft.outputSize))")
+            try require(
+                afterDraft.outputURL.lastPathComponent == "Portrait-\(ExportText.projectFrame).mp4", "format",
+                "the file would be \(afterDraft.outputURL.lastPathComponent)")
             try require(afterDraft.framing.isExact, "format", "the sheet would box the resized sequence")
             try require(
                 FormatMismatch(sequence: resized, assets: portraitDoc.project.assets).isClean, "format",
@@ -753,16 +794,25 @@ enum SkeletonCheck {
 
             // And it is one undo, like every other edit.
             try require(await portraitDoc.viewModel.undo()?.status == .applied, "format", "the resize did not undo")
+            let unframed = try unwrap(portraitDoc.sequence, "format", "no sequence after the undo")
             try require(
-                portraitDoc.sequence?.frameSize == FrameSize(width: 1920, height: 1080), "format",
-                "undo left the sequence at \(String(describing: portraitDoc.sequence?.frameSize))")
+                unframed.frameSize == FrameSize(width: 1920, height: 1080), "format",
+                "undo left the frame at \(unframed.frameSize)")
+            // And the app does not argue. The change is still in the log after the undo, so the guard that
+            // reads the log declines to make it again — this launch or any other.
+            try require(
+                SequenceFormat.autoMatch(
+                    sequence: unframed, assets: portraitDoc.project.assets,
+                    history: portraitDoc.viewModel.history)
+                    == nil, "format", "the undone frame change was offered again")
             await portraitDoc.close(using: services)
             ok(
                 "format",
                 "a new project holding one 720x1280 clip is 1920x1080 and pillarboxes it by "
-                    + "\(Int(pillar.rounded())) px, which the export sheet's own framing calls exact; match "
-                    + "media resized to 720x1280 in one transaction, kept \(clipsAfterFormat) clip(s), wrote "
-                    + "\(ExportFraming.pixels(portraitSize)) to \(portraitOut.lastPathComponent), and undid")
+                    + "\(Int(pillar.rounded())) px, which the export sheet's own framing calls exact; the import "
+                    + "framed it 720x1280 by itself in one transaction, kept \(clipsAfterFormat) clip(s), wrote "
+                    + "\(ExportFraming.pixels(portraitSize)) to \(portraitOut.lastPathComponent) as "
+                    + "\(afterDraft.outputURL.lastPathComponent), undid, and did not offer again")
 
             // 12. Publish: connect the fixture Google account through the real loopback flow, export through
             //     render_export (a render row), then publish_youtube through the registry: approval_required

@@ -28,10 +28,9 @@ final class AppModel {
     var renaming: ProjectRename?
     /// The export sheet's draft while it is up; nil when it is not.
     var exporting: ExportDraft?
+    /// The frame sheet's draft while it is up; nil when it is not. The sheet is the custom-size and
+    /// frame-rate form now — the frame itself is picked from the menu on the preview.
     var formatting: SequenceFormat?
-    /// The frame the footage wants, while the post-import offer is standing.
-    var formatOffer: FrameSize?
-    private var formatOfferDismissed = false
     /// A one-line note in the status bar, for things that went right but are worth saying (an import
     /// that stopped at the library rather than the timeline).
     var lastStatusNote: String?
@@ -283,9 +282,9 @@ final class AppModel {
         }
     }
 
-    /// Opens the format sheet over the active sequence and its assets. The sheet needs the assets
+    /// Opens the frame sheet over the active sequence and its assets. The sheet needs the assets
     /// because the question it answers — does the footage fill this frame? — is about the clips, not
-    /// the sequence (`docs/plans/sequence-format.md`).
+    /// the sequence (`docs/plans/sequence-format.md`). It is reached from the frame menu's last row.
     func presentFormatSheet() {
         guard let document, let sequence = document.sequence else { return }
         formatting = SequenceFormat(sequence: sequence, assets: document.project.assets)
@@ -295,8 +294,8 @@ final class AppModel {
         formatting = nil
     }
 
-    /// Commits the format as one `setSequenceSettings` transaction: undoable, rewriting no clip, and
-    /// picked up by the preview because the sequence's size is part of the render structure's
+    /// Commits the frame as one `setSequenceSettings` transaction: undoable, rewriting no clip, and
+    /// picked up by the preview because the frame's size is part of the render structure's
     /// fingerprint. Same error shape as `commitRename`, for the same reason.
     func commitFormat(_ format: SequenceFormat) async -> String? {
         guard let document else { return nil }
@@ -305,10 +304,9 @@ final class AppModel {
             return nil
         }
         do {
-            _ = try await document.apply(operation, label: "Change sequence format")
+            _ = try await document.apply(operation, label: SequenceFormatText.changeLabel)
             lastCommandError = nil
             formatting = nil
-            formatOffer = nil
             return nil
         } catch {
             let message = "\(error)"
@@ -317,32 +315,42 @@ final class AppModel {
         }
     }
 
-    /// The frame every new project is created at (`ProjectDocument.create`). An offer is only ever made
-    /// against this: once the user has set a format, their choice stands and nothing second-guesses it.
-    static let creationFrameSize = FrameSize(width: 1920, height: 1080)
-
-    /// Raised after an import when media lands in a sequence still at its creation default whose shape
-    /// disagrees with the footage. It is an offer, never an action: matching the sequence to the media
-    /// is one click away and one dismissal away, and silence is the third option.
-    func noteFormatAfterImport() {
-        guard !formatOfferDismissed, let document, let sequence = document.sequence else { return }
-        guard sequence.frameSize == AppModel.creationFrameSize else { return }
-        let mismatch = FormatMismatch(sequence: sequence, assets: document.project.assets)
-        guard !mismatch.isClean, let suggested = mismatch.suggestedSize else { return }
-        formatOffer = suggested
-    }
-
-    /// The offer's one click: the same transaction the sheet sends, with the footage's own frame.
-    func acceptFormatOffer() {
+    /// The frame menu's one click: a size, applied as one transaction. Nothing to confirm — the preview
+    /// redraws under the pointer and ⌘Z is the confirmation.
+    func setFrame(_ size: FrameSize) {
         guard let document, let sequence = document.sequence else { return }
         var format = SequenceFormat(sequence: sequence, assets: document.project.assets)
-        format.selection = .matchMedia
+        format.selection = .custom
+        format.customWidth = size.width
+        format.customHeight = size.height
         perform { _ = await self.commitFormat(format) }
     }
 
-    func dismissFormatOffer() {
-        formatOffer = nil
-        formatOfferDismissed = true
+    /// What the frame menu offers over the open project, on the preview and in the status bar.
+    var frameChoices: FrameChoices? { currentMismatch.map { FrameChoices(mismatch: $0) } }
+
+    /// Frames the project after its first import, rather than asking to.
+    ///
+    /// This used to raise a dismissible offer in the status bar. Nobody wants a frame that does not fit
+    /// their footage, so the app sets it and says what it did and what it followed
+    /// (`docs/plans/frame-at-edit-time.md`, 4). `SequenceFormat.autoMatch` holds the three guards that
+    /// keep this from ever being an argument — untouched creation default, no frame change anywhere in
+    /// the history (so an undo is final and survives a relaunch), and footage of one shape.
+    func noteFormatAfterImport() {
+        guard let document, let sequence = document.sequence else { return }
+        guard
+            let format = SequenceFormat.autoMatch(
+                sequence: sequence, assets: document.project.assets, history: document.viewModel.history)
+        else { return }
+        guard let operation = format.operation else { return }
+        let previous = sequence.frameSize
+        let note = SequenceFormatText.matched(
+            format.size, source: format.matchMediaSource, restoring: previous)
+        let existing = lastStatusNote
+        perform {
+            _ = try await document.apply(operation, label: SequenceFormatText.matchLabel)
+            self.lastStatusNote = existing.map { "\($0) · \(note)" } ?? note
+        }
     }
 
     /// Whether the active sequence's clips fill its frame. Recomputed from the live projection, so it
@@ -352,11 +360,13 @@ final class AppModel {
         return FormatMismatch(sequence: sequence, assets: document.project.assets)
     }
 
-    /// What the status bar says about the frame: the format, and the bars when the footage does not
-    /// fill it. Nil when there is no document to ask.
-    var formatSummary: String? { currentMismatch?.summary }
-
-    var hasFormatMismatch: Bool { currentMismatch.map { !$0.isClean } ?? false }
+    /// What the status bar says beside the frame menu: the bars the frame is adding, when it is adding
+    /// any. The frame's own size and aspect are on the menu's face, so this is only the bad news.
+    var formatBars: String? {
+        guard let mismatch = currentMismatch, let worst = mismatch.worst else { return nil }
+        let count = mismatch.offenders.count
+        return "\(count) \(count == 1 ? "clip" : "clips") \(worst.barsDescription.lowercased())"
+    }
 
     /// The Publish sheet over the newest done render; the sheet's Upload goes through `publish_youtube`.
     func presentPublishSheet() {
@@ -407,7 +417,9 @@ final class AppModel {
     /// 1080x1920 reel whatever the sequence was (`docs/plans/export-sheet.md`).
     func presentExportSheet() {
         guard let services, let document, let sequence = document.sequence else { return }
-        exporting = ExportDraft(sequence: sequence, exportsDirectory: services.layout.exportsDir)
+        exporting = ExportDraft(
+            sequence: sequence, projectName: document.project.name,
+            exportsDirectory: services.layout.exportsDir)
     }
 
     func dismissExportSheet() {
@@ -421,7 +433,7 @@ final class AppModel {
         let url = draft.outputURL
         panel.directoryURL = url.deletingLastPathComponent()
         panel.nameFieldStringValue = url.lastPathComponent
-        panel.message = "Export \(draft.sequenceName)"
+        panel.message = "Export \(draft.projectName)"
         panel.prompt = "Choose"
         if let type = UTType(filenameExtension: url.pathExtension) { panel.allowedContentTypes = [type] }
         guard panel.runModal() == .OK else { return nil }
@@ -488,32 +500,6 @@ final class AppModel {
         let ranked = running.compactMap { entry in rank[entry.kind].map { (entry, $0) } }
         if let best = ranked.min(by: { $0.1 < $1.1 }) { return best.0 }
         return running.first
-    }
-
-    /// Resizes the sequence to the footage's own frame, then exports that frame — the one action that
-    /// turns "I want a portrait file of my portrait video" into a portrait file.
-    ///
-    /// The export sheet's own size controls cannot do this. They set the *second* fit, and a portrait
-    /// output of a landscape sequence boxes an already boxed picture: black on all four sides, proven in
-    /// `RenderKitTests.PortraitFramingTests`. Only the sequence's frame changes the first fit.
-    func matchFormatAndExport(_ draft: ExportDraft) {
-        guard let services, let document, let sequence = document.sequence else { return }
-        var format = SequenceFormat(sequence: sequence, assets: document.project.assets)
-        guard format.matchMediaSize != nil else { return }
-        format.selection = .matchMedia
-        exporting = nil
-        perform {
-            if let operation = format.operation {
-                let applied = try await document.apply(operation, label: "Change sequence format")
-                try await document.waitForVersion(applied.version)
-            }
-            guard let resized = document.sequence else { return }
-            // A fresh draft over the resized sequence. Its default is match-sequence, so the export is
-            // the footage's own frame and nothing is boxed at either stage.
-            var next = ExportDraft(sequence: resized, exportsDirectory: services.layout.exportsDir)
-            next.chose(draft.outputURL)
-            self.commitExport(next)
-        }
     }
 
     /// Shows the last exported file in Finder. An export that lands in a folder nobody opened is not
@@ -642,12 +628,7 @@ struct EditorView: View {
                     onChoosePath: { model.exporting.flatMap { model.chooseExportPath(for: $0) } },
                     onPoster: { await model.exportPoster() }, onExport: { model.commitExport($0) },
                     onCancel: { model.dismissExportSheet() },
-                    mismatch: model.currentMismatch,
-                    onChangeFormat: {
-                        model.dismissExportSheet()
-                        model.presentFormatSheet()
-                    },
-                    onMatchAndExport: { model.matchFormatAndExport(draft) })
+                    mismatch: model.currentMismatch)
             }
         }
         .onChange(of: approvals.requests.count) { previous, current in
@@ -709,8 +690,15 @@ struct EditorView: View {
             if guides.showsFrameGuide, let mismatch = model.currentMismatch {
                 FrameGuideOverlay(mismatch: mismatch)
             }
-            FrameGuideToggle(isOn: guides.showsFrameGuide) { guides.toggleFrameGuide() }
-                .padding(PanelTheme.panelInset)
+            HStack(spacing: PanelTheme.controlGap) {
+                if let choices = model.frameChoices {
+                    FrameMenu(
+                        choices: choices, style: .viewfinder, pick: { model.setFrame($0) },
+                        custom: { model.presentFormatSheet() })
+                }
+                FrameGuideToggle(isOn: guides.showsFrameGuide) { guides.toggleFrameGuide() }
+            }
+            .padding(PanelTheme.panelInset)
         }
     }
 
@@ -808,10 +796,11 @@ struct EditorView: View {
             // a plain ⌘-letter belongs to a menu and this window has none (`ui-style.md`, Keyboard).
             Button("Rename", systemImage: "pencil") { model.presentRenameSheet() }
                 .disabled(model.document == nil)
-            Button("Format", systemImage: "aspectratio") { model.presentFormatSheet() }
-                .help("The frame every clip is fitted into")
-                .disabled(model.document == nil)
                 .help("Rename this project; the .tlproj package keeps its file name")
+            // No Format button. The toolbar makes, opens, copies, names, fills, and emits the *file*;
+            // the frame is an edit that goes in the history and changes every rendered pixel, so it
+            // lives on the picture it is about, beside the frame guide's switch
+            // (`docs/plans/frame-at-edit-time.md`, 2).
             Button("Import", systemImage: "square.and.arrow.down") { model.presentImportPanel() }
         }
         ToolbarItemGroup {
@@ -921,23 +910,15 @@ struct EditorView: View {
                     .foregroundStyle(Color.accentColor)
                     .accessibilityIdentifier("status-reveal")
             }
-            if let format = model.formatSummary {
-                Button(action: { model.presentFormatSheet() }) {
-                    Label(format, systemImage: model.hasFormatMismatch ? "exclamationmark.triangle" : "aspectratio")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(model.hasFormatMismatch ? PanelTheme.warning : Color.secondary)
-                .help("The frame every clip is fitted into")
-                .accessibilityIdentifier("status-format")
+            // The labelled twin of the icon on the preview: the same menu, with the numbers on its face.
+            if let choices = model.frameChoices {
+                FrameMenu(
+                    choices: choices, style: .status, pick: { model.setFrame($0) },
+                    custom: { model.presentFormatSheet() })
             }
-            if let offer = model.formatOffer {
-                HStack(spacing: PanelTheme.controlGap) {
-                    Button("\(SequenceFormatText.matchOffer) (\(offer.description))") {
-                        model.acceptFormatOffer()
-                    }
-                    Button(SequenceFormatText.dismiss) { model.dismissFormatOffer() }
-                }
-                .accessibilityIdentifier("format-offer")
+            if let bars = model.formatBars {
+                Text(bars).foregroundStyle(PanelTheme.warning).lineLimit(1)
+                    .accessibilityIdentifier("status-frame-bars")
             }
             if let note = model.lastStatusNote { Text(note).foregroundStyle(.secondary).lineLimit(1) }
             if let error = model.lastCommandError ?? document.lastError ?? document.viewModel.lastError.map({ "\($0)" })
