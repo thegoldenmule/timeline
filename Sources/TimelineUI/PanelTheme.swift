@@ -119,6 +119,18 @@ public enum PanelTheme {
     /// export sheet's schematic has to draw the same thing to be truthful.
     public static let letterboxFill = Color.black
 
+    /// The edge of the frame, drawn over the preview's picture. A fixed light hue rather than a
+    /// semantic one, for `letterboxFill`'s reason: the preview is a black surface in either appearance,
+    /// so what is drawn on top of it does not follow the system either.
+    public static let frameGuideStroke = Color.white.opacity(0.85)
+    /// The frame guide's stroke, thick enough to read over a busy picture and thin enough that it does
+    /// not hide a row of it.
+    public static let frameGuideWidth: CGFloat = 1.5
+    /// The wash over everything outside the frame. Without it the preview's own background is black, so
+    /// a correctly framed portrait project looks exactly like a landscape one full of pillarboxed
+    /// portrait clips — which is the whole reason the guide exists (`docs/plans/frame-guide.md`).
+    public static let frameGuideSurround = Color.white.opacity(0.1)
+
     /// A resting border.
     public static let borderIdle = Color.secondary.opacity(0.25)
     /// A border that is saying something: a drop is over this target.

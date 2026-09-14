@@ -584,6 +584,11 @@ struct EditorView: View {
     let assistant: AssistantConsole
     let publish: PublishConsole
 
+    /// Whether the preview draws its frame guide, remembered under `preview.frameGuide` the way a
+    /// panel's collapsed flag is (`docs/plans/frame-guide.md`). It is window state, not document state,
+    /// which is why it is held here beside `panels` rather than on `AppModel`.
+    @State private var guides = PreviewGuideModel()
+
     var body: some View {
         HStack(spacing: 0) {
             PanelChrome(.assistant, layout: panels) {
@@ -684,12 +689,29 @@ struct EditorView: View {
         VStack(spacing: 0) {
             PreviewLayerView(preview: document.preview)
                 .frame(minHeight: 240)
+                .overlay(alignment: .topTrailing) { previewOverlay }
             Divider()
             TimelineView(viewModel: document.viewModel)
                 .frame(minHeight: 220)
             statusBar
         }
         .frame(minWidth: PanelTheme.centreMinimum, maxWidth: .infinity)
+    }
+
+    /// What is drawn on the picture: the frame every clip is fitted into, and the switch for it.
+    ///
+    /// The preview aspect-fits the picture into whatever shape the panels leave it, on the panel's own
+    /// black, so without the guide black around the picture is indistinguishable from black inside it —
+    /// a correct portrait project looks exactly like a landscape one full of pillarboxed portrait clips.
+    /// The guide takes no clicks; the button is the only control here.
+    @ViewBuilder private var previewOverlay: some View {
+        ZStack(alignment: .topTrailing) {
+            if guides.showsFrameGuide, let mismatch = model.currentMismatch {
+                FrameGuideOverlay(mismatch: mismatch)
+            }
+            FrameGuideToggle(isOn: guides.showsFrameGuide) { guides.toggleFrameGuide() }
+                .padding(PanelTheme.panelInset)
+        }
     }
 
     private var publishSheetPresented: Binding<Bool> {
