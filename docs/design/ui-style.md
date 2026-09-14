@@ -198,6 +198,25 @@ the picture itself, top-trailing at `panelInset`, visible in both states because
 back; it has no keyboard shortcut, for the reason under Keyboard. The flag is `PreviewGuideModel`,
 persisted under `preview.frameGuide` the way `PanelLayoutModel` persists `panel.<id>.collapsed`.
 
+**The frame is also *changed* there.** `FrameMenu` sits beside the guide's switch in the same
+top-trailing cluster, `controlGap` apart: a `Menu` whose rows are Match footage (first and marked, when
+the footage does not fit), the five `SequenceFormatPreset` shapes with the current one checked, and
+Custom frame…, which opens the sheet for a custom size and the frame rate. Picking a row applies one
+`setSequenceSettings` transaction — undo is the confirmation, and the preview redraws under the pointer.
+The viewfinder copy is icon-only, because the guide's own label is already drawing the numbers; the
+status bar renders the same `FrameChoices` as `FrameMenu(style: .status)`, with the numbers on its face
+and the bars beside it. There is no Format button in the toolbar: the toolbar makes, opens, copies,
+names, fills, and emits the *file*, and the frame is an edit.
+
+## Vocabulary
+
+A user never reads the word **sequence**. There is one frame per project, nobody made a second, and
+`Sequence` is the model's name for what carries it. Above a string literal the user sees, the word is
+**frame**; at and below the type system, the word is **sequence** — the same boundary rule as
+Assistant/Agent above, and greppable the same way. The four nouns the framing feature is allowed:
+*project*, *frame* (its size and its rate), *footage*, *aspect*. `SequenceFormatTests` holds every
+public copy constant and asserts none of them says it.
+
 ## Assistant, and Agent
 
 The panel is the **Assistant**. The protocol it runs on is still `AgentRuntime`, its module is still

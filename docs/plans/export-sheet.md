@@ -281,6 +281,13 @@ the exact shape that made the old button wrong. It:
   choice means a store for it, and a remembered reel preset is how you get back to silently
   letterboxing a sequence that has since changed shape.
 - No sequence-dimension editing. "This should be configurable" is answered here for the *export* only.
+  **Second correction (2026-09-14, `docs/plans/frame-at-edit-time.md`):** decision 8's file-name formula
+  is now `<project>-<preset>.<ext>`, not `<sequence>-<preset>.<ext>` — a sequence is called "Sequence 1"
+  because `ProjectDocument.create` says so, and that string was reaching users' file names. The
+  `Match sequence` preset of decision 6 is named `Project frame`, and the sheet's fix-it button (which
+  resized the project and exported in one click) is removed: the sheet still *reports* a frame the
+  footage does not fill, because this is the last moment before the file exists, but framing is
+  edit-time work and the frame control above the timeline is where it is done.
   **Correction:** this section originally said changing a sequence's `width`/`height` needed a
   `resizeSequence` command that does not exist. That was a search for the wrong name.
   `setSequenceSettings` (`Sources/TimelineCore/Command.swift:223`, decided at `Decide.swift:290`)

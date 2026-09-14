@@ -1,6 +1,13 @@
 # The sequence format
 
-Status: implemented, 2026-09-13. Companion to `docs/plans/export-sheet.md`, which this one corrects.
+Status: implemented 2026-09-13, **partly superseded 2026-09-14** by
+`docs/plans/frame-at-edit-time.md`, which corrects decisions 2 and 6 and the vocabulary throughout.
+The word "sequence" below is the model's and is correct in code; it must not appear in anything a user
+reads, and no longer does. Decision 2's toolbar button is gone (framing is a menu on the preview and in
+the status bar; the sheet is what Custom frame… opens) and decision 6's dismissible offer is gone (the
+first import into an unframed project sets the frame and says so). Everything else here still stands.
+
+Companion to `docs/plans/export-sheet.md`, which this one corrects.
 `TimelineCore`, `ProjectStore` and `RenderKit` change in one place only: a rotation-aware display size
 derived from a probe. The write path, the event, its inverse and its projection all exist already.
 

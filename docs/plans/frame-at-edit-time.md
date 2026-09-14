@@ -1,6 +1,6 @@
 # The frame, at edit time
 
-Status: plan, 2026-09-14. Corrects `docs/plans/sequence-format.md` (decisions 2 and 6) and
+Status: implemented, 2026-09-14. Corrects `docs/plans/sequence-format.md` (decisions 2 and 6) and
 `docs/plans/export-sheet.md` (the file-name formula). Companion to `docs/plans/frame-guide.md`, whose
 overlay is untouched. Nothing in `TimelineCore`, `Contracts`, `RenderKit`, or `MediaKit` changes: this
 is vocabulary, one control moved, one offer turned into an action, and one string in a file name.
@@ -336,7 +336,39 @@ project's own name and contains no "Sequence".
 a line naming the vocabulary rule. `docs/plans/sequence-format.md` decisions 2 and 6 and
 `docs/plans/export-sheet.md`'s file-name note are marked corrected, pointing here.
 
-## 10. Left out
+## 10. What landed
+
+All of it, in one pass, plus one thing the plan did not anticipate.
+
+- The vocabulary of section 1, everywhere, with `SequenceFormatTests.noCopyAUserReadsSaysSequence`
+  holding every public copy constant in `SequenceFormatText`, `ExportText`, `FrameGuideText`,
+  `SequenceFormatPreset.builtIn`, `FrameChoices`, `FormatMismatch` and `ExportFraming` and asserting
+  none of them says it. That test is the enforcement; a new string that says "sequence" fails it.
+- `FrameChoices` and `FrameMenu` in `SequenceFormatView.swift`, rendered twice: `.viewfinder` beside
+  `FrameGuideToggle` in `EditorView.previewOverlay`, and `.status` in the status bar where the frame
+  line used to open a sheet. The toolbar's Format button is gone and Rename has its tooltip back.
+- `ExportDraft.projectName` and `ExportDestination.url(projectName:)`, with the skeleton check still
+  pinning the two copies of the formula together and now also asserting the default name begins with
+  the project's own name and contains no "sequence".
+- `SequenceFormat.creationFrameSize` and `SequenceFormat.autoMatch`, and
+  `AppModel.noteFormatAfterImport` applying rather than offering. `formatOffer`, `formatOfferDismissed`,
+  `acceptFormatOffer`, `dismissFormatOffer`, `matchFormatAndExport`, `AppModel.creationFrameSize` and
+  `ExportText.matchAndExport` are deleted.
+- The export sheet's warning, kept and reworded; its two buttons and
+  `ExportSheetView.onChangeFormat` / `onMatchAndExport` removed.
+
+Two notes for whoever reads this next:
+
+- **The status bar splits what the frame line used to say.** `FormatMismatch.summary` was one string
+  carrying the size, the aspect, and the bars; the menu's face now carries the size and the aspect
+  (`FrameChoices.label`) and `AppModel.formatBars` carries the bars beside it in `warning`. `summary`
+  itself is unchanged and is still what the sheet and the tools read.
+- **`AppModel.hasFormatMismatch` is gone**, because nothing read it once the status bar's button became
+  a menu that tints itself from `FrameChoices.hasMismatch`.
+
+`TimelineUITests` 240 → 247. `make e2e` is still 19 steps, with `export` and `format` rewritten.
+
+## 11. Left out
 
 - Renaming `Sequence`, `SequenceID`, `SequenceSettings`, `setSequenceSettings`, or the file
   `SequenceFormatView.swift`. Section 1 says why.

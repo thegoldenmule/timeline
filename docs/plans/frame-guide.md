@@ -188,7 +188,10 @@ Three notes for whoever reads this next:
   they would go and `FrameGuide.rect` is what they would be drawn against, but each one is its own
   decision about what an editor here needs.
 - Any change to the format control: the toolbar's Format button, the format sheet, the status bar's
-  format line, and the word "sequence" in user-facing copy are all the next agent's.
+  format line, and the word "sequence" in user-facing copy are all the next agent's. **Done, 2026-09-14,
+  `docs/plans/frame-at-edit-time.md`:** the toolbar button is gone, the frame is now picked from
+  `FrameMenu` beside this plan's own switch in `previewOverlay`, and nothing a user reads says
+  "sequence". This overlay, its tokens, and its tests are untouched.
 - Zoom or pan of the preview, and any click handling on it.
 - Drawing the guide over the export sheet's thumbnail. `ExportFramingView` already draws both fits in its
   own schematic.
