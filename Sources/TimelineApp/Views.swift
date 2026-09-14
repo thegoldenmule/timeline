@@ -478,6 +478,18 @@ final class AppModel {
         }
     }
 
+    /// The running job worth a line in the status bar. Now that the window follows *every* job, the
+    /// list also carries the thumbnail, peak, and hashing work the library does constantly; a 40 ms
+    /// thumbnail job winning the status bar over a two-minute export would be a worse kind of silence.
+    func foregroundJob(among running: [JobCenter.Entry]) -> JobCenter.Entry? {
+        let rank: [JobKind: Int] = [
+            .export: 0, .publish: 1, .transcription: 2, .alignment: 3, .analysis: 4, .import: 5,
+        ]
+        let ranked = running.compactMap { entry in rank[entry.kind].map { (entry, $0) } }
+        if let best = ranked.min(by: { $0.1 < $1.1 }) { return best.0 }
+        return running.first
+    }
+
     /// Shows the last exported file in Finder. An export that lands in a folder nobody opened is not
     /// much better than one that never ran.
     func revealLastExport() {
@@ -826,7 +838,7 @@ struct EditorView: View {
             Text(document.url.lastPathComponent)
             Text("Render: \(document.lastRenderPath.rawValue) #\(document.playerItemGeneration)")
             Text(String(format: "Playhead %.2fs", document.playheadSeconds))
-            if let job = jobs.running.first {
+            if let job = model.foregroundJob(among: jobs.running) {
                 HStack(spacing: PanelTheme.controlGap) {
                     if let fraction = job.progress.fraction {
                         ProgressView(value: fraction).progressViewStyle(.linear).frame(width: 120)
