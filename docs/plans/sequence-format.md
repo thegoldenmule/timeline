@@ -1,6 +1,6 @@
 # The sequence format
 
-Status: plan, 2026-09-13. Companion to `docs/plans/export-sheet.md`, which this one corrects.
+Status: implemented, 2026-09-13. Companion to `docs/plans/export-sheet.md`, which this one corrects.
 `TimelineCore`, `ProjectStore` and `RenderKit` change in one place only: a rotation-aware display size
 derived from a probe. The write path, the event, its inverse and its projection all exist already.
 
@@ -218,7 +218,22 @@ implementation does not re-litigate them.
 - The fork/project-id catalog collision noted in `project-rename.md` section 4 is still open and still
   unrelated.
 
-## 6. Left out
+## 6. What landed
+
+All of it, in two passes. The core primitive, the tool reporting and the skills first
+(`Orientation.swift`, `ProjectTools.formatMismatch`, `OrientationToolTests`); then the sheet, the
+two-stage framing, the status bar and the offer (`SequenceFormatView.swift`, `ExportSheetView`,
+`Views.swift`, `SequenceFormatTests`). The skeleton check's `format` step is the proof, and it asserts
+the bug as well as the fix: a new project holding one 720x1280 clip is 1920x1080 and pillarboxes it by
+656 px **which the export sheet's own framing calls exact**, then match media resizes to 720x1280 in
+one transaction, keeps every clip, writes a 720x1280 file, and undoes.
+
+One deviation from section 2: no new `PanelTheme` token was needed, because the format sheet reuses
+`formSheetWidth` and `framePreviewHeight` from the export sheet. `FormatMismatch` also reuses
+`ExportFraming` rather than reimplementing the fit, since media-into-sequence is the same arithmetic
+with different arguments.
+
+## 7. Left out
 
 - A format picker in the New flow (decision 6). It replaces an `NSSavePanel` with a configuration
   sheet and deserves its own plan.
