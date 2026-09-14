@@ -143,6 +143,15 @@ public enum ExportText {
     public static let letterboxBadge = "letterboxed"
     public static let pillarboxBadge = "pillarboxed"
 
+    /// The warning about the stage before this one: the footage does not fill the sequence, so no
+    /// preset here can save it. Named in the sheet where the problem is found, not where it is caused.
+    public static func sequenceMismatch(
+        _ clip: String, _ clipSize: String, _ sequenceSize: String, _ bars: String
+    ) -> String {
+        "\(clip) is \(clipSize) in a \(sequenceSize) sequence, so it is \(bars) before this export "
+            + "begins. No preset removes that — the sequence's own frame is what to change."
+    }
+
     public static func dimensionRange(_ minimum: Int, _ maximum: Int) -> String {
         "Width and height are between \(minimum) and \(maximum) pixels"
     }
@@ -363,10 +372,16 @@ public struct ExportDraft: Hashable, Sendable {
 public struct ExportFramingView: View {
     public let framing: ExportFraming
     public let frame: CGImage?
+    /// The *other* fit, drawn nested inside the sequence: the footage into the sequence frame. The
+    /// compositor aspect-fits twice and this view used to draw only the outer one, which is how a
+    /// sequence full of pillarboxed portrait clips could report "the sequence fills the frame" and be
+    /// telling the truth about the wrong stage (`docs/plans/sequence-format.md`).
+    public let media: ExportFraming?
 
-    public init(framing: ExportFraming, frame: CGImage? = nil) {
+    public init(framing: ExportFraming, frame: CGImage? = nil, media: ExportFraming? = nil) {
         self.framing = framing
         self.frame = frame
+        self.media = media
     }
 
     public var body: some View {
@@ -384,6 +399,19 @@ public struct ExportFramingView: View {
                         .frame(width: framing.output.width * scale, height: framing.output.height * scale)
                     picture
                         .frame(width: framing.fitted.width * scale, height: framing.fitted.height * scale)
+                    if let media, !media.isExact {
+                        // Sequence pixels reach points through both fits, so the inner rectangle is
+                        // drawn where the footage actually lands in the exported frame.
+                        let inner = framing.scale * scale
+                        Rectangle()
+                            .fill(PanelTheme.posterFill)
+                            .overlay(
+                                Rectangle()
+                                    .strokeBorder(PanelTheme.warning, lineWidth: PanelTheme.borderWidth)
+                            )
+                            .frame(width: media.fitted.width * inner, height: media.fitted.height * inner)
+                            .accessibilityIdentifier("export-media-framing")
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -435,24 +463,57 @@ public struct ExportSheetView: View {
     public let onPoster: (@MainActor () async -> CGImage?)?
     public let onExport: (ExportDraft) -> Void
     public let onCancel: () -> Void
+    /// Whether the sequence's own clips fill its frame. An export cannot fix this — by the time a file
+    /// is framed the footage has already been fitted into the sequence — so the sheet reports it and
+    /// hands over to the format sheet rather than pretending a preset could help.
+    public let mismatch: FormatMismatch?
+    public let onChangeFormat: (() -> Void)?
     @State private var frame: CGImage?
 
     public init(
         draft: Binding<ExportDraft>, onChoosePath: @escaping () -> URL?,
         onPoster: (@MainActor () async -> CGImage?)? = nil, onExport: @escaping (ExportDraft) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void, mismatch: FormatMismatch? = nil,
+        onChangeFormat: (() -> Void)? = nil
     ) {
         self._draft = draft
         self.onChoosePath = onChoosePath
         self.onPoster = onPoster
         self.onExport = onExport
         self.onCancel = onCancel
+        self.mismatch = mismatch
+        self.onChangeFormat = onChangeFormat
+    }
+
+    /// The footage's fit into the sequence frame, for the nested rectangle and the warning.
+    private var mediaFraming: ExportFraming? {
+        guard let worst = mismatch?.worst else { return nil }
+        return worst.framing
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.sectionGap) {
             Text(ExportText.title).font(PanelTheme.sectionTitle)
-            ExportFramingView(framing: draft.framing, frame: frame)
+            ExportFramingView(framing: draft.framing, frame: frame, media: mediaFraming)
+            if let mismatch, !mismatch.isClean, let worst = mismatch.worst {
+                HStack(alignment: .firstTextBaseline, spacing: PanelTheme.controlGap) {
+                    Label(
+                        ExportText.sequenceMismatch(
+                            worst.assetName, worst.displaySize.description,
+                            mismatch.sequenceSize.description, worst.barsDescription.lowercased()),
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(PanelTheme.caption)
+                    .foregroundStyle(PanelTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    if let onChangeFormat {
+                        Button(SequenceFormatText.change, action: onChangeFormat)
+                            .buttonStyle(.link)
+                            .font(PanelTheme.caption)
+                    }
+                }
+                .accessibilityIdentifier("export-sequence-mismatch")
+            }
             Text(ExportText.fitNote)
                 .font(PanelTheme.caption)
                 .foregroundStyle(.secondary)
