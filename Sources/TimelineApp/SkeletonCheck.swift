@@ -640,6 +640,93 @@ enum SkeletonCheck {
                     + "flags \(Int(bar.rounded())) px of letterbox first; gated export wrote "
                     + "\(ExportFraming.pixels(written)) to \(exportDraft.outputURL.lastPathComponent) and a render row")
 
+            // 11d. Format: the user's own case, end to end. Every project is created 1920x1080 whatever it
+            //      holds, and the compositor fits each source into that frame *before* any export is framed,
+            //      so a project of portrait clips exported "match sequence" is a pillarboxed landscape file
+            //      while the export sheet correctly reports no letterboxing — it draws the later stage. The
+            //      format sheet is what sees the earlier one (docs/plans/sequence-format.md).
+            let portraitClip = try await TestMedia.videoWithAudio(
+                .tone(frequency: 330), size: CGSize(width: 720, height: 1280), duration: 2, in: media.url,
+                name: "portrait")
+            let portraitURL = services.layout.projectsDir.appendingPathComponent("Portrait.tlproj")
+            let portraitDoc = try await ProjectDocument.create(at: portraitURL, name: "Portrait", using: services)
+            let portraitTrack = try unwrap(portraitDoc.sequence?.tracks.first { $0.kind == .video }, "format", "no V1")
+            _ = try await MediaImporter(services: services, document: portraitDoc, jobs: JobCenter())
+                .importFiles([portraitClip.url], at: TimelineDropTarget(trackId: portraitTrack.id, at: .zero))
+            let createdSequence = try unwrap(portraitDoc.sequence, "format", "no sequence")
+            try require(
+                createdSequence.frameSize == FrameSize(width: 1920, height: 1080), "format",
+                "a new project is \(createdSequence.frameSize)")
+
+            let firstLook = FormatMismatch(sequence: createdSequence, assets: portraitDoc.project.assets)
+            try require(!firstLook.isClean, "format", "portrait footage in a landscape frame reported clean")
+            let offender = try unwrap(firstLook.worst, "format", "no offending clip")
+            guard case .pillarbox(let pillar) = offender.bars else {
+                throw Failure(step: "format", reason: "the bars are \(offender.bars)")
+            }
+            // The export sheet is blind to this on purpose, and proving it is the point: its own framing is
+            // exact, because the sequence does fill the frame it is being exported at.
+            let blindDraft = ExportDraft(sequence: createdSequence, exportsDirectory: services.layout.exportsDir)
+            try require(
+                blindDraft.framing.isExact, "format",
+                "the export framing should be exact here; it is \(blindDraft.framing.bars)")
+
+            var format = SequenceFormat(sequence: createdSequence, assets: portraitDoc.project.assets)
+            try require(format.recommendsMatchMedia, "format", "matching the media was not recommended")
+            format.selection = .matchMedia
+            try require(
+                format.size == FrameSize(width: 720, height: 1280), "format", "match media gives \(format.size)")
+            try require(format.resultingMismatch.isClean, "format", "matching left bars behind")
+            let beforeFormat = portraitDoc.version
+            let clipsBeforeFormat =
+                portraitDoc.project.sequences[createdSequence.id]?.tracks
+                .reduce(0) { $0 + $1.clips.count } ?? 0
+            let formatted = try await portraitDoc.apply(
+                try unwrap(format.operation, "format", "no operation"), label: "Change sequence format")
+            try await portraitDoc.waitForVersion(formatted.version)
+            let resized = try unwrap(portraitDoc.sequence, "format", "no sequence after the resize")
+            try require(
+                resized.frameSize == FrameSize(width: 720, height: 1280), "format",
+                "the sequence is \(resized.frameSize)")
+            try require(
+                portraitDoc.version == beforeFormat + 1, "format",
+                "the resize took \(portraitDoc.version - beforeFormat) versions")
+            let clipsAfterFormat = resized.tracks.reduce(0) { $0 + $1.clips.count }
+            try require(
+                clipsAfterFormat == clipsBeforeFormat, "format",
+                "the resize changed the clip count from \(clipsBeforeFormat) to \(clipsAfterFormat)")
+            try require(
+                FormatMismatch(sequence: resized, assets: portraitDoc.project.assets).isClean, "format",
+                "the footage still does not fill the frame")
+
+            // The file itself: portrait in, portrait out. This is the line that was landscape before.
+            let portraitCompiled = try await services.renderer.compile(
+                resized, assets: portraitDoc.project.assets, options: .full)
+            let portraitOut = services.layout.exportsDir.appendingPathComponent("portrait-match.mp4")
+            let portraitJob = await services.jobRunner.submit(
+                services.renderer.export(portraitCompiled, preset: ExportDraft.matchSequence, to: portraitOut))
+            _ = try await portraitJob.wait()
+            let portraitTracks = try await AVURLAsset(url: portraitOut).loadTracks(withMediaType: .video)
+            let portraitTrackOut: AVAssetTrack = try unwrap(
+                portraitTracks.first, "format", "the portrait export has no video track")
+            let portraitSize = try await portraitTrackOut.load(.naturalSize)
+            try require(
+                portraitSize == CGSize(width: 720, height: 1280), "format",
+                "the file is \(ExportFraming.pixels(portraitSize)), not the sequence's 720 × 1280")
+
+            // And it is one undo, like every other edit.
+            try require(await portraitDoc.viewModel.undo()?.status == .applied, "format", "the resize did not undo")
+            try require(
+                portraitDoc.sequence?.frameSize == FrameSize(width: 1920, height: 1080), "format",
+                "undo left the sequence at \(String(describing: portraitDoc.sequence?.frameSize))")
+            await portraitDoc.close(using: services)
+            ok(
+                "format",
+                "a new project holding one 720x1280 clip is 1920x1080 and pillarboxes it by "
+                    + "\(Int(pillar.rounded())) px, which the export sheet's own framing calls exact; match "
+                    + "media resized to 720x1280 in one transaction, kept \(clipsAfterFormat) clip(s), wrote "
+                    + "\(ExportFraming.pixels(portraitSize)) to \(portraitOut.lastPathComponent), and undid")
+
             // 12. Publish: connect the fixture Google account through the real loopback flow, export through
             //     render_export (a render row), then publish_youtube through the registry: approval_required
             //     with the card's rows, approved on the stack, retried with the token; the fake drops the
