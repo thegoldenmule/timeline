@@ -34,6 +34,19 @@ struct StyleTests {
         #expect(PanelTheme.numberFieldWidth == 72)
     }
 
+    /// The preview's guide draws over a surface that is black in either appearance, so its stroke and
+    /// its surround are fixed hues like `letterboxFill` rather than semantic ones. Asserted so the
+    /// exception stays a deliberate one (`docs/design/ui-style.md`, Colour and material).
+    @Test func theFrameGuideTokensAreTheOnesTheDocNames() {
+        #expect(PanelTheme.frameGuideWidth == 1.5)
+        let environment = EnvironmentValues()
+        let stroke = PanelTheme.frameGuideStroke.resolve(in: environment)
+        #expect(abs(stroke.opacity - 0.85) < 0.01)
+        let surround = PanelTheme.frameGuideSurround.resolve(in: environment)
+        #expect(abs(surround.opacity - 0.1) < 0.01)
+        #expect(surround.red == stroke.red)
+    }
+
     /// The two places the chrome and the Metal canvas have to agree. Asserted here so a change to
     /// either side has to be a deliberate change to both; see `docs/design/ui-style.md`.
     @Test func theChromeAndTheTimelineAgreeWhereTheyMust() {
