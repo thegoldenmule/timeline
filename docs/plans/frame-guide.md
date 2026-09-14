@@ -1,6 +1,6 @@
 # The frame guide
 
-Status: plan, 2026-09-14. Companion to `docs/plans/sequence-format.md`, which made the frame editable
+Status: implemented, 2026-09-14. Companion to `docs/plans/sequence-format.md`, which made the frame editable
 and reportable but left it invisible. Nothing in `TimelineCore`, `Contracts`, `RenderKit`, or the render
 path changes: this is one overlay, one toggle, and the arithmetic `ExportFraming` already does.
 
@@ -164,7 +164,25 @@ read. `PreviewLayerView` itself does not change.
 No new step. `make e2e` stays at 19 steps: the guide is a rendering of `FormatMismatch`, whose behaviour
 the `format` step already proves end to end against real files, and the check has no window to draw into.
 
-## 5. Left out
+## 5. What landed
+
+All of it, in one pass: `FrameGuideView.swift` (the geometry, the flag, the overlay, the button), three
+`PanelTheme` tokens, the `.overlay` in `centreColumn`, `FrameGuideTests` (14) and one `StyleTests` case.
+`make e2e` is still 19 steps and no test target moved except `TimelineUITests`, 225 → 240.
+
+Three notes for whoever reads this next:
+
+- The switch is `rectangle.dashed` when the guide is on and `rectangle.slash` when it is off, rather than
+  one symbol in two colours. With the guide off there is nothing else on the picture to read the state
+  from, so the icon has to carry it.
+- The label sits inside the frame's top-leading corner and overflows into the surround on a frame
+  narrower than the label. That is the right way round: it is anchored to the frame it names, and the
+  surround is the part of the panel with nothing in it.
+- Rendered through `ImageRenderer` while building, which is how the wash was settled at 0.1: enough that
+  a portrait frame in a landscape panel is unmistakably a portrait frame, little enough that it is not
+  competing with the picture.
+
+## 6. Left out
 
 - Safe-area and title-safe guides, a rule-of-thirds grid, and a centre cross. The same overlay is where
   they would go and `FrameGuide.rect` is what they would be drawn against, but each one is its own
