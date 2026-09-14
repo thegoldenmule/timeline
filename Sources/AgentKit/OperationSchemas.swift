@@ -99,12 +99,14 @@ public enum OperationSchemas {
             "What the importer learned about a file. `extra` is required (use {} when empty).",
             properties: [
                 "codec": Schema.string("FourCC or codec name, e.g. hvc1."),
-                "width": Schema.integer("Pixel width."),
-                "height": Schema.integer("Pixel height."),
+                "width": Schema.integer("Encoded pixel width, before the display rotation."),
+                "height": Schema.integer("Encoded pixel height, before the display rotation."),
                 "fps": Schema.ref("rational", "Nominal frame rate."),
                 "colorPrimaries": Schema.string("Colour primaries, e.g. bt2020."),
                 "transfer": Schema.string("Transfer function, e.g. arib-std-b67 (HLG)."),
-                "rotation": Schema.integer("Display rotation in degrees."),
+                "rotation": Schema.integer(
+                    "Display rotation in degrees, counter-clockwise positive (ffmpeg convention). ±90 swaps the display axes: a portrait iPhone clip is width 3840, height 2160, rotation -90 and displays 2160x3840."
+                ),
                 "capturedAt": Schema.string("ISO-8601 capture date."),
                 "extra": Schema.map("QuickTime metadata and other extras.", values: Schema.any("Any JSON value.")),
             ], required: ["extra"]),
@@ -208,7 +210,8 @@ public enum OperationSchemas {
                 "height": Schema.integer("Frame height.", minimum: 1),
             ], required: ["name", "frameDuration", "width", "height"])
         op(
-            "setSequenceSettings", "Changes a sequence's name, frame duration or size.",
+            "setSequenceSettings",
+            "Changes a sequence's name, frame duration or size. Resizing is allowed at any time and rewrites no clip; match the size to the footage's displaySize from project_describe (the probe's encoded width/height are before the display rotation, so a portrait phone clip probes 3840x2160 with rotation -90 and needs a 2160x3840 sequence). A frame-duration change is refused once a video or caption track holds clips.",
             [
                 "sequenceId": Schema.ref("idOrRef", "Sequence."),
                 "after": Schema.ref("sequenceSettings", "New settings, complete."),

@@ -4,6 +4,78 @@ import TimelineCore
 
 /// `project_list`, `project_describe`, `timeline_query`: the read side.
 enum ProjectTools {
+    /// The shape `assetSummary` emits, shared by `project_describe` and `timeline_query`.
+    static let assetSummarySchema = Schema.object(
+        "One asset.",
+        properties: [
+            "assetId": Schema.string("Asset id."),
+            "displayName": Schema.string("File name."),
+            "kind": Schema.enum("Media kind.", AssetKind.allCases.map(\.rawValue)),
+            "duration": Schema.any("Media duration (rational time)."),
+            "hasVideo": Schema.bool("Has a video track."),
+            "hasAudio": Schema.bool("Has an audio track."),
+            "offline": Schema.bool("The file is missing from the library."),
+            "analyses": Schema.array("Recorded analysis kinds.", items: Schema.string("Analysis kind.")),
+            "libraryPath": Schema.string("Path within the media library."),
+            "size": Schema.string(
+                "ENCODED pixel size as stored in the file, e.g. 3840x2160, before the display rotation. Do not judge orientation from this."
+            ),
+            "displaySize": Schema.string(
+                "Pixel size as displayed, with the rotation applied, e.g. 2160x3840. This is the one to compare with a sequence's width/height."
+            ),
+            "orientation": Schema.enum("Orientation of displaySize.", Orientation.allCases.map(\.rawValue)),
+            "aspect": Schema.string("Display aspect as a reduced ratio, e.g. 9:16."),
+            "rotation": Schema.integer(
+                "Display rotation in degrees, counter-clockwise positive (ffmpeg convention); omitted when 0. ±90 swaps the axes, which is why displaySize exists."
+            ),
+            "fps": Schema.number("Nominal frame rate."),
+            "sampleRate": Schema.integer("Audio sample rate."),
+            "codec": Schema.string("Codec, e.g. hvc1."),
+            "transfer": Schema.string("Transfer function, e.g. arib-std-b67 (HLG)."),
+        ], required: ["assetId", "displayName", "kind"])
+
+    static let sequenceSummarySchema = Schema.object(
+        "One sequence; `tracks`, `transitions` and `markers` are present at level tracks.",
+        properties: [
+            "sequenceId": Schema.string("Sequence id."),
+            "name": Schema.string("Sequence name."),
+            "frameDuration": Schema.any("Frame duration (rational time)."),
+            "width": Schema.integer("Frame width in pixels."),
+            "height": Schema.integer("Frame height in pixels."),
+            "orientation": Schema.enum("Orientation of the sequence frame.", Orientation.allCases.map(\.rawValue)),
+            "aspect": Schema.string("Frame aspect as a reduced ratio, e.g. 16:9."),
+            "duration": Schema.any("Sequence duration (rational time)."),
+            "trackCount": Schema.integer("Number of tracks."),
+            "isActive": Schema.bool("True for the active sequence."),
+            "tracks": Schema.array("Tracks (level tracks).", items: Schema.any("Track summary with its clips.")),
+            "transitions": Schema.array("Transitions (level tracks).", items: Schema.any("Transition summary.")),
+            "markers": Schema.array("Markers (level tracks).", items: Schema.any("Marker summary.")),
+        ], required: ["sequenceId", "name", "width", "height", "orientation"])
+
+    static let formatMismatchSchema = Schema.object(
+        "A sequence whose video clips do not fill its frame: the compositor aspect-fits each source, so these clips export with black bars.",
+        properties: [
+            "sequenceId": Schema.string("Sequence id."),
+            "sequenceName": Schema.string("Sequence name."),
+            "sequenceSize": Schema.string("The sequence frame, e.g. 1920x1080."),
+            "sequenceOrientation": Schema.enum("Sequence orientation.", Orientation.allCases.map(\.rawValue)),
+            "clips": Schema.array(
+                "The clips that do not fill the frame.",
+                items: Schema.object(
+                    "One clip that does not fill the frame.",
+                    properties: [
+                        "clipId": Schema.string("Clip id."),
+                        "trackId": Schema.string("Track id."),
+                        "assetId": Schema.string("Asset id."),
+                        "displayName": Schema.string("Asset file name."),
+                        "displaySize": Schema.string("The asset's rotated display size, e.g. 2160x3840."),
+                        "orientation": Schema.enum("Clip orientation.", Orientation.allCases.map(\.rawValue)),
+                        "pillarboxPixels": Schema.integer("Black bar width on each side, in sequence pixels."),
+                        "letterboxPixels": Schema.integer("Black bar height top and bottom, in sequence pixels."),
+                    ], required: ["clipId", "displaySize", "orientation"])),
+            "note": Schema.string("The same thing in one sentence, with the fix."),
+        ], required: ["sequenceId", "sequenceSize", "clips", "note"])
+
     static let projectList = Tool(
         name: "project_list",
         description:
@@ -50,7 +122,7 @@ enum ProjectTools {
     static let projectDescribe = Tool(
         name: "project_describe",
         description:
-            "Describes a project. level summary: name, version, settings, sequences and assets. level tracks: adds every track with its clips (id, start, end, asset, label, caption text), transitions and markers, optionally limited to a time range. level full: the complete project document as JSON (large). Read this before timeline_apply to get ids and the expectedVersion.",
+            "Describes a project. level summary: name, version, settings, sequences and assets. level tracks: adds every track with its clips (id, start, end, asset, label, caption text), transitions and markers, optionally limited to a time range. level full: the complete project document as JSON (large). Read this before timeline_apply to get ids and the expectedVersion. Judge framing from an asset's displaySize (rotation applied), never its encoded size; a formatMismatch entry appears when a sequence's clips do not fill its frame.",
         inputSchema: Schema.withDefs(
             Schema.object(
                 "Describe request.",
@@ -72,9 +144,11 @@ enum ProjectTools {
                 "version": Schema.integer("Current version; pass it as expectedVersion."),
                 "activeSequenceId": Schema.string("Active sequence id."),
                 "settings": Schema.any("Project settings."),
-                "sequences": Schema.array(
-                    "Sequences.", items: Schema.any("Sequence summary, with tracks at level tracks.")),
-                "assets": Schema.array("Assets.", items: Schema.any("Asset summary.")),
+                "sequences": Schema.array("Sequences.", items: sequenceSummarySchema),
+                "assets": Schema.array("Assets.", items: assetSummarySchema),
+                "formatMismatch": Schema.array(
+                    "Present only when a sequence's clips do not fill its frame, so the export has black bars; one entry per such sequence.",
+                    items: formatMismatchSchema),
                 "history": Schema.any("Undo/redo targets."),
                 "project": Schema.any("The full project document (level full)."),
             ], required: ["projectId", "name", "version", "sequences", "assets"], additionalProperties: true),
@@ -102,6 +176,10 @@ enum ProjectTools {
                 }),
         ]
         if let active = project.activeSequenceId { o["activeSequenceId"] = .string(active.rawValue) }
+        let mismatches = project.sequences.values.sorted { $0.id < $1.id }
+            .filter { only == nil || $0.id == only }
+            .compactMap { formatMismatch($0, in: project) }
+        if !mismatches.isEmpty { o["formatMismatch"] = .array(mismatches) }
         let history = await resolved.store.history()
         var h: [String: JSONValue] = [:]
         if let undo = history.latestLive {
@@ -127,8 +205,11 @@ enum ProjectTools {
             o["project"] = ToolSupport.json(document)
         }
         let clipCount = project.sequences.values.reduce(0) { $0 + $1.tracks.reduce(0) { $0 + $1.clips.count } }
-        let text =
+        var text =
             "\(project.name): version \(project.version), \(project.sequences.count) sequence(s), \(clipCount) clip(s), \(project.assets.count) asset(s)."
+        for mismatch in mismatches {
+            if let note = mismatch["note"]?.stringValue { text += "\nFormat mismatch: \(note)" }
+        }
         return ToolOutput(structured: .object(o), text: text)
     }
 
@@ -139,7 +220,13 @@ enum ProjectTools {
             "offline": .bool(a.offline), "analyses": .array(a.analyses.keys.sorted().map { .string($0) }),
             "libraryPath": .string(a.libraryPath),
         ]
-        if let w = a.probe.width, let h = a.probe.height { o["size"] = .string("\(w)x\(h)") }
+        if let encoded = a.probe.encodedSize { o["size"] = .string(encoded.description) }
+        if let display = a.displaySize {
+            o["displaySize"] = .string(display.description)
+            o["orientation"] = .string(display.orientation.rawValue)
+            o["aspect"] = .string(display.aspectLabel)
+        }
+        if let rotation = a.probe.rotation, rotation != 0 { o["rotation"] = .number(Double(rotation)) }
         if let fps = a.probe.fps { o["fps"] = .number((fps.doubleValue * 1000).rounded() / 1000) }
         if let sr = a.sampleRate { o["sampleRate"] = .number(Double(sr)) }
         if let codec = a.probe.codec { o["codec"] = .string(codec) }
@@ -147,11 +234,54 @@ enum ProjectTools {
         return .object(o)
     }
 
+    /// One sequence whose clips do not fill its frame, with the clips named and the bars measured.
+    ///
+    /// The compositor aspect-fits every source into the sequence frame
+    /// (`RenderKit/Compositor.swift`), so a clip whose *display* shape differs from the sequence's is
+    /// letterboxed or pillarboxed in the exported file. Display shape, never the encoded probe size: a
+    /// portrait iPhone clip probes as landscape 3840x2160 with rotation -90.
+    static func formatMismatch(_ s: Sequence, in project: Project) -> JSONValue? {
+        let frame = s.frameSize
+        guard frame.width > 0, frame.height > 0 else { return nil }
+        var offenders: [JSONValue] = []
+        for track in s.tracks where track.kind == .video {
+            for clip in track.clips.values.sorted(by: { $0.start < $1.start }) {
+                guard let assetId = clip.assetId, let asset = project.assets[assetId],
+                    let size = asset.displaySize, !size.fills(frame)
+                else { continue }
+                let scale = min(Double(frame.width) / Double(size.width), Double(frame.height) / Double(size.height))
+                let pillarbox = Int(((Double(frame.width) - Double(size.width) * scale) / 2).rounded())
+                let letterbox = Int(((Double(frame.height) - Double(size.height) * scale) / 2).rounded())
+                var o: [String: JSONValue] = [
+                    "clipId": .string(clip.id.rawValue), "trackId": .string(clip.trackId.rawValue),
+                    "assetId": .string(assetId.rawValue), "displayName": .string(asset.displayName),
+                    "displaySize": .string(size.description), "orientation": .string(size.orientation.rawValue),
+                ]
+                if pillarbox > 0 { o["pillarboxPixels"] = .number(Double(pillarbox)) }
+                if letterbox > 0 { o["letterboxPixels"] = .number(Double(letterbox)) }
+                offenders.append(.object(o))
+            }
+        }
+        guard !offenders.isEmpty else { return nil }
+        let names = offenders.compactMap { $0["displayName"]?.stringValue }
+        let listed = Set(names).sorted().joined(separator: ", ")
+        let note =
+            "\(offenders.count) video clip(s) do not fill the \(frame.description) \(s.orientation.rawValue) "
+            + "frame of sequence \"\(s.name)\" and are exported with black bars: \(listed). "
+            + "Resize the sequence with timeline_apply setSequenceSettings if the footage's shape is the one wanted."
+        return .object([
+            "sequenceId": .string(s.id.rawValue), "sequenceName": .string(s.name),
+            "sequenceSize": .string(frame.description), "sequenceOrientation": .string(s.orientation.rawValue),
+            "clips": .array(offenders), "note": .string(note),
+        ])
+    }
+
     static func sequenceSummary(_ s: Sequence, level: String, range: TimeRange?, isActive: Bool) -> JSONValue {
         var o: [String: JSONValue] = [
             "sequenceId": .string(s.id.rawValue), "name": .string(s.name),
             "frameDuration": ToolSupport.timeJSON(s.frameDuration),
             "width": .number(Double(s.width)), "height": .number(Double(s.height)),
+            "orientation": .string(s.orientation.rawValue), "aspect": .string(s.aspectLabel),
             "duration": ToolSupport.timeJSON(ToolSupport.duration(of: s)),
             "trackCount": .number(Double(s.tracks.count)),
             "isActive": .bool(isActive),
@@ -248,7 +378,11 @@ enum ProjectTools {
             "Query results.",
             properties: [
                 "kind": Schema.string("The kind queried."),
-                "results": Schema.array("Matching entities.", items: Schema.any("Entity summary.")),
+                "results": Schema.array(
+                    "Matching entities.",
+                    items: Schema.any(
+                        "Entity summary. For kind assets this is the summary project_describe emits, including the rotation-aware displaySize and orientation alongside the encoded size."
+                    )),
                 "count": Schema.integer("Number of results returned."),
                 "version": Schema.integer("Project version the results reflect."),
                 "sequenceId": Schema.string("Sequence searched (for timeline kinds)."),
