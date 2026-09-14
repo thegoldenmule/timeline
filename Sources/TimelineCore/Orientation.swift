@@ -88,6 +88,13 @@ extension Probe {
     public var orientation: Orientation? { displaySize?.orientation }
 }
 
+extension SequenceSettings {
+    /// The frame these settings describe. Settings carry the same width and height a sequence does.
+    public var frameSize: FrameSize { FrameSize(width: width, height: height) }
+
+    public var orientation: Orientation { frameSize.orientation }
+}
+
 extension Sequence {
     /// The sequence's own frame. Sequence sizes are stored as displayed, so no rotation is involved.
     public var frameSize: FrameSize { FrameSize(width: width, height: height) }

@@ -25,12 +25,11 @@ extension Asset {
     /// The shape the picture has once it is the right way up. `AVAssetImageGenerator` applies the
     /// track's preferred transform, so a clip shot on a phone held upright draws as 1080x1920 however
     /// its stored dimensions and rotation describe it.
+    /// Derived from `displaySize` (`TimelineCore/Orientation.swift`), which is where the rotation rule
+    /// lives now. This helper predates it and did the same swap by hand; two copies of that rule is
+    /// exactly one too many, since getting it wrong turns every portrait clip landscape.
     public var displayAspectRatio: CGFloat? {
-        guard let width = probe.width, let height = probe.height, width > 0, height > 0 else { return nil }
-        let turn = ((probe.rotation ?? 0) % 360 + 360) % 360
-        let upright = turn == 90 || turn == 270
-        return upright
-            ? CGFloat(height) / CGFloat(width)
-            : CGFloat(width) / CGFloat(height)
+        guard let size = displaySize, size.height > 0 else { return nil }
+        return CGFloat(size.width) / CGFloat(size.height)
     }
 }
