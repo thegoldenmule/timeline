@@ -136,7 +136,7 @@ enum DemoAgentScript {
             .turnStarted(index: 1),
             .assistantText("Looking at the project before exporting."),
             .toolCall(id: "call-describe", name: "project_describe", input: ["level": "summary"]),
-            .assistantText("Exporting a vertical reel of the active sequence."),
+            .assistantText("Exporting a vertical reel of the project."),
             .toolCall(
                 id: "call-export", name: "render_export",
                 input: ["preset": "reel9x16", "outputPath": .string(exportPath)]

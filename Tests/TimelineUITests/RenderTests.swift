@@ -306,6 +306,6 @@ struct RenderTests {
         let scene = TimelineSceneBuilder.build(from: vm)
         let frame = try renderer.render(scene: scene)
         #expect(frame.pixel(x: 600, y: 4).matches(TimelineTheme.ruler))
-        #expect(scene.labels.contains { $0.text == "No sequence" })
+        #expect(scene.labels.contains { $0.text == "Nothing to edit yet" })
     }
 }

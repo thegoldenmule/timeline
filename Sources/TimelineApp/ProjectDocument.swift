@@ -15,7 +15,7 @@ enum DocumentError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .noActiveSequence: "The project has no active sequence"
+        case .noActiveSequence: "The project has nothing to edit yet"
         case .noPlayerItem: "No player item has been built yet"
         case .playerItemFailed(let reason): "The player item failed: \(reason)"
         case .timedOut(let what): "Timed out waiting for \(what)"

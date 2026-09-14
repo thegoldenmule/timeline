@@ -313,7 +313,7 @@ public enum TimelineSceneBuilder {
         guard let seq = input.sequence else {
             scene.labels.append(
                 SceneLabel(
-                    text: "No sequence", origin: CGPoint(x: layout.headerWidth + 8, y: layout.rulerHeight + 8),
+                    text: "Nothing to edit yet", origin: CGPoint(x: layout.headerWidth + 8, y: layout.rulerHeight + 8),
                     fontSize: 12, color: TimelineTheme.dimText, maxWidth: 200))
             addRuler(&scene, layout: layout, frameDuration: RationalTime(1001, 24000))
             return scene

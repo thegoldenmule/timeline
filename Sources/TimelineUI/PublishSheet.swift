@@ -101,7 +101,7 @@ public enum PublishText {
         + "scene that did not happen. Not needed for scripts, captions, colour, clearly unrealistic "
         + "animation, or production help like brightness and background blur."
     public static let scheduleHelp = "Scheduling keeps the video private until the date; it needs Private privacy."
-    public static let noCaptionTracks = "The sequence has no caption tracks"
+    public static let noCaptionTracks = "The project has no caption tracks"
 }
 
 // MARK: - Model
