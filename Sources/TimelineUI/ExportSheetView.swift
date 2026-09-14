@@ -143,6 +143,19 @@ public enum ExportText {
     public static let letterboxBadge = "letterboxed"
     public static let pillarboxBadge = "pillarboxed"
 
+    /// The worst case, and the one a size picker invites: the footage is already boxed into the
+    /// sequence, and this export boxes that again. The picture ends up small with black on all four
+    /// sides — `RenderKitTests.PortraitFramingTests` writes the file and reads the black back out.
+    public static func boxedTwice(
+        _ clip: String, _ clipSize: String, _ sequenceSize: String, _ outputSize: String
+    ) -> String {
+        "This boxes the picture twice: \(clip) is \(clipSize) fitted into the \(sequenceSize) sequence, "
+            + "and that is fitted again into \(outputSize). Changing the export's size cannot undo the "
+            + "first fit — only the sequence's own frame can."
+    }
+
+    public static func matchAndExport(_ size: String) -> String { "Match the sequence to the footage (\(size))" }
+
     /// The warning about the stage before this one: the footage does not fill the sequence, so no
     /// preset here can save it. Named in the sheet where the problem is found, not where it is caused.
     public static func sequenceMismatch(
@@ -468,13 +481,16 @@ public struct ExportSheetView: View {
     /// hands over to the format sheet rather than pretending a preset could help.
     public let mismatch: FormatMismatch?
     public let onChangeFormat: (() -> Void)?
+    /// Resizes the sequence to the footage's own frame and exports that, in one click. The sheet's own
+    /// size controls cannot express this: they change the second fit, and the damage is in the first.
+    public let onMatchAndExport: (() -> Void)?
     @State private var frame: CGImage?
 
     public init(
         draft: Binding<ExportDraft>, onChoosePath: @escaping () -> URL?,
         onPoster: (@MainActor () async -> CGImage?)? = nil, onExport: @escaping (ExportDraft) -> Void,
         onCancel: @escaping () -> Void, mismatch: FormatMismatch? = nil,
-        onChangeFormat: (() -> Void)? = nil
+        onChangeFormat: (() -> Void)? = nil, onMatchAndExport: (() -> Void)? = nil
     ) {
         self._draft = draft
         self.onChoosePath = onChoosePath
@@ -483,6 +499,14 @@ public struct ExportSheetView: View {
         self.onCancel = onCancel
         self.mismatch = mismatch
         self.onChangeFormat = onChangeFormat
+        self.onMatchAndExport = onMatchAndExport
+    }
+
+    /// True when this export would box an already boxed picture: the sequence does not hold its footage,
+    /// *and* the export's frame is not the sequence's shape either.
+    private var wouldBoxTwice: Bool {
+        guard let mismatch, !mismatch.isClean else { return false }
+        return !draft.framing.isExact
     }
 
     /// The footage's fit into the sequence frame, for the nested rectangle and the warning.
@@ -496,16 +520,27 @@ public struct ExportSheetView: View {
             Text(ExportText.title).font(PanelTheme.sectionTitle)
             ExportFramingView(framing: draft.framing, frame: frame, media: mediaFraming)
             if let mismatch, !mismatch.isClean, let worst = mismatch.worst {
-                HStack(alignment: .firstTextBaseline, spacing: PanelTheme.controlGap) {
+                VStack(alignment: .leading, spacing: PanelTheme.rowGap) {
                     Label(
-                        ExportText.sequenceMismatch(
-                            worst.assetName, worst.displaySize.description,
-                            mismatch.sequenceSize.description, worst.barsDescription.lowercased()),
+                        wouldBoxTwice
+                            ? ExportText.boxedTwice(
+                                worst.assetName, worst.displaySize.description,
+                                mismatch.sequenceSize.description, ExportFraming.pixels(draft.outputSize))
+                            : ExportText.sequenceMismatch(
+                                worst.assetName, worst.displaySize.description,
+                                mismatch.sequenceSize.description, worst.barsDescription.lowercased()),
                         systemImage: "exclamationmark.triangle"
                     )
                     .font(PanelTheme.caption)
                     .foregroundStyle(PanelTheme.warning)
                     .fixedSize(horizontal: false, vertical: true)
+                    // The one control that reaches the outcome the user actually wants. The size
+                    // controls below cannot: they change the second fit, and the loss is in the first.
+                    if let onMatchAndExport, let suggested = mismatch.suggestedSize {
+                        Button(ExportText.matchAndExport(suggested.description), action: onMatchAndExport)
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("export-match-and-export")
+                    }
                     if let onChangeFormat {
                         Button(SequenceFormatText.change, action: onChangeFormat)
                             .buttonStyle(.link)

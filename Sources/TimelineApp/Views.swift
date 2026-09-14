@@ -490,6 +490,32 @@ final class AppModel {
         return running.first
     }
 
+    /// Resizes the sequence to the footage's own frame, then exports that frame — the one action that
+    /// turns "I want a portrait file of my portrait video" into a portrait file.
+    ///
+    /// The export sheet's own size controls cannot do this. They set the *second* fit, and a portrait
+    /// output of a landscape sequence boxes an already boxed picture: black on all four sides, proven in
+    /// `RenderKitTests.PortraitFramingTests`. Only the sequence's frame changes the first fit.
+    func matchFormatAndExport(_ draft: ExportDraft) {
+        guard let services, let document, let sequence = document.sequence else { return }
+        var format = SequenceFormat(sequence: sequence, assets: document.project.assets)
+        guard format.matchMediaSize != nil else { return }
+        format.selection = .matchMedia
+        exporting = nil
+        perform {
+            if let operation = format.operation {
+                let applied = try await document.apply(operation, label: "Change sequence format")
+                try await document.waitForVersion(applied.version)
+            }
+            guard let resized = document.sequence else { return }
+            // A fresh draft over the resized sequence. Its default is match-sequence, so the export is
+            // the footage's own frame and nothing is boxed at either stage.
+            var next = ExportDraft(sequence: resized, exportsDirectory: services.layout.exportsDir)
+            next.chose(draft.outputURL)
+            self.commitExport(next)
+        }
+    }
+
     /// Shows the last exported file in Finder. An export that lands in a folder nobody opened is not
     /// much better than one that never ran.
     func revealLastExport() {
@@ -615,7 +641,8 @@ struct EditorView: View {
                     onChangeFormat: {
                         model.dismissExportSheet()
                         model.presentFormatSheet()
-                    })
+                    },
+                    onMatchAndExport: { model.matchFormatAndExport(draft) })
             }
         }
         .onChange(of: approvals.requests.count) { previous, current in

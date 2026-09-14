@@ -725,6 +725,17 @@ enum SkeletonCheck {
                 FormatMismatch(sequence: resized, assets: portraitDoc.project.assets).isClean, "format",
                 "the footage still does not fill the frame")
 
+            // The export sheet over the resized sequence: its default is the footage's own frame and
+            // nothing is boxed at either stage, so the user's next click cannot undo the fix.
+            let afterDraft = ExportDraft(sequence: resized, exportsDirectory: services.layout.exportsDir)
+            try require(
+                afterDraft.outputSize == CGSize(width: 720, height: 1280), "format",
+                "the sheet would export \(ExportFraming.pixels(afterDraft.outputSize))")
+            try require(afterDraft.framing.isExact, "format", "the sheet would box the resized sequence")
+            try require(
+                FormatMismatch(sequence: resized, assets: portraitDoc.project.assets).isClean, "format",
+                "the footage still does not fill the resized frame")
+
             // The file itself: portrait in, portrait out. This is the line that was landscape before.
             let portraitCompiled = try await services.renderer.compile(
                 resized, assets: portraitDoc.project.assets, options: .full)
