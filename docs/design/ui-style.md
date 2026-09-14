@@ -171,11 +171,32 @@ Semantic only. A view never names a hue.
 | `borderIdle` + `borderWidth` | a resting border |
 | `borderActive` + `borderWidthActive` | a border that is saying something: a drop is over this target |
 | `letterboxFill` | the black an export composites on — what the compositor writes where the fitted picture does not reach |
+| `frameGuideStroke` + `frameGuideWidth` | the edge of the frame, drawn over the preview's picture |
+| `frameGuideSurround` | the wash over everything outside that frame |
 | `warning` | attention, nothing failed: a missing file, an unaudited client |
 | `danger` | something failed |
 | `.secondary` / `.tertiary` | supporting and incidental text — use the hierarchy, not an opacity |
 
 The accent colour fills exactly one thing, `ownBubbleFill`, and strokes exactly one, `borderActive`.
+
+`letterboxFill` and the three `frameGuide` tokens are the only fixed hues, and for one reason: they are
+drawn on the picture, which is black in either appearance because the compositor and the preview's own
+backing layer both paint it. Everything else follows the system.
+
+## The preview
+
+The preview is an `AVPlayerLayer` with `videoGravity = .resizeAspect` on black, so the picture is
+aspect-fitted into whatever the panels leave the centre column and **the black around it is the panel's
+own background** — indistinguishable from black baked into the frame. `FrameGuideOverlay` is what tells
+them apart: the frame stroked on its own edge, everything outside it washed with `frameGuideSurround`,
+the size and aspect in its top-leading corner, and — when the footage does not fill the frame — where
+the footage actually lands, dashed in `warning`, with the bar measurement beside the size.
+
+The fit is `FrameGuide`, which is a reading of `ExportFraming` with the viewport as the output, so the
+guide cannot drift from what `resizeAspect` does. The overlay takes no clicks. Its switch is a button on
+the picture itself, top-trailing at `panelInset`, visible in both states because there is no other way
+back; it has no keyboard shortcut, for the reason under Keyboard. The flag is `PreviewGuideModel`,
+persisted under `preview.frameGuide` the way `PanelLayoutModel` persists `panel.<id>.collapsed`.
 
 ## Assistant, and Agent
 
